@@ -13,6 +13,8 @@
 @inject IHttpClientFactory HttpFactory
 @inject PageContext PageContext
 @inject IJSRuntime JS
+@inject DownloadLogService DownloadLogSvc
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
  
 <div class="so-page-wrapper">
     @* --- Header Section (ชื่อหน้าและวันที่ขวาสุด) --- *@
@@ -135,15 +137,15 @@
                                     @item.AvailableQty.ToString("N0")
                                 </td>
                                 
-                                <td class="text-center align-middle"> 
-                                    @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoIn)) 
-                                    { 
-                                        var lines = item.AdditionalInfoIn.Split('\n'); 
-                                        foreach (var line in lines) 
+                                <td class="text-center align-middle">
+                                    @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoIn))
+                                    {
+                                        var lines = item.AdditionalInfoIn.Split('\n');
+                                        foreach (var line in lines)
                                         {
-                                        <div>@line.Trim()</div>
+                                            <div>@line.Trim()</div>
                                         }
-                                     }
+                                    }
                                 </td>
 
                                 <td class="align-middle">
@@ -153,9 +155,22 @@
                                 
                               
                                 <td class="text-center align-middle">
-                                    @(string.IsNullOrWhiteSpace(item.AdditionalInfoIn)
-                                                                ? item.AdditionalInfoOut
-                                                                : "")
+                                    @{
+                                        var infoOut = string.IsNullOrWhiteSpace(item.AdditionalInfoIn)
+                                            ? item.AdditionalInfoOut
+                                            : "";
+
+                                        var filteredLines = (infoOut ?? "")
+                                            .Split('\n')
+                                            .Where(line => !line.Trim().StartsWith("WCD", StringComparison.OrdinalIgnoreCase))
+                                            .ToList();
+
+                                        var displayText = string.Join("\n", filteredLines).Trim();
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(displayText))
+                                    {
+                                        @displayText
+                                    }
                                 </td>
                                 <td class="align-middle">
                                     <div class="fw-bold">@item.CustomerCode</div>
@@ -276,7 +291,7 @@
         materialResults.Clear();
         showMaterialDropdown = false;
     }
-    protected override  Task OnInitializedAsync()
+    protected override Task OnInitializedAsync()
     {
         PageContext.Menu = "Sales";
         PageContext.Page = "Stock Movement";
@@ -343,12 +358,15 @@
     {
         if (stockData?.Detail == null || !stockData.Detail.Any())
             return;
-
+        var username = AuthState.Permission?.Username;
+        var fileName = $"StockMovement_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+        await DownloadLogSvc.LogDownloadAsync(username, fileName);
         using var wb = new XLWorkbook();
         var ws = wb.Worksheets.Add("StockMovement");
         var headerRow = ws.Row(1);
         headerRow.Style.Font.Bold = true;
         headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+
         string[] headers =
             {
                 "Date",
@@ -384,10 +402,15 @@
             ws.Cell(row, 7).Value = item.VendorCode;
             ws.Cell(row, 8).Value = item.VendorName;
             
-            ws.Cell(row, 9).Value =
-                string.IsNullOrWhiteSpace(item.AdditionalInfoIn)
-                ? item.AdditionalInfoOut
-                : "";
+            var infoOut = string.IsNullOrWhiteSpace(item.AdditionalInfoIn)
+    ? item.AdditionalInfoOut ?? ""
+    : "";
+
+            var filteredInfoOut = string.Join("\n", infoOut
+                .Split('\n')
+                .Where(line => !line.Trim().StartsWith("WCD", StringComparison.OrdinalIgnoreCase)));
+
+            ws.Cell(row, 9).Value = filteredInfoOut.Trim();
             ws.Cell(row, 10).Value = item.CustomerCode;
             ws.Cell(row, 11).Value = item.CustomerName;
             ws.Cell(row, 12).Value = item.MaterialGroup;

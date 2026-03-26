@@ -5,7 +5,8 @@
 @inject Mgt.Lit.WebFront.Services.UiState UiState
 @implements IDisposable
 
-<nav class="sidebar-modern @(IsCollapsed ? "collapsed" : "")">
+<nav class="sidebar-modern @(IsCollapsed ? "collapsed" : "") @(IsMobileOpen ? "mobile-open" : "")"
+     style="@(IsCollapsed ? "overflow:visible;" : "")">
     <div class="sidebar-inner d-flex flex-column h-100">
         <div class="profile-container px-3 pt-4">
             <div class="dropdown">
@@ -31,10 +32,8 @@
                 <ul class="dropdown-menu premium-dropdown shadow border-0">
                     <li><a class="dropdown-item" href="#">@T("NewProject")</a></li>
 
-                    @if (IsAdmin)
-                    {
-                        <li><a class="dropdown-item" href="/settings">@T("Settings")</a></li>
-                    }
+                    <li><a class="dropdown-item" href="/settings">@T("Settings")</a></li>
+                    
 
                     <li><a class="dropdown-item" href="/profile">@T("Profile")</a></li>
                     <li><hr class="dropdown-divider"></li>
@@ -94,14 +93,20 @@
                     }
                 }
 
+       
+
                 @* ── Pages / Management Section ── *@
                 @if (HasAnyManagementPage)
                 {
                     <li class="section-label-white">@(!IsCollapsed ? T("Pages") : "•••")</li>
 
-                    <li class="nav-item">
+                    <li class="nav-item"
+                        @onmouseenter="() => { if (IsCollapsed) showFlyout = true; }"
+                        @onmouseleave="() => showFlyout = false"
+                        style="position:relative">
+
                         <div class="modern-link-item"
-                             data-bs-toggle="collapse"
+                             data-bs-toggle="@(!IsCollapsed ? "collapse" : "")"
                              data-bs-target="#mgtMenu"
                              style="cursor:pointer">
                             <img src="/images/user-gear.png" class="menu-icon-img" />
@@ -112,51 +117,73 @@
                             }
                         </div>
 
-                        <div class="collapse @(!IsCollapsed ? "show" : "")" id="mgtMenu">
-                            <ul class="list-unstyled ms-2">
+                        @if (!IsCollapsed)
+                        {
+                            <div class="collapse show" id="mgtMenu">
+                                <ul class="list-unstyled ms-2">
+                                    @if (CanPage1)
+                                    {
+                                        <li>
+                                            <NavLink href="/sales-orders" class="sub-pill-link">
+                                                <img src="/images/inventory-alt.png" class="sub-icon-img" />
+                                                <span>@T("SalesOrderList")</span>
+                                            </NavLink>
+                                        </li>
+                                    }
+                                    @if (CanPage2)
+                                    {
+                                        <li>
+                                            <NavLink href="/warehouse-stock-material" class="sub-pill-link">
+                                                <img src="/images/user-gear.png" class="sub-icon-img" />
+                                                <span>@T("StockMaterial")</span>
+                                            </NavLink>
+                                        </li>
+                                    }
+                                    @if (CanPage3)
+                                    {
+                                        <li>
+                                            <NavLink href="/warehouse-stock-movement" class="sub-pill-link">
+                                                <img src="/images/users-alt.png" class="sub-icon-img" />
+                                                <span>@T("StockMovement")</span>
+                                            </NavLink>
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+
+                        @if (IsCollapsed && showFlyout)
+                        {
+                            <div class="flyout-panel"
+                                 @onmouseenter="() => showFlyout = true"
+                                 @onmouseleave="() => showFlyout = false">
+                                <div class="flyout-header">@T("Management")</div>
                                 @if (CanPage1)
                                 {
-                                    <li>
-                                        <NavLink href="/sales-orders" class="sub-pill-link">
-                                            <img src="/images/inventory-alt.png" class="sub-icon-img" />
-                                            @if (!IsCollapsed)
-                                            {
-                                                <span>@T("SalesOrderList")</span>
-                                            }
-                                        </NavLink>
-                                    </li>
+                                    <NavLink href="/sales-orders" class="flyout-item">
+                                        <span class="flyout-dot"></span>
+                                        @T("SalesOrderList")
+                                    </NavLink>
                                 }
-
                                 @if (CanPage2)
                                 {
-                                    <li>
-                                        <NavLink href="/warehouse-stock-material" class="sub-pill-link">
-                                            <img src="/images/user-gear.png" class="sub-icon-img" />
-                                            @if (!IsCollapsed)
-                                            {
-                                                <span>@T("StockMaterial")</span>
-                                            }
-                                        </NavLink>
-                                    </li>
+                                    <NavLink href="/warehouse-stock-material" class="flyout-item">
+                                        <span class="flyout-dot"></span>
+                                        @T("StockMaterial")
+                                    </NavLink>
                                 }
-
                                 @if (CanPage3)
                                 {
-                                    <li>
-                                        <NavLink href="/warehouse-stock-movement" class="sub-pill-link">
-                                            <img src="/images/users-alt.png" class="sub-icon-img" />
-                                            @if (!IsCollapsed)
-                                            {
-                                                <span>@T("StockMovement")</span>
-                                            }
-                                        </NavLink>
-                                    </li>
+                                    <NavLink href="/warehouse-stock-movement" class="flyout-item">
+                                        <span class="flyout-dot"></span>
+                                        @T("StockMovement")
+                                    </NavLink>
                                 }
-                            </ul>
-                        </div>
+                            </div>
+                        }
+
                     </li>
                 }
-
             </ul>
         </div>
 
@@ -172,7 +199,8 @@
 @code {
     private bool IsCollapsed = false;
     private bool IsEn;
-
+    private bool showFlyout = false;
+    [Parameter] public bool IsMobileOpen { get; set; }
     // ── helpers ──────────────────────────────────────────────────────────────
 
     // JWT encodes role via ClaimTypes.Role (long URI) — value e.g. "Admin", "Leader"

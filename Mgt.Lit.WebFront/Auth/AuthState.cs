@@ -15,7 +15,7 @@ public class AuthState
     public ClaimsPrincipal? User { get; set; }
     public View_UserPermission? Permission { get; set; }
     public int? CurrentCompanyID { get; set; }
-
+    public void Clear() { Token = null; User = null; }
     public AuthState(ProtectedSessionStorage storage)
     {
         _storage = storage;

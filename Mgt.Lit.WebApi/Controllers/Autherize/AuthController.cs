@@ -25,7 +25,7 @@ namespace Mgt.Lit.WebApi.Controllers
         private readonly AppDbContext _context;
         private readonly IActivityLogService _activityLogService;
 
-        public AuthController(IUserRepository userRepo,IConfiguration config,AppDbContext context,IActivityLogService activityLogService)
+        public AuthController(IUserRepository userRepo, IConfiguration config, AppDbContext context, IActivityLogService activityLogService)
         {
             _userRepo = userRepo;
             _config = config;
@@ -63,10 +63,12 @@ namespace Mgt.Lit.WebApi.Controllers
                           ?? companies.FirstOrDefault();
 
             var accessToken = JwtHelper.GenerateToken(
-                user,
-                _config,
-                primaryCompanyId: primary?.CompanyID
-            );
+     user,
+     _config,
+     primaryCompanyId: primary?.CompanyID,
+     primaryCompanyCode: primary?.CompanyCode,  // ✅ เพิ่ม
+     allCompanies: companies                    // ✅ เพิ่ม
+ );
 
             var refreshToken = Guid.NewGuid().ToString();
 
@@ -214,7 +216,7 @@ namespace Mgt.Lit.WebApi.Controllers
 
             user.Password = dto.NewPassword;
             await _context.SaveChangesAsync();
-            
+
             return Ok(new { message = "Password updated" });
         }
 
@@ -235,7 +237,6 @@ namespace Mgt.Lit.WebApi.Controllers
                 return Unauthorized();
 
             var user = stored.User;
-
             var currentCompanyId = stored.CurrentCompanyID;
 
             if (currentCompanyId == null)
@@ -249,7 +250,28 @@ namespace Mgt.Lit.WebApi.Controllers
             stored.LastUsedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
-            var newAccessToken = JwtHelper.GenerateToken(user, _config, currentCompanyId);
+            // ✅ ดึง companies ทั้งหมดของ user
+            var userCompanies = await (
+                from uc in _context.MsUserCompanies
+                join c in _context.MsCompanies on uc.CompanyID equals c.CompanyID
+                where uc.UserID == user.UserID
+                select new UserCompanyDto
+                {
+                    CompanyID = uc.CompanyID,
+                    CompanyCode = c.CompanyCode,
+                    CompanyName = c.CompanyName,
+                    IsPrimary = uc.IsPrimary
+                }
+            ).ToListAsync();
+
+            var primaryCode = userCompanies
+                .FirstOrDefault(x => x.CompanyID == currentCompanyId)?.CompanyCode;
+
+            var newAccessToken = JwtHelper.GenerateToken(
+                user, _config, currentCompanyId,
+                primaryCompanyCode: primaryCode,   // ✅ เพิ่ม
+                allCompanies: userCompanies        // ✅ เพิ่ม
+            );
 
             return Ok(new
             {
@@ -314,7 +336,28 @@ namespace Mgt.Lit.WebApi.Controllers
             storedRefresh.LastUsedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
-            var newToken = JwtHelper.GenerateToken(user, _config, dto.CompanyID);
+            // ✅ ดึง companies ทั้งหมดของ user
+            var allCompanies = await (
+                from uc in _context.MsUserCompanies
+                join c in _context.MsCompanies on uc.CompanyID equals c.CompanyID
+                where uc.UserID == userId
+                select new UserCompanyDto
+                {
+                    CompanyID = uc.CompanyID,
+                    CompanyCode = c.CompanyCode,
+                    CompanyName = c.CompanyName,
+                    IsPrimary = uc.IsPrimary
+                }
+            ).ToListAsync();
+
+            var switchedCode = allCompanies
+                .FirstOrDefault(x => x.CompanyID == dto.CompanyID)?.CompanyCode;
+
+            var newToken = JwtHelper.GenerateToken(
+                user, _config, dto.CompanyID,
+                primaryCompanyCode: switchedCode,  // ✅ เพิ่ม
+                allCompanies: allCompanies         // ✅ เพิ่ม
+            );
 
             var permission = await _context.View_UserPermissions
                 .AsNoTracking()

@@ -6,6 +6,7 @@
 @using ClosedXML.Excel
 @using Mgt.Lit.WebFront.Components.Layout.MainLay
 @using Mgt.Lit.WebFront.Models.SalesOrder
+@using Mgt.Lit.WebFront.Services
 @using Mgt.Lit.WebFront.Services.Member
 @using Mgt.Lit.WebFront.Services.SalesOrder
 @inject PageContext PageContext
@@ -14,6 +15,7 @@
 @inject NavigationManager Nav
 @inject Mgt.Lit.WebFront.Services.UiState UiState
 @inject IHttpClientFactory HttpFactory
+@inject DownloadLogService DownloadLogSvc
 @implements IAsyncDisposable
 
 <div class="so-page-wrapper">
@@ -53,7 +55,7 @@
                 <label class="modern-label">Billing Date</label>
                 <input id="dateRange"
                        class="form-control modern-input @(!string.IsNullOrEmpty(dateRangeError) ? "is-invalid" : "")"
-                       placeholder="Select date range" 
+                       placeholder="Select date range"
                        autocomplete="off" />
                 @if (!string.IsNullOrEmpty(dateRangeError))
                 {
@@ -93,6 +95,7 @@
                            value="@materialSearch"
                            @oninput="OnMaterialSearch"
                            @onfocus="() => showMaterialDropdown = true"
+                           @onblur="OnSoldToBlur"
                            placeholder="Choose Material" />
 
                     @if (materialResults.Any() && showMaterialDropdown)
@@ -233,13 +236,23 @@
     [JSInvokable]
     public void SetDateRange(string start, string end)
     {
+        if (string.IsNullOrEmpty(start) || string.IsNullOrEmpty(end))
+        {
+            DocDateFrom = null;
+            DocDateTo = null;
+            pagedItems.Clear();
+            totalItems = 0;
+            totalPages = 1;
+            _ = InvokeAsync(StateHasChanged);
+            return;
+        }
+
         if (DateTime.TryParse(start, out var startDate))
             DocDateFrom = startDate;
 
         if (DateTime.TryParse(end, out var endDate))
             DocDateTo = endDate;
     }
-
     private static readonly Dictionary<string, Dictionary<string, string>> Text = new()
     {
         ["en"] = new()
@@ -305,7 +318,13 @@
             ["ExportAs"] = "ส่งออกเป็น"
         }
     };
-
+    private async Task OnSoldToBlur()
+    {
+        // หน่วงเวลาเล็กน้อยเพื่อให้ @onclick ของ row ทำงานก่อน
+        await Task.Delay(200);
+        showSoldToDropdown = false;
+        await InvokeAsync(StateHasChanged);
+    }
     protected override void OnInitialized()
     {
         UiState.Changed += OnUiChanged;
@@ -360,33 +379,42 @@
 
     private void OnSoldToFocus()
     {
-        showSoldToDropdown = true;
+        // เปิด dropdown เฉพาะเมื่อมีผลลัพธ์อยู่แล้ว (กำลังพิมพ์อยู่)
+        // ไม่เปิดเมื่อ focus กลับมาหลังเลือกแล้ว
+        if (soldToResults.Any() && string.IsNullOrEmpty(filters.SoldToParty))
+        {
+            showSoldToDropdown = true;
+        }
     }
+
+    private CancellationTokenSource? _materialCts;
 
     private async Task OnMaterialSearch(ChangeEventArgs e)
     {
         materialSearch = e.Value?.ToString() ?? string.Empty;
+        filters.Material = null; // clear ทันทีเมื่อพิมพ์ใหม่
+        materialResults.Clear();
+        showMaterialDropdown = false;
 
-        if (string.IsNullOrWhiteSpace(materialSearch))
-        {
-            filters.Material = null;
-            materialResults.Clear();
-            showMaterialDropdown = false;
+        if (string.IsNullOrWhiteSpace(materialSearch) || materialSearch.Length < 2)
             return;
-        }
 
-        if (materialSearch.Length < 2)
-        {
-            materialResults.Clear();
-            showMaterialDropdown = false;
-            return;
-        }
+        // Debounce 300ms
+        _materialCts?.Cancel();
+        _materialCts = new CancellationTokenSource();
+        var token = _materialCts.Token;
 
         try
         {
+            await Task.Delay(300, token);
+
+            if (token.IsCancellationRequested) return;
+
             materialResults = await SalesOrderService.SearchMaterialAsync(materialSearch);
             showMaterialDropdown = materialResults.Any();
+            await InvokeAsync(StateHasChanged);
         }
+        catch (TaskCanceledException) { }
         catch (UnauthorizedAccessException)
         {
             Nav.NavigateTo("/", replace: true);
@@ -406,30 +434,34 @@
         showMaterialDropdown = false;
     }
 
+    private CancellationTokenSource? _soldToCts;
+
     private async Task OnSoldToSearch(ChangeEventArgs e)
     {
         soldToSearch = e.Value?.ToString() ?? string.Empty;
+        filters.SoldToParty = null; // clear ทันทีเมื่อพิมพ์ใหม่
+        soldToResults.Clear();
+        showSoldToDropdown = false;
 
-        if (string.IsNullOrWhiteSpace(soldToSearch))
-        {
-            filters.SoldToParty = null;
-            soldToResults.Clear();
-            showSoldToDropdown = false;
+        if (string.IsNullOrWhiteSpace(soldToSearch) || soldToSearch.Length < 2)
             return;
-        }
 
-        if (soldToSearch.Length < 2)
-        {
-            soldToResults.Clear();
-            showSoldToDropdown = false;
-            return;
-        }
+        // Debounce 300ms
+        _soldToCts?.Cancel();
+        _soldToCts = new CancellationTokenSource();
+        var token = _soldToCts.Token;
 
         try
         {
+            await Task.Delay(300, token);
+
+            if (token.IsCancellationRequested) return;
+
             soldToResults = await SalesOrderService.SearchSoldToAsync(soldToSearch);
             showSoldToDropdown = soldToResults.Any();
+            await InvokeAsync(StateHasChanged);
         }
+        catch (TaskCanceledException) { }
         catch (UnauthorizedAccessException)
         {
             Nav.NavigateTo("/", replace: true);
@@ -483,10 +515,51 @@
         salesOrgError = null;
         dateRangeError = null;
 
+        // ✅ ปิด dropdown
+        showSoldToDropdown = false;
+        showMaterialDropdown = false;
+
+        // ✅ ถ้าพิมพ์ค้างแต่ไม่เลือก → clear filter นั้น
+        if (string.IsNullOrWhiteSpace(soldToSearch))
+        {
+            filters.SoldToParty = null;
+        }
+        else if (string.IsNullOrWhiteSpace(filters.SoldToParty))
+        {
+            // มีข้อความใน input แต่ไม่ได้เลือก → clear input ออก
+            soldToSearch = string.Empty;
+            soldToResults.Clear();
+        }
+
+        if (string.IsNullOrWhiteSpace(materialSearch))
+        {
+            filters.Material = null;
+        }
+        else if (string.IsNullOrWhiteSpace(filters.Material))
+        {
+            // มีข้อความใน input แต่ไม่ได้เลือก → clear input ออก
+            materialSearch = string.Empty;
+            materialResults.Clear();
+        }
+
+        // validate date จาก JS input
+        if (_jsModule is not null)
+        {
+            try
+            {
+                var inputValue = await _jsModule.InvokeAsync<string>("getDateRangeValue");
+                if (string.IsNullOrWhiteSpace(inputValue))
+                {
+                    DocDateFrom = null;
+                    DocDateTo = null;
+                }
+            }
+            catch { }
+        }
+
         if (string.IsNullOrWhiteSpace(filters.SalesOrganization))
         {
             salesOrgError = "Please select Sales Organization";
-            // Clear ข้อมูลเก่าออก
             pagedItems.Clear();
             totalItems = 0;
             totalPages = 1;
@@ -497,7 +570,6 @@
         if (DocDateFrom is null || DocDateTo is null)
         {
             dateRangeError = "Please select Billing Date range";
-            // Clear ข้อมูลเก่าออก
             pagedItems.Clear();
             totalItems = 0;
             totalPages = 1;
@@ -511,7 +583,6 @@
 
         await LoadDataAsync();
     }
-
     private async Task PrevPage()
     {
         if (filters.Page <= 1 || isLoading)
@@ -535,7 +606,9 @@
         try
         {
             isLoading = true;
-
+            var username = AuthState.Permission?.Username;
+            var fileName = $"SalesOrders_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await DownloadLogSvc.LogDownloadAsync(username, fileName);
             var all = await GetAllForExport();
 
             using var wb = new XLWorkbook();
@@ -653,7 +726,19 @@
 
         return all;
     }
-
+    [JSInvokable]
+    public void ClearDateRange()
+    {
+        DocDateFrom = null;
+        DocDateTo = null;
+    
+        // Clear ผลลัพธ์เก่าออก
+        pagedItems.Clear();
+        totalItems = 0;
+        totalPages = 1;
+    
+        _ = InvokeAsync(StateHasChanged);
+    }
     public async ValueTask DisposeAsync()
     {
         if (_isDisposed)
@@ -686,5 +771,9 @@
         }
 
         dotNetRef?.Dispose();
+        _soldToCts?.Cancel();
+        _soldToCts?.Dispose();
+        _materialCts?.Cancel();
+        _materialCts?.Dispose();
     }
 }

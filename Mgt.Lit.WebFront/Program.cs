@@ -15,7 +15,7 @@ var apiBaseUrl = builder.Environment.IsDevelopment()
     : builder.Configuration["ApiBaseUrlDocker"];
 
 
-
+builder.Services.AddScoped<DownloadLogService>();
 builder.Services.AddScoped(sp => new HttpClient
 {
     BaseAddress = new Uri(apiBaseUrl)

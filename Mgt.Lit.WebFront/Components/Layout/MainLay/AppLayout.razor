@@ -3,22 +3,115 @@
 @using Mgt.Lit.WebFront.Auth
 @inject Mgt.Lit.WebFront.Auth.AuthState AuthState
 @inject NavigationManager Nav
-
 <div class="app-shell @(IsCollapsed ? "collapsed" : "")">
+
+    @* ── Hamburger button (mobile only) ── *@
+    <button class="mobile-menu-btn" @onclick="ToggleMobile">
+        <i class="bi @(IsMobileOpen ? "bi-x" : "bi-list")"></i>
+    </button>
+
+    @* ── Overlay ── *@
+    <div class="mobile-overlay @(IsMobileOpen ? "active" : "")"
+         @onclick="CloseMobile">
+    </div>
+
     <div class="app-body">
-        <SideMenu />
+        <SideMenu IsMobileOpen="IsMobileOpen" />
         <main class="app-content">
-            <div class="page-inner">
+            <div class="page-inner" style="@(IsMobileOpen ? "" : "")">
                 @Body
             </div>
         </main>
     </div>
 </div>
+@* --- Session Expired Popup --- *@
+@if (showSessionExpired)
+{
+    <div class="session-overlay">
+        <div class="session-modal">
+            <div class="session-icon">⏱️</div>
+            <h5 class="session-title">Session Expired</h5>
+            <p class="session-desc">Your session has expired.<br />Please log in again to continue.</p>
+            <button class="btn-session-login" @onclick="GoToLogin">
+                Go to Login
+            </button>
+        </div>
+    </div>
+}
+
+<style>
+    .session-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .session-modal {
+        background: white;
+        border-radius: 16px;
+        padding: 2.5rem 2rem;
+        text-align: center;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        min-width: 300px;
+    }
+
+    .session-icon {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+    }
+
+    .session-title {
+        font-weight: 700;
+        font-size: 1.2rem;
+        margin-bottom: 0.5rem;
+        color: #333;
+    }
+
+    .session-desc {
+        color: #666;
+        font-size: 0.95rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .btn-session-login {
+        background: #198754;
+        color: white;
+        border: none;
+        border-radius: 999px;
+        padding: 0.6rem 2rem;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+
+        .btn-session-login:hover {
+            background: #157347;
+        }
+</style>
 
 @code {
     private bool IsCollapsed = false;
     private bool _initialized;
+    private bool showSessionExpired = false;
+    private System.Threading.Timer? _sessionTimer;
+    private bool IsMobileOpen = false;
 
+    private void ToggleMobile()
+    {
+        IsMobileOpen = !IsMobileOpen;
+        StateHasChanged();
+    }
+
+    private void CloseMobile()
+    {
+        IsMobileOpen = false;
+        StateHasChanged();
+    }
     protected override void OnInitialized()
     {
         Nav.LocationChanged += OnLocationChanged;
@@ -39,7 +132,65 @@
         }
 
         CheckCurrentPagePermission();
+        StartSessionTimer();
         StateHasChanged();
+    }
+
+    private void StartSessionTimer()
+    {
+        // ตรวจสอบทุก 30 วินาที
+        _sessionTimer = new System.Threading.Timer(async _ =>
+        {
+            if (IsTokenExpired())
+            {
+                await InvokeAsync(() =>
+                {
+                    showSessionExpired = true;
+                    StateHasChanged();
+                });
+            }
+        }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+    }
+
+    private bool IsTokenExpired()
+    {
+        try
+        {
+            var token = AuthState.Token;
+            if (string.IsNullOrWhiteSpace(token))
+                return true;
+
+            // Decode JWT payload (ไม่ต้องใช้ library)
+            var parts = token.Split('.');
+            if (parts.Length != 3)
+                return true;
+
+            var payload = parts[1];
+            // Pad base64
+            payload = payload.PadRight(payload.Length + (4 - payload.Length % 4) % 4, '=');
+            var json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(payload));
+            var doc = System.Text.Json.JsonDocument.Parse(json);
+
+            if (doc.RootElement.TryGetProperty("exp", out var expProp))
+            {
+                var exp = expProp.GetInt64();
+                var expiry = DateTimeOffset.FromUnixTimeSeconds(exp);
+                return expiry <= DateTimeOffset.UtcNow;
+            }
+
+            return true;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private void GoToLogin()
+    {
+        showSessionExpired = false;
+        AuthState.Clear(); // ถ้ามี method Clear ใน AuthState
+        Nav.NavigateTo("/", replace: true);
     }
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
@@ -69,5 +220,6 @@
     public void Dispose()
     {
         Nav.LocationChanged -= OnLocationChanged;
+        _sessionTimer?.Dispose();
     }
 }

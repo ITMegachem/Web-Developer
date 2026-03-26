@@ -19,7 +19,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
     {
         private readonly AppDbContext _context;
         private readonly SapService _sapService;
-       
+
 
         public SalesOrderController(AppDbContext context, SapService sapService)
         {
@@ -73,52 +73,52 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
         private IQueryable<View_MGT_GLC_ALL_Sales> BuildSalesBaseQuery(
     SalesOrderRequestDto request,
     View_UserPermission permission)
-{
-    var query = _context.View_MGT_GLC_ALL_Sales
-        .AsNoTracking()
-        .Where(x => x.BillingDocument != null);
+        {
+            var query = _context.View_MGT_GLC_ALL_Sales
+                .AsNoTracking()
+                .Where(x => x.BillingDocument != null);
 
-    if (!string.IsNullOrEmpty(request.SalesOrganization))
-        query = query.Where(x => x.SalesOrganization == request.SalesOrganization);
+            if (!string.IsNullOrEmpty(request.SalesOrganization))
+                query = query.Where(x => x.SalesOrganization == request.SalesOrganization);
 
-    if (request.DocDateFrom.HasValue)
-    {
-        var from = request.DocDateFrom.Value.Date;
-        query = query.Where(x => x.BillingDocumentDate >= from);
-    }
+            if (request.DocDateFrom.HasValue)
+            {
+                var from = request.DocDateFrom.Value.Date;
+                query = query.Where(x => x.BillingDocumentDate >= from);
+            }
 
-    if (request.DocDateTo.HasValue)
-    {
-        var to = request.DocDateTo.Value.Date.AddDays(1);
-        query = query.Where(x => x.BillingDocumentDate < to);
-    }
+            if (request.DocDateTo.HasValue)
+            {
+                var to = request.DocDateTo.Value.Date.AddDays(1);
+                query = query.Where(x => x.BillingDocumentDate < to);
+            }
 
-    if (!string.IsNullOrWhiteSpace(request.BillingDocument))
-    {
-        var keyword = $"%{request.BillingDocument.Trim()}%";
-        query = query.Where(x =>
-            EF.Functions.Like(x.BillingDocument, keyword) ||
-            EF.Functions.Like(x.SalesDocument, keyword));
-    }
+            if (!string.IsNullOrWhiteSpace(request.BillingDocument))
+            {
+                var keyword = $"%{request.BillingDocument.Trim()}%";
+                query = query.Where(x =>
+                    EF.Functions.Like(x.BillingDocument, keyword) ||
+                    EF.Functions.Like(x.SalesDocument, keyword));
+            }
 
-    if (!string.IsNullOrWhiteSpace(request.SoldToParty))
-    {
-        var keyword = $"%{request.SoldToParty.Trim()}%";
-        query = query.Where(x =>
-            EF.Functions.Like(x.SoldToParty, keyword) ||
-            EF.Functions.Like(x.SoldToName, keyword));
-    }
+            if (!string.IsNullOrWhiteSpace(request.SoldToParty))
+            {
+                var keyword = $"%{request.SoldToParty.Trim()}%";
+                query = query.Where(x =>
+                    EF.Functions.Like(x.SoldToParty, keyword) ||
+                    EF.Functions.Like(x.SoldToName, keyword));
+            }
 
-    if (!string.IsNullOrWhiteSpace(request.Material))
-    {
-        var keyword = $"%{request.Material.Trim()}%";
-        query = query.Where(x =>
-            EF.Functions.Like(x.Material, keyword) ||
-            EF.Functions.Like(x.MaterialName, keyword));
-    }
+            if (!string.IsNullOrWhiteSpace(request.Material))
+            {
+                var keyword = $"%{request.Material.Trim()}%";
+                query = query.Where(x =>
+                    EF.Functions.Like(x.Material, keyword) ||
+                    EF.Functions.Like(x.MaterialName, keyword));
+            }
 
-    return query;
-}
+            return query;
+        }
         [Authorize]
         [HttpPost("ExportSales")]
         public async Task<IActionResult> ExportSales([FromBody] SalesOrderRequestDto request)
@@ -467,9 +467,11 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 .Where(x => x.Material != null);
 
             query = ApplySalesPermission(query, permission);
+            if (keyword.Length < 3) // อย่า query ถ้าสั้นเกินไป
+                return Ok(new List<object>());
 
             var like = $"%{keyword}%";
-
+            _context.Database.SetCommandTimeout(60); //
             var items = await query
                 .Where(x =>
                     EF.Functions.Like(x.Material, like) ||

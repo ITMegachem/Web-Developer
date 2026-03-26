@@ -15,7 +15,6 @@ export function initDateRange(dotnetRef) {
         return;
     }
 
-    // ปิด browser history / autocomplete
     element.setAttribute("autocomplete", "off");
 
     const picker = new Litepicker({
@@ -23,6 +22,7 @@ export function initDateRange(dotnetRef) {
         singleMode: false,
         format: "YYYY-MM-DD",
         autoApply: true,
+        resetButton: true,   // เพิ่มปุ่ม clear ใน picker
         dropdowns: {
             minYear: 2020,
             maxYear: 2030,
@@ -30,15 +30,31 @@ export function initDateRange(dotnetRef) {
             years: true
         },
         setup: (picker) => {
+            // ตอนเลือกวันที่
             picker.on("selected", (start, end) => {
-
                 dotnetRef.invokeMethodAsync(
                     "SetDateRange",
                     start.format("YYYY-MM-DD"),
                     end.format("YYYY-MM-DD")
                 );
+            });
 
+            // ตอนกด reset / clear
+            picker.on("clear:selection", () => {
+                dotnetRef.invokeMethodAsync("SetDateRange", "", "");
             });
         }
     });
+
+    // กรณีผู้ใช้ลบข้อความใน input โดยตรง (Backspace / Delete)
+    element.addEventListener("input", () => {
+        if (element.value === "") {
+            picker.clearSelection();
+            dotnetRef.invokeMethodAsync("SetDateRange", "", "");
+        }
+    });
+}
+export function getDateRangeValue() {
+    const element = document.getElementById("dateRange");
+    return element ? element.value : "";
 }

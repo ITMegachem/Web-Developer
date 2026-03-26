@@ -10,87 +10,260 @@
 
 @implements IDisposable
 
-<div class="container-fluid p-0">
-    <h5 class="mb-3">@T("Title")</h5>
+<div class="container-fluid p-0" style="max-width: 680px;">
+    <h5 class="mb-4" style="font-weight:700; color:#0f172a;">@T("Title")</h5>
 
-    <div class="card shadow-sm">
-        <div class="card-body d-flex gap-3 align-items-start">
+    <div class="profile-card">
 
-            <img src="/images/icon-person.png"
-                 alt="User"
-                 style="width:64px;height:64px;border-radius:50%;border:1px solid #eee;padding:6px;" />
-
-            <div class="flex-grow-1">
-                <div class="fw-semibold fs-5">@FullName</div>
-                <div class="text-muted small">@Username</div>
-
-                <hr class="my-3" />
-
-                <div class="row g-3">
-                    <div class="col-md-4">
-                        <div class="text-muted small">@T("Email")</div>
-                        <div class="fw-semibold">@Email</div>
-                    </div>
-
-                    <div class="col-md-4">
-                        <div class="text-muted small">@T("EmployeeId")</div>
-                        <div class="fw-semibold">@EmployeeId</div>
-                    </div>
-
-                    <div class="col-md-4">
-                        <div class="text-muted small">@T("Roles")</div>
-                        <div class="fw-semibold">@Roles</div>
-                    </div>
-                    <div class="row g-3 mt-1">
-                        <div class="col-md-4">
-                            <div class="text-muted small">@T("Company")</div>
-                            <div class="fw-semibold">@PrimaryCompany</div>
-                        </div>
-
-                        <div class="col-md-8">
-                            <div class="text-muted small">@T("Companies")</div>
-                            <div class="fw-semibold">@Companies</div>
-                        </div>
-                    </div>
-
-                </div>
-
-                <div class="mt-3">
-                    <button class="btn btn-light border btn-sm" @onclick="ToggleClaims">
-                        @T("ToggleClaims")
-                    </button>
-                </div>
-
-                @if (showClaims)
-                {
-                    <div class="mt-3">
-                        <div class="text-muted small mb-2">@T("Claims")</div>
-                        <div class="table-responsive">
-                            <table class="table table-sm mb-0">
-                                <thead>
-                                    <tr>
-                                        <th>@T("Type")</th>
-                                        <th>@T("Value")</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var c in claims)
-                                    {
-                                        <tr>
-                                            <td class="text-muted">@PrettyClaimType(c.Type)</td>
-                                            <td>@c.Value</td>
-                                        </tr>
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                }
+        @* ── Header ── *@
+        <div class="profile-header">
+            <div class="profile-avatar">
+                <i class="bi bi-person" style="font-size:28px; color:#65a30d;"></i>
             </div>
-
+            <div>
+                <div class="profile-name">@FullName</div>
+                <div class="profile-username">@Username</div>
+            </div>
+            <div class="ms-auto">
+                <span class="role-badge">@Roles</span>
+            </div>
         </div>
+
+        <div class="profile-divider"></div>
+
+        @* ── Info Grid ── *@
+        <div class="info-grid">
+            <div class="info-item">
+                <div class="info-icon"><i class="bi bi-envelope"></i></div>
+                <div>
+                    <div class="info-label">@T("Email")</div>
+                    <div class="info-value">@Email</div>
+                </div>
+            </div>
+            <div class="info-item">
+                <div class="info-icon"><i class="bi bi-person-badge"></i></div>
+                <div>
+                    <div class="info-label">@T("EmployeeId")</div>
+                    <div class="info-value">@EmployeeId</div>
+                </div>
+            </div>
+            <div class="info-item">
+                <div class="info-icon"><i class="bi bi-building"></i></div>
+                <div>
+                    <div class="info-label">@T("Company")</div>
+                    <div class="info-value">@PrimaryCompany</div>
+                </div>
+            </div>
+            <div class="info-item">
+                <div class="info-icon"><i class="bi bi-buildings"></i></div>
+                <div>
+                    <div class="info-label">@T("Companies")</div>
+                    <div class="info-value">@Companies</div>
+                </div>
+            </div>
+        </div>
+
+        @* ── Claims Toggle ── *@
+        <div class="mt-4">
+            <button class="btn-claims" @onclick="ToggleClaims">
+                <i class="bi @(showClaims ? "bi-chevron-up" : "bi-chevron-down") me-1"></i>
+                @T("ToggleClaims")
+            </button>
+        </div>
+
+        @if (showClaims)
+        {
+            <div class="claims-box mt-3">
+                <div class="info-label mb-2">@T("Claims")</div>
+                <table class="claims-table">
+                    <thead>
+                        <tr>
+                            <th>@T("Type")</th>
+                            <th>@T("Value")</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in claims)
+                        {
+                            <tr>
+                                <td class="claim-type">@PrettyClaimType(c.Type)</td>
+                                <td class="claim-value">@c.Value</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
     </div>
 </div>
+
+<style>
+    .profile-card {
+        background: #fff;
+        border: 0.5px solid #e2e8f0;
+        border-radius: 20px;
+        padding: 28px;
+        box-shadow: 0 2px 12px rgba(15,23,42,0.06);
+    }
+
+    .profile-header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+
+    .profile-avatar {
+        width: 60px;
+        height: 60px;
+        border-radius: 16px;
+        background: #e9f5db;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .profile-name {
+        font-size: 18px;
+        font-weight: 700;
+        color: #0f172a;
+    }
+
+    .profile-username {
+        font-size: 13px;
+        color: #94a3b8;
+        margin-top: 2px;
+    }
+
+    .role-badge {
+        background: #e9f5db;
+        color: #65a30d;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 5px 14px;
+        border-radius: 999px;
+        border: 1px solid #bef264;
+    }
+
+    .profile-divider {
+        height: 0.5px;
+        background: #f1f5f9;
+        margin: 24px 0;
+    }
+
+    .info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+
+    .info-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        background: #f8fafc;
+        border-radius: 12px;
+        padding: 14px 16px;
+        border: 0.5px solid #f1f5f9;
+    }
+
+    .info-icon {
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background: #e9f5db;
+        color: #65a30d;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        flex-shrink: 0;
+    }
+
+    .info-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .info-value {
+        font-size: 14px;
+        font-weight: 700;
+        color: #0f172a;
+        margin-top: 3px;
+    }
+
+    .btn-claims {
+        display: inline-flex;
+        align-items: center;
+        padding: 8px 18px;
+        background: #f8fafc;
+        color: #64748b;
+        border: 0.5px solid #e2e8f0;
+        border-radius: 10px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all .2s;
+    }
+
+        .btn-claims:hover {
+            background: #e9f5db;
+            color: #65a30d;
+            border-color: #bef264;
+        }
+
+    .claims-box {
+        background: #f8fafc;
+        border-radius: 14px;
+        padding: 16px;
+        border: 0.5px solid #e2e8f0;
+    }
+
+    .claims-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+    }
+
+        .claims-table thead tr {
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .claims-table th {
+            padding: 8px 10px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            text-align: left;
+        }
+
+        .claims-table tbody tr {
+            border-bottom: 0.5px solid #f1f5f9;
+        }
+
+            .claims-table tbody tr:last-child {
+                border-bottom: none;
+            }
+
+    .claim-type {
+        padding: 10px;
+        color: #64748b;
+        font-weight: 500;
+        width: 40%;
+    }
+
+    .claim-value {
+        padding: 10px;
+        color: #0f172a;
+        font-weight: 600;
+    }
+</style>
 
 @code {
     private string FullName = "-";
@@ -170,25 +343,23 @@
 
         // บริษัทหลัก
         PrimaryCompany =
-            u.FindFirst("CompanyCode")?.Value
-            ?? "-";
+     u.FindFirst("CompanyCode")?.Value
+     ?? u.FindFirst("CompanyID")?.Value   // fallback ใช้ ID แทน
+     ?? "-";
 
         // บริษัททั้งหมดที่เข้าถึงได้
-        var companyClaims = u.FindAll("Company").Select(x => x.Value).Distinct().ToList();
-        Companies = companyClaims.Count > 0
-            ? string.Join(", ", companyClaims)
-            : PrimaryCompany;
+       
 
         var roleClaims = u.FindAll(System.Security.Claims.ClaimTypes.Role).Select(x => x.Value).ToList();
         Roles = roleClaims.Count > 0 ? string.Join(", ", roleClaims) : "-";
 
         var hiddenClaimTypes = new[]
-{"CompanyID",
-    "exp",
-    "iss",
-    "aud",
-    "nbf",
-    "iat"
+{
+    "CompanyID", "exp", "iss", "aud", "nbf", "iat",
+    "CanViewCost", "CanViewVendor", "DataScope",
+    "Page1Access", "Page2Access", "Page3Access",
+    "TokenVersion", "UserID",
+    System.Security.Claims.ClaimTypes.Name  // Username ซ้ำกับ header
 };
 
         claims = u.Claims

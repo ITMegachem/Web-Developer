@@ -7,6 +7,7 @@
 @using Mgt.Lit.Core.Entities
 @using Mgt.Lit.WebFront.Components.Layout.MainLay
 @using Mgt.Lit.WebFront.Models.SalesOrder
+@using Mgt.Lit.WebFront.Services
 @using Mgt.Lit.WebFront.Services.Member
 @using Mgt.Lit.WebFront.Services.Models
 @using Mgt.Lit.WebFront.Services.SalesOrder
@@ -15,6 +16,7 @@
 @inject NavigationManager Nav
 @inject Mgt.Lit.WebFront.Services.UiState UiState
 @inject IHttpClientFactory HttpFactory
+@inject DownloadLogService DownloadLogSvc
 @inject PageContext PageContext
 
 
@@ -122,8 +124,8 @@
             <table class="table modern-table mb-0">
                 <thead>
                     <tr>
-                        <th style="font-size: 110% !important; font-weight: 800 !important;" >@T("MaterialCode")</th>
-                        <th style="font-size: 110% !important; font-weight: 800 !important;" >@T("MaterialDescription")</th>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;">@T("MaterialCode")</th>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;">@T("MaterialDescription")</th>
                         <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("BatchNo")</th>
                         <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("Unresticted Stock")</th>
                         <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Block Stock</th>
@@ -132,11 +134,11 @@
                         <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("Unit")</th>
                         <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("EXPDate")</th>
                         @if (!HideCostColumns)
-        {
-                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Packet/Price</th>
-                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Cost / KG</th>
-                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("TotalValue")</th>
-        }
+                        {
+                            <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Packet/Price</th>
+                            <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Cost / KG</th>
+                            <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("TotalValue")</th>
+                        }
                     </tr>
                 </thead>
                 <tbody>
@@ -186,7 +188,7 @@
                 <button class="pill-nav-btn"
                         disabled="@(filters.Page <= 1 || isLoading)"
                         @onclick="PrevPage">
-                    <i class="bi bi-chevron-left"></i> 
+                    <i class="bi bi-chevron-left"></i>
                    
                 </button>
 
@@ -463,7 +465,9 @@
         try
         {
             isLoading = true;
-
+            var username = AuthState.Permission?.Username;
+            var fileName = $"WarehouseStock_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await DownloadLogSvc.LogDownloadAsync(username, fileName);
             if (!_isDisposed)
                 await InvokeAsync(StateHasChanged);
 

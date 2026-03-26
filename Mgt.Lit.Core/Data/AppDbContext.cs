@@ -9,8 +9,8 @@ namespace Mgt.Lit.Core.Data
     public class AppDbContext : DbContext
     {
         public AppDbContext(DbContextOptions<AppDbContext> options)
-            : base(options) {  }
-
+            : base(options) { }
+        public DbSet<DownloadLog> DownloadLogs { get; set; }
         public DbSet<MsUser> MsUsers { get; set; }
         public DbSet<MsCompany> MsCompanies { get; set; }
         public DbSet<MsUserCompany> MsUserCompanies { get; set; }
@@ -59,7 +59,7 @@ namespace Mgt.Lit.Core.Data
             // 🔑 2. จัดการ Composite Key สำหรับ MsUserCompany
             modelBuilder.Entity<MsUserCompany>()
                 .HasKey(x => new { x.UserID, x.CompanyID });
-
+            modelBuilder.Entity<DownloadLog>().ToTable("DownloadLogs");
             // 🏗️ 3. Mapping ชื่อตารางให้ตรงกับ SQL Server
             modelBuilder.Entity<MsCompany>().ToTable("Ms_Company");
             modelBuilder.Entity<MsUserCompany>().ToTable("Ms_UserCompany");
@@ -68,6 +68,7 @@ namespace Mgt.Lit.Core.Data
             modelBuilder.Entity<ErrorLog>().ToTable("ErrorLog");
             modelBuilder.Entity<Entities.RefreshToken>().ToTable("RefreshTokens", "dbo");
             modelBuilder.Entity<Ms_MaterialGroup1>().HasNoKey();
+
         }
 
         public DbSet<Entities.RefreshToken> RefreshTokens { get; set; }

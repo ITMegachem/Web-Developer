@@ -13,87 +13,204 @@
 
 @implements IDisposable
 
-<div class="container-fluid p-0">
-    <h5 class="mb-3">@T("Title")</h5>
 
-    <div class="row g-3">
-        <!-- Language -->
-        <div class="col-lg-6">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <div class="fw-semibold mb-2">@T("LangTitle")</div>
-                    <div class="text-muted small mb-3">@T("LangDesc")</div>
+<div class="container-fluid p-0" style="max-width: 560px;">
+    <h5 class="mb-4" style="font-weight:700; color:#0f172a;">@T("Title")</h5>
 
-                    <div class="d-flex align-items-center gap-3">
-                        <span class="badge text-bg-light border">@T("TH")</span>
-
-                        <div class="form-check form-switch m-0">
-                            <input class="form-check-input"
-                                   type="checkbox"
-                                   role="switch"
-                                   @bind="IsEn"
-                                   @bind:after="OnLangToggled" />
-                        </div>
-
-                        <span class="badge text-bg-light border">@T("EN")</span>
-
-                        <span class="ms-2 small text-muted">@UiState.Lang</span>
+    @if (_isAdmin)
+    {
+        <div class="settings-card mb-3">
+            <div class="settings-card-icon">
+                <i class="bi bi-translate"></i>
+            </div>
+            <div class="flex-grow-1">
+                <div class="settings-card-title">@T("LangTitle")</div>
+                <div class="settings-card-desc">@T("LangDesc")</div>
+                <div class="d-flex align-items-center gap-3 mt-3">
+                    <span class="lang-badge @(!IsEn ? "active" : "")">TH</span>
+                    <div class="form-check form-switch m-0">
+                        <input class="form-check-input lang-switch"
+                               type="checkbox"
+                               role="switch"
+                               @bind="IsEn"
+                               @bind:after="OnLangToggled" />
                     </div>
+                    <span class="lang-badge @(IsEn ? "active" : "")">EN</span>
                 </div>
             </div>
         </div>
+    }
 
-        <!-- Change password -->
-        <div class="col-lg-6">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <div class="fw-semibold mb-2">@T("PwdTitle")</div>
-                    <div class="text-muted small mb-3">@T("PwdDesc")</div>
+    <div class="settings-card">
+        <div class="settings-card-icon">
+            <i class="bi bi-shield-lock"></i>
+        </div>
+        <div class="flex-grow-1">
+            <div class="settings-card-title">@T("PwdTitle")</div>
+            <div class="settings-card-desc">@T("PwdDesc")</div>
 
-                    @if (!string.IsNullOrWhiteSpace(msg))
-                    {
-                        <div class="alert @msgClass py-2 mb-3">@msg</div>
-                    }
+            @if (!string.IsNullOrWhiteSpace(msg))
+            {
+                <div class="alert @msgClass py-2 mt-3 mb-0 rounded-3 small">@msg</div>
+            }
 
-                    <div class="mb-2">
-                        <label class="form-label">@T("CurrentPwd")</label>
-                        <input class="form-control"
-                               type="password"
-                               @bind="CurrentPassword" />
-                    </div>
-
-                    <div class="mb-2">
-                        <label class="form-label">@T("NewPwd")</label>
-                        <input class="form-control"
-                               type="password"
-                               @bind="NewPassword" />
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label">@T("ConfirmPwd")</label>
-                        <input class="form-control"
-                               type="password"
-                               @bind="ConfirmPassword" />
-                    </div>
-
-                    <button class="btn btn-primary"
-                            disabled="@busy"
-                            @onclick="ChangePassword">
-                        @if (busy)
-                        {
-                            <span class="spinner-border spinner-border-sm me-2"></span>
-                        }
-                        @T("SavePwd")
-                    </button>
+            <div class="mt-3 d-flex flex-column gap-2">
+                <div class="pwd-field-wrap">
+                    <i class="bi bi-lock pwd-field-icon"></i>
+                    <input class="pwd-input"
+                           type="password"
+                           placeholder="@T("CurrentPwd")"
+                           @bind="CurrentPassword" />
+                </div>
+                <div class="pwd-field-wrap">
+                    <i class="bi bi-key pwd-field-icon"></i>
+                    <input class="pwd-input"
+                           type="password"
+                           placeholder="@T("NewPwd")"
+                           @bind="NewPassword" />
+                </div>
+                <div class="pwd-field-wrap">
+                    <i class="bi bi-check2-circle pwd-field-icon"></i>
+                    <input class="pwd-input"
+                           type="password"
+                           placeholder="@T("ConfirmPwd")"
+                           @bind="ConfirmPassword" />
                 </div>
             </div>
+
+            <button class="btn-save mt-3"
+                    disabled="@busy"
+                    @onclick="ChangePassword">
+                @if (busy)
+                {
+                    <span class="spinner-border spinner-border-sm me-2"></span>
+                }
+                <i class="bi bi-check-lg me-1"></i>
+                @T("SavePwd")
+            </button>
         </div>
     </div>
 </div>
 
+<style>
+    .settings-card {
+        background: #fff;
+        border: 0.5px solid #e2e8f0;
+        border-radius: 18px;
+        padding: 24px;
+        display: flex;
+        gap: 20px;
+        box-shadow: 0 2px 12px rgba(15,23,42,0.06);
+    }
+
+    .settings-card-icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        background: #e9f5db;
+        color: #65a30d;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        flex-shrink: 0;
+    }
+
+    .settings-card-title {
+        font-size: 15px;
+        font-weight: 700;
+        color: #0f172a;
+    }
+
+    .settings-card-desc {
+        font-size: 13px;
+        color: #94a3b8;
+        margin-top: 2px;
+    }
+
+    .lang-badge {
+        font-size: 12px;
+        font-weight: 700;
+        color: #94a3b8;
+        padding: 4px 12px;
+        border-radius: 999px;
+        border: 1.5px solid #e2e8f0;
+        background: #f8fafc;
+        transition: all .2s;
+    }
+
+    .lang-badge.active {
+        color: #65a30d;
+        border-color: #84cc16;
+        background: #e9f5db;
+    }
+
+    .lang-switch {
+        width: 40px;
+        height: 22px;
+        cursor: pointer;
+    }
+
+    .lang-switch:checked {
+        background-color: #84cc16;
+        border-color: #84cc16;
+    }
+
+    .pwd-field-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
+    }
+
+    .pwd-field-icon {
+        position: absolute;
+        left: 14px;
+        color: #94a3b8;
+        font-size: 15px;
+        pointer-events: none;
+    }
+
+    .pwd-input {
+        width: 100%;
+        padding: 11px 14px 11px 40px;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        font-size: 14px;
+        color: #0f172a;
+        background: #f8fafc;
+        outline: none;
+        transition: border .2s, background .2s;
+    }
+
+    .pwd-input:focus {
+        border-color: #84cc16;
+        background: #fff;
+        box-shadow: 0 0 0 3px rgba(132,204,22,0.12);
+    }
+
+    .btn-save {
+        display: inline-flex;
+        align-items: center;
+        padding: 10px 24px;
+        background: #65a30d;
+        color: #fff;
+        border: none;
+        border-radius: 12px;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: background .2s, transform .1s;
+    }
+
+    .btn-save:hover { background: #4d7c0f; }
+    .btn-save:active { transform: scale(0.97); }
+    .btn-save:disabled { background: #d1d5db; cursor: not-allowed; }
+</style>
+
 @code {
     private bool IsEn;
-
+    private bool _isAdmin;
+    
     private string CurrentPassword = "";
     private string NewPassword = "";
     private string ConfirmPassword = "";
@@ -120,7 +237,9 @@
             ["PwdMismatch"] = "New password and confirm password do not match.",
             ["PwdEmpty"] = "Please fill all password fields.",
             ["PwdOk"] = "Password updated successfully.",
-            ["PwdFail"] = "Cannot update password."
+            ["PwdFail"] = "Cannot update password.",
+            ["PwdWrongCurrent"] = "Current password is incorrect.",
+            ["PwdWeak"] = "Password must be at least 6 characters and contain uppercase, lowercase, number, and special character."
         },
         ["th"] = new()
         {
@@ -138,10 +257,20 @@
             ["PwdMismatch"] = "รหัสผ่านใหม่และยืนยันรหัสผ่านไม่ตรงกัน",
             ["PwdEmpty"] = "กรุณากรอกข้อมูลรหัสผ่านให้ครบ",
             ["PwdOk"] = "เปลี่ยนรหัสผ่านเรียบร้อย",
-            ["PwdFail"] = "เปลี่ยนรหัสผ่านไม่สำเร็จ"
+            ["PwdFail"] = "เปลี่ยนรหัสผ่านไม่สำเร็จ",
+            ["PwdWrongCurrent"] = "รหัสผ่านปัจจุบันไม่ถูกต้อง",
+            ["PwdWeak"] = "รหัสผ่านต้องมีอย่างน้อย 6 ตัว และประกอบด้วยตัวพิมพ์ใหญ่ ตัวพิมพ์เล็ก ตัวเลข และอักขระพิเศษ"
         }
     };
-
+    private bool IsPasswordStrong(string pwd)
+    {
+        if (pwd.Length < 6) return false;
+        if (!pwd.Any(char.IsUpper)) return false;
+        if (!pwd.Any(char.IsLower)) return false;
+        if (!pwd.Any(char.IsDigit)) return false;
+        if (!pwd.Any(c => !char.IsLetterOrDigit(c))) return false;
+        return true;
+    }
     protected override async Task OnInitializedAsync()
     {
         if (string.IsNullOrEmpty(AuthState.Token))
@@ -149,23 +278,15 @@
             Nav.NavigateTo("/");
             return;
         }
-
-        var role =
-            AuthState.User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
-            ?? AuthState.User?.FindFirst("role")?.Value;
-
-        if (!string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase))
-        {
-            Nav.NavigateTo("/sales-orders"); // หรือหน้าอื่นที่อยากให้กลับไป
-            return;
-        }
-
+        // var role =
+        //     AuthState.User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
+        //     ?? AuthState.User?.FindFirst("role")?.Value;
+        // // ✅ ลบบล็อก role check ออกทั้งหมด ให้ทุกคนเข้าได้
+        // _isAdmin = string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase);
         await UiState.InitAsync();
         UiState.Changed += OnUiChanged;
         IsEn = UiState.Lang == "en";
     }
-
-
     private void OnUiChanged()
     {
         IsEn = UiState.Lang == "en";
@@ -197,6 +318,7 @@
     {
         msg = null;
 
+        // ✅ เช็คว่ากรอกครบ
         if (string.IsNullOrWhiteSpace(CurrentPassword) ||
             string.IsNullOrWhiteSpace(NewPassword) ||
             string.IsNullOrWhiteSpace(ConfirmPassword))
@@ -206,6 +328,15 @@
             return;
         }
 
+        // ✅ เช็ค password strength
+        if (!IsPasswordStrong(NewPassword))
+        {
+            msg = T("PwdWeak");
+            msgClass = "alert-warning";
+            return;
+        }
+
+        // ✅ เช็ค confirm match
         if (NewPassword != ConfirmPassword)
         {
             msg = T("PwdMismatch");
@@ -217,7 +348,6 @@
         {
             busy = true;
 
-            
             var (ok, err) = await AccountService.ChangePasswordAsync(new ChangePasswordRequest
             {
                 CurrentPassword = CurrentPassword,
@@ -234,10 +364,12 @@
             }
             else
             {
-                msg = err ?? T("PwdFail");   // จะเห็นสาเหตุจริง เช่น 401/500
+                // ✅ แปลง 400 Bad Request เป็นข้อความที่อ่านง่าย
+                msg = (err != null && err.Contains("incorrect"))
+                    ? T("PwdWrongCurrent")
+                    : T("PwdFail");
                 msgClass = "alert-danger";
             }
-
         }
         catch
         {
