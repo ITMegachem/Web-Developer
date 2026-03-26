@@ -1,145 +1,437 @@
-﻿/* Background เป็นสีเขียวแบบภาพ */
+﻿*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Nunito', sans-serif;
+}
+
 .login-bg {
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 40px 20px;
-    background: radial-gradient(circle at 30% 20%, #d7e57a 0 110px, transparent 111px), radial-gradient(circle at 70% 60%, #cfe06b 0 140px, transparent 141px), radial-gradient(circle at 20% 75%, #c3d657 0 160px, transparent 161px), radial-gradient(circle at 85% 30%, #b7cc4b 0 120px, transparent 121px), linear-gradient(180deg, #e7f1a9 0%, #cfe06b 100%);
+    background: radial-gradient(circle at 28% 18%, #d7e57a 0 110px, transparent 111px), radial-gradient(circle at 72% 62%, #cfe06b 0 145px, transparent 146px), radial-gradient(circle at 18% 78%, #c3d657 0 165px, transparent 166px), radial-gradient(circle at 86% 28%, #b7cc4b 0 125px, transparent 126px), radial-gradient(circle at 55% 90%, #cce065 0 80px, transparent 81px), linear-gradient(160deg, #eaf4b0 0%, #c8dc60 100%);
 }
 
-
-/* กล่องหลักสีขาว */
 .login-card {
-    width: min(1100px, 92vw);
+    width: min(1060px, 92vw);
     background: #ffffff;
-    border-radius: 10px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+    border-radius: 24px;
+    box-shadow: 0 2px 0 rgba(255,255,255,0.9) inset, 0 24px 64px rgba(80,110,20,0.22), 0 4px 16px rgba(80,110,20,0.10);
     overflow: hidden;
+    animation: cardIn 0.65s cubic-bezier(0.16,1,0.3,1) both;
 }
 
-/* แบ่งซ้ายโล่งใส่โลโก้ และขวาเป็นฟอร์ม */
+@keyframes cardIn {
+    from {
+        opacity: 0;
+        transform: translateY(32px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
 .login-card-inner {
     display: flex;
     min-height: 560px;
 }
 
 .login-left {
-    flex: 1.1;
+    flex: 1.15;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 50px 40px;
-    background: #ffffff;
+    padding: 56px 44px;
+    background: #f9fdf2;
+    border-right: 1px solid rgba(180,210,60,0.25);
+    position: relative;
+    overflow: hidden;
 }
 
-.login-right {
-    flex: 0.9;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: 50px 70px;
+    .login-left::before {
+        content: '';
+        position: absolute;
+        width: 380px;
+        height: 380px;
+        background: radial-gradient(circle, rgba(196,224,80,0.2) 0%, transparent 70%);
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%,-50%);
+        border-radius: 50%;
+        animation: glow 5s ease-in-out infinite alternate;
+    }
+
+@keyframes glow {
+    0% {
+        transform: translate(-50%,-50%) scale(1);
+        opacity: 0.7;
+    }
+
+    100% {
+        transform: translate(-50%,-50%) scale(1.14);
+        opacity: 1;
+    }
 }
 
-@media (max-width: 992px) {
-    .login-card-inner {
-        flex-direction: column;
-        min-height: auto;
-    }
-
-    .login-right {
-        padding: 40px 30px;
-    }
-
-    .login-left {
-        padding: 40px 30px 10px;
-    }
-}
-
-/* โลโก้ในพื้นที่ขาว ๆ */
 .logo-stack {
+    position: relative;
+    z-index: 1;
     width: 100%;
-    max-width: 520px;
+    max-width: 440px;
     text-align: center;
+    animation: logoIn 0.8s cubic-bezier(0.16,1,0.3,1) 0.15s both;
+}
+
+@keyframes logoIn {
+    from {
+        opacity: 0;
+        transform: scale(0.88);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
 
 .mgt-logo {
     width: 100%;
     height: auto;
     display: block;
-    margin: 0 auto 18px;
+    margin: 0 auto;
+    filter: drop-shadow(0 8px 24px rgba(100,140,20,0.15));
+    transition: filter 0.3s, transform 0.3s;
+}
+
+    .mgt-logo:hover {
+        filter: drop-shadow(0 12px 32px rgba(100,140,20,0.28));
+        transform: scale(1.02);
+    }
+
+.login-right {
+    flex: 0.85;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 56px 64px;
 }
 
 .one-report-logo {
-    width: 72%;
+    width: 64%;
     height: auto;
     display: block;
-    margin: 0 auto;
+    margin: 0 auto 6px;
+    animation: fadeUp 0.6s cubic-bezier(0.16,1,0.3,1) 0.25s both;
 }
 
-/* Title */
 .login-title {
-    font-size: 2.2rem;
-    font-weight: 700;
-    color: #111827;
-    margin-bottom: 26px;
+    font-size: 2rem;
+    font-weight: 800;
+    color: #1a2e05;
+    margin-bottom: 28px;
     text-align: center;
+    letter-spacing: -0.4px;
+    animation: fadeUp 0.6s cubic-bezier(0.16,1,0.3,1) 0.35s both;
 }
 
-/* Inputs ให้โค้งมนแบบภาพ */
+@keyframes fadeUp {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Alert */
+.alert-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fef2f2;
+    border: 1px solid #fca5a5;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 0.88rem;
+    color: #b91c1c;
+    margin-bottom: 18px;
+    animation: shake 0.4s cubic-bezier(0.36,0.07,0.19,0.97);
+}
+
+@keyframes shake {
+    0%,100% {
+        transform: translateX(0);
+    }
+
+    20% {
+        transform: translateX(-5px);
+    }
+
+    40% {
+        transform: translateX(5px);
+    }
+
+    60% {
+        transform: translateX(-3px);
+    }
+
+    80% {
+        transform: translateX(3px);
+    }
+}
+
+.alert-close {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: #b91c1c;
+    cursor: pointer;
+    font-size: 15px;
+    opacity: 0.65;
+    transition: opacity 0.2s;
+}
+
+    .alert-close:hover {
+        opacity: 1;
+    }
+
+/* Field */
+.field-block {
+    margin-bottom: 18px;
+    animation: fadeUp 0.55s cubic-bezier(0.16,1,0.3,1) both;
+}
+
+    .field-block:nth-of-type(1) {
+        animation-delay: 0.45s;
+    }
+
+    .field-block:nth-of-type(2) {
+        animation-delay: 0.55s;
+    }
+
 .form-label {
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: #374151;
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 1.3px;
+    text-transform: uppercase;
+    color: #4b5e16;
+    margin-bottom: 7px;
+}
+
+.input-wrap {
+    position: relative;
+}
+
+.input-icon {
+    position: absolute;
+    left: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #86b026;
+    pointer-events: none;
+    display: flex;
 }
 
 .form-control {
-    height: 48px !important;
-    border-radius: 999px !important;
-    border: 1px solid #d1d5db !important;
-    padding: 0 18px !important;
-    font-size: 1rem !important;
+    width: 100%;
+    height: 50px;
+    border-radius: 999px;
+    border: 1.5px solid #d1d5db;
+    padding: 0 20px 0 46px;
+    font-family: 'Nunito', sans-serif;
+    font-size: 0.95rem;
+    color: #1f2937;
+    outline: none;
+    background: #ffffff;
+    transition: border-color 0.22s, box-shadow 0.22s, background 0.22s;
 }
 
-    .form-control:focus {
-        box-shadow: none !important;
-        border-color: #22c55e !important;
+    .form-control::placeholder {
+        color: rgba(107,114,128,0.45);
     }
 
-/* ปุ่ม Login เป็นพื้นขาว กรอบเขียว ตัวหนังสือเขียว */
-.btn-login {
-    height: 48px !important;
-    border-radius: 999px !important;
-    background: #ffffff !important;
-    border: 2px solid #22c55e !important;
-    color: #16a34a !important;
-    font-weight: 700 !important;
-    font-size: 1rem !important;
+    .form-control:focus {
+        border-color: #22c55e;
+        box-shadow: 0 0 0 4px rgba(34,197,94,0.13);
+        background: #f6fef0;
+    }
+
+.eye-btn {
+    position: absolute;
+    right: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: #9ca3af;
+    cursor: pointer;
+    display: flex;
+    padding: 0;
+    transition: color 0.2s;
 }
 
-    .btn-login:hover {
-        background: #16a34a !important;
-        border-color: #16a34a !important;
-        color: #ffffff !important;
+    .eye-btn:hover {
+        color: #22c55e;
+    }
+
+/* Button */
+.btn-wrap {
+    margin-top: 6px;
+    animation: fadeUp 0.55s cubic-bezier(0.16,1,0.3,1) 0.65s both;
+}
+
+.btn-login {
+    width: 100%;
+    height: 50px;
+    border-radius: 999px;
+    background: #ffffff;
+    border: 2px solid #22c55e;
+    color: #16a34a;
+    font-family: 'Nunito', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background 0.22s, color 0.22s, box-shadow 0.22s, transform 0.18s;
+}
+
+    .btn-login:hover:not(:disabled) {
+        background: #16a34a;
+        border-color: #16a34a;
+        color: #ffffff;
+        box-shadow: 0 6px 24px rgba(34,197,94,0.38);
+        transform: translateY(-2px);
+    }
+
+    .btn-login:active:not(:disabled) {
+        transform: translateY(0);
+        box-shadow: none;
     }
 
     .btn-login:disabled {
-        opacity: 0.7;
+        opacity: 0.65;
+        cursor: not-allowed;
     }
 
-/* ลิงก์ลืมรหัสผ่าน */
-.forgot-password a {
-    color: #16a34a;
-    text-decoration: none;
+.spin-ring {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(22,163,74,0.3);
+    border-top-color: #16a34a;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: inline-block;
+    flex-shrink: 0;
 }
 
-    .forgot-password a:hover {
-        text-decoration: underline;
+.btn-login:hover:not(:disabled) .spin-ring {
+    border-color: rgba(255,255,255,0.35);
+    border-top-color: #fff;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.forgot-password {
+    text-align: center;
+    margin-top: 18px;
+    font-size: 0.85rem;
+    animation: fadeUp 0.55s cubic-bezier(0.16,1,0.3,1) 0.75s both;
+}
+
+    .forgot-password a {
+        color: #16a34a;
+        text-decoration: none;
+        font-weight: 700;
+        transition: color 0.2s;
     }
 
-/* Alert */
-.alert {
-    margin-bottom: 18px;
-    border-radius: 8px;
-    font-size: 0.95rem;
+        .forgot-password a:hover {
+            color: #15803d;
+            text-decoration: underline;
+        }
+
+.init-loader {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #eaf4b0;
+}
+
+.init-ring {
+    width: 36px;
+    height: 36px;
+    border: 3px solid rgba(34,197,94,0.2);
+    border-top-color: #22c55e;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+/* เพิ่ม/แก้ไข ใน siteLogin.css */
+
+@media (max-width: 768px) {
+
+    /* เปลี่ยนจาก row → column */
+    .login-card-inner {
+        flex-direction: column;
+        min-height: auto;
+    }
+
+    /* ฝั่งซ้าย: เปลี่ยนจาก flex:1.15 → แถบด้านบน */
+    .login-left {
+        display: flex; /* ไม่ซ่อนแล้ว */
+        flex: none;
+        width: 100%;
+        padding: 32px 40px 24px;
+        border-right: none;
+        border-bottom: 1px solid rgba(180,210,60,0.25);
+        min-height: auto;
+    }
+
+    .logo-stack {
+        max-width: 200px; /* โลโก้เล็กลงพอดีมือถือ */
+        margin: 0 auto;
+    }
+
+    /* ฝั่งขวา: ฟอร์มเต็มความกว้าง */
+    .login-right {
+        flex: 1;
+        padding: 32px 28px 44px;
+        width: 100%;
+    }
+
+    .login-card {
+        width: 92vw;
+        border-radius: 20px;
+    }
+
+    .one-report-logo {
+        width: 50%;
+        margin-bottom: 8px;
+    }
+
+    .login-title {
+        font-size: 1.6rem;
+        margin-bottom: 20px;
+    }
+}
 }

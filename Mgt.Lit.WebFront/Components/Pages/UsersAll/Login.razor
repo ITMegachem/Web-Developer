@@ -13,11 +13,10 @@
 @using System.IdentityModel.Tokens.Jwt
 @inject IJSRuntime JS
 @inject NavigationManager Nav
-
 @if (!_isInitialized)
 {
-    <div class="d-flex justify-content-center align-items-center" style="height: 100vh; background: #f8f9fa;">
-        <div class="spinner-border text-success" role="status"></div>
+    <div class="init-loader">
+        <div class="init-ring"></div>
     </div>
 }
 else
@@ -25,38 +24,87 @@ else
     <div class="login-bg">
         <div class="login-card">
             <div class="login-card-inner">
+
+                <!-- Left: MGT Logo -->
                 <div class="login-left">
                     <div class="logo-stack">
-                        <img src="images/MGT-Logo-jpg.jpg" class="mgt-logo" alt="MGT Logo">
+                        <img src="images/mgt-logo.png" class="mgt-logo" alt="MGT Logo">
                     </div>
                 </div>
 
+                <!-- Right: Form -->
                 <div class="login-right">
                     <img src="images/one-report.png" class="one-report-logo" alt="OneReport Logo">
                     <div class="login-title">Welcome Back!</div>
 
                     @if (showAlert)
                     {
-                        <div class="alert alert-@(alertType) alert-dismissible fade show text-start" role="alert">
-                            <i class="bi bi-exclamation-triangle-fill me-2"></i> @alertMessage
-                            <button type="button" class="btn-close" @onclick="() => showAlert = false"></button>
+                        <div class="alert-box">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                                <circle cx="12" cy="12" r="10" />
+                                <line x1="12" y1="8" x2="12" y2="12" />
+                                <line x1="12" y1="16" x2="12.01" y2="16" />
+                            </svg>
+                            <span>@alertMessage</span>
+                            <button class="alert-close" @onclick="() => showAlert = false">✕</button>
                         </div>
                     }
 
-                    <div class="text-start">
+                    <div class="field-block">
                         <label class="form-label">Username</label>
-                        <input class="form-control mb-3" placeholder="Enter username" @bind="username" />
-
-                        <label class="form-label">Password</label>
-                        <input class="form-control mb-3" type="password" placeholder="Enter password" @bind="password" @onkeyup="HandleKeyUp" />
+                        <div class="input-wrap">
+                            <span class="input-icon">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                                    <circle cx="12" cy="8" r="4" />
+                                    <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+                                </svg>
+                            </span>
+                            <input class="form-control" placeholder="Enter username" @bind="username" autocomplete="username" />
+                        </div>
                     </div>
 
-                    <div class="d-grid mt-3">
-                        <button class="btn btn-login" @onclick="DoLogin" disabled="@isLoading">
+                    <div class="field-block">
+                        <label class="form-label">Password</label>
+                        <div class="input-wrap">
+                            <span class="input-icon">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                                    <rect x="3" y="11" width="18" height="11" rx="2" />
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                                </svg>
+                            </span>
+                            <input class="form-control"
+                                   type="@(showPassword ? "text" : "password")"
+                                   placeholder="Enter password"
+                                   @bind="password"
+                                   @onkeyup="HandleKeyUp"
+                                   autocomplete="current-password"
+                                   style="padding-right:48px;" />
+                            <button class="eye-btn" type="button" @onclick="() => showPassword = !showPassword" tabindex="-1">
+                                @if (showPassword)
+                                {
+                                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                                        <line x1="1" y1="1" x2="23" y2="23" />
+                                    </svg>
+                                }
+                                else
+                                {
+                                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                        <circle cx="12" cy="12" r="3" />
+                                    </svg>
+                                }
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="btn-wrap">
+                        <button class="btn-login" @onclick="DoLogin" disabled="@isLoading">
                             @if (isLoading)
                             {
-                                <span class="spinner-border spinner-border-sm me-2"></span>
-                                <span>Logging in...</span>
+                                <span class="spin-ring"></span>
+                                <span>Signing in…</span>
                             }
                             else
                             {
@@ -65,10 +113,11 @@ else
                         </button>
                     </div>
 
-                    <div class="forgot-password mt-3 text-center">
+                    <div class="forgot-password">
                         <a href="#">Forgotten password?</a>
                     </div>
                 </div>
+
             </div>
         </div>
     </div>
@@ -79,6 +128,7 @@ else
     string password = "";
     bool isLoading = false;
     bool showAlert = false;
+    bool showPassword = false;
     string alertType = "success";
     string alertMessage = "";
     bool _isInitialized = false;
@@ -86,15 +136,11 @@ else
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-
         await AuthState.InitializeAsync();
         _isInitialized = true;
         StateHasChanged();
-
         if (!string.IsNullOrEmpty(AuthState.Token))
-        {
             Nav.NavigateTo("/Main", forceLoad: true);
-        }
     }
 
     private async Task HandleKeyUp(KeyboardEventArgs e)
@@ -151,7 +197,6 @@ else
 
             AuthState.Token = result.Token;
             AuthState.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "jwt"));
-
             Nav.NavigateTo("/Main", forceLoad: true);
         }
         catch (Exception ex)

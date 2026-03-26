@@ -423,18 +423,28 @@
 }
 /* content ชิด sidebar (ไม่มีช่องว่างขาว) */
 .app-content {
-    margin-left: 270px; /* ดันเท่ากับ sidebar */
+    margin-left: 270px;
     min-height: 100vh;
-    padding: 0; /* กัน gap จาก padding */
-    background: #ffffff; /* สีพื้นของ content */
-    box-shadow: -1px 0 18px rgba(15, 23, 42, 0.06); /* เงาฝั่งซ้ายของแผ่น */
+    padding: 0;
+    background: #ffffff;
+    box-shadow: -1px 0 18px rgba(15, 23, 42, 0.06);
     transition: all .3s ease;
     width: calc(100% - 270px);
+    /* ลบ transform, scale, min-height calc ออกทั้งหมด */
 }
-/* ถ้าต้องการเว้นระยะด้านใน ให้ทำเป็น inner wrapper */
+
+    .app-content.collapsed {
+        margin-left: 90px;
+        width: calc(100% - 90px);
+    }
+
+/* ✅ ใส่ zoom ตรงนี้แทน — ไม่กระทบ layout เลย */
 .page-inner {
-    padding: 24px 32px; /* เว้นด้านในแทน */
+    padding: 24px 32px;
+    zoom: 0.9;
 }
+
+
 html, body {
     margin: 0;
     padding: 0;
