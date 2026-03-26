@@ -47,7 +47,7 @@ builder.Services
 
 builder.Services.AddHttpClient<StockService>(client =>
 {
-    client.BaseAddress = new Uri(apiBaseUrl);
+    client.BaseAddress = new Uri(apiBaseUrl);//
 });
 
 builder.Services.AddScoped<PageContext>();
