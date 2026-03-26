@@ -1,0 +1,73 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+@using Mgt.Lit.WebFront.Auth
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject NavigationManager Nav
+
+<div class="app-shell @(IsCollapsed ? "collapsed" : "")">
+    <div class="app-body">
+        <SideMenu />
+        <main class="app-content">
+            <div class="page-inner">
+                @Body
+            </div>
+        </main>
+    </div>
+</div>
+
+@code {
+    private bool IsCollapsed = false;
+    private bool _initialized;
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        await AuthState.InitializeAsync();
+        _initialized = true;
+
+        if (string.IsNullOrWhiteSpace(AuthState.Token))
+        {
+            Nav.NavigateTo("/", replace: true);
+            return;
+        }
+
+        CheckCurrentPagePermission();
+        StateHasChanged();
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (!_initialized)
+            return;
+
+        _ = InvokeAsync(CheckCurrentPagePermission);
+    }
+
+    private void CheckCurrentPagePermission()
+    {
+        var relativePath = Nav.ToBaseRelativePath(Nav.Uri);
+
+        if (string.IsNullOrWhiteSpace(AuthState.Token))
+        {
+            Nav.NavigateTo("/", replace: true);
+            return;
+        }
+
+        if (!PermissionHelper.CanAccessRoute(AuthState.User, relativePath))
+        {
+            Nav.NavigateTo("/unauthorized", replace: true);
+        }
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

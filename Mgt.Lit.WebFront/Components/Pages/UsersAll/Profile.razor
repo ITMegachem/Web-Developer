@@ -1,0 +1,235 @@
+﻿@namespace Mgt.Lit.WebFront.Pages
+@page "/profile"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout AppLayout
+@rendermode InteractiveServer
+
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject NavigationManager Nav
+@inject Mgt.Lit.WebFront.Services.UiState UiState
+
+@implements IDisposable
+
+<div class="container-fluid p-0">
+    <h5 class="mb-3">@T("Title")</h5>
+
+    <div class="card shadow-sm">
+        <div class="card-body d-flex gap-3 align-items-start">
+
+            <img src="/images/icon-person.png"
+                 alt="User"
+                 style="width:64px;height:64px;border-radius:50%;border:1px solid #eee;padding:6px;" />
+
+            <div class="flex-grow-1">
+                <div class="fw-semibold fs-5">@FullName</div>
+                <div class="text-muted small">@Username</div>
+
+                <hr class="my-3" />
+
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="text-muted small">@T("Email")</div>
+                        <div class="fw-semibold">@Email</div>
+                    </div>
+
+                    <div class="col-md-4">
+                        <div class="text-muted small">@T("EmployeeId")</div>
+                        <div class="fw-semibold">@EmployeeId</div>
+                    </div>
+
+                    <div class="col-md-4">
+                        <div class="text-muted small">@T("Roles")</div>
+                        <div class="fw-semibold">@Roles</div>
+                    </div>
+                    <div class="row g-3 mt-1">
+                        <div class="col-md-4">
+                            <div class="text-muted small">@T("Company")</div>
+                            <div class="fw-semibold">@PrimaryCompany</div>
+                        </div>
+
+                        <div class="col-md-8">
+                            <div class="text-muted small">@T("Companies")</div>
+                            <div class="fw-semibold">@Companies</div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="mt-3">
+                    <button class="btn btn-light border btn-sm" @onclick="ToggleClaims">
+                        @T("ToggleClaims")
+                    </button>
+                </div>
+
+                @if (showClaims)
+                {
+                    <div class="mt-3">
+                        <div class="text-muted small mb-2">@T("Claims")</div>
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>@T("Type")</th>
+                                        <th>@T("Value")</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var c in claims)
+                                    {
+                                        <tr>
+                                            <td class="text-muted">@PrettyClaimType(c.Type)</td>
+                                            <td>@c.Value</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                }
+            </div>
+
+        </div>
+    </div>
+</div>
+
+@code {
+    private string FullName = "-";
+    private string Username = "-";
+    private string Email = "-";
+    private string EmployeeId = "-";
+    private string Roles = "-";
+    private string PrimaryCompany = "-";
+    private string Companies = "-";
+
+
+    private bool showClaims;
+    private List<System.Security.Claims.Claim> claims = new();
+
+    private static readonly Dictionary<string, Dictionary<string, string>> Text = new()
+    {
+        ["en"] = new()
+        {
+            ["Title"] = "Profile",
+            ["Email"] = "Email",
+            ["EmployeeId"] = "Employee ID",
+            ["Roles"] = "Roles",
+            ["ToggleClaims"] = "Show/Hide claims",
+            ["Claims"] = "Claims",
+            ["Type"] = "Type",
+            ["Value"] = "Value",
+            ["Company"] = "Company",
+            ["Companies"] = "Companies"
+
+        },
+        ["th"] = new()
+        {
+            ["Title"] = "โปรไฟล์",
+            ["Email"] = "อีเมล",
+            ["EmployeeId"] = "รหัสพนักงาน",
+            ["Roles"] = "สิทธิ์",
+            ["ToggleClaims"] = "แสดง/ซ่อนรายละเอียด",
+            ["Claims"] = "ข้อมูลสิทธิ์ (Claims)",
+            ["Type"] = "ประเภท",
+            ["Value"] = "ค่า",
+            ["Company"] = "บริษัทหลัก",
+            ["Companies"] = "บริษัทที่เข้าถึงได้"
+
+        }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (string.IsNullOrEmpty(AuthState.Token) || AuthState.User is null)
+        {
+            Nav.NavigateTo("/");
+            return;
+        }
+
+        await UiState.InitAsync();
+        UiState.Changed += OnUiChanged;
+
+        var u = AuthState.User;
+
+        // ปรับชื่อ claim ให้ตรงกับของคุณได้
+        FullName = u.FindFirst("FullName")?.Value
+                   ?? u.FindFirst("name")?.Value
+                   ?? "-";
+
+        Username = u.Identity?.Name
+                   ?? u.FindFirst("Username")?.Value
+                   ?? u.FindFirst("preferred_username")?.Value
+                   ?? "-";
+
+        Email = u.FindFirst("Email")?.Value
+                ?? u.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                ?? "-";
+
+        EmployeeId = u.FindFirst("EmployeeId")?.Value
+              ?? u.FindFirst("EmpId")?.Value
+              ?? Username;
+
+        // บริษัทหลัก
+        PrimaryCompany =
+            u.FindFirst("CompanyCode")?.Value
+            ?? "-";
+
+        // บริษัททั้งหมดที่เข้าถึงได้
+        var companyClaims = u.FindAll("Company").Select(x => x.Value).Distinct().ToList();
+        Companies = companyClaims.Count > 0
+            ? string.Join(", ", companyClaims)
+            : PrimaryCompany;
+
+        var roleClaims = u.FindAll(System.Security.Claims.ClaimTypes.Role).Select(x => x.Value).ToList();
+        Roles = roleClaims.Count > 0 ? string.Join(", ", roleClaims) : "-";
+
+        var hiddenClaimTypes = new[]
+{"CompanyID",
+    "exp",
+    "iss",
+    "aud",
+    "nbf",
+    "iat"
+};
+
+        claims = u.Claims
+            .Where(c => !hiddenClaimTypes.Contains(c.Type))
+            .OrderBy(c => c.Type)
+            .ToList();
+
+    }
+
+    private void ToggleClaims() => showClaims = !showClaims;
+
+    private void OnUiChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => UiState.Changed -= OnUiChanged;
+
+    private string T(string key)
+    {
+        var lang = UiState.Lang ?? "en";
+        if (Text.TryGetValue(lang, out var dict) && dict.TryGetValue(key, out var value))
+        {
+            return value;
+        }
+        return key;
+    }
+    private static string PrettyClaimType(string type)
+    {
+        return type switch
+        {
+            System.Security.Claims.ClaimTypes.Name => "Username",
+            System.Security.Claims.ClaimTypes.Role => "Role",
+            System.Security.Claims.ClaimTypes.Email => "Email",
+            System.Security.Claims.ClaimTypes.GivenName => "FirstName",
+            System.Security.Claims.ClaimTypes.Surname => "LastName",
+            _ when type.StartsWith("http://schemas.microsoft.com/") => type.Split('/').Last(),
+            _ when type.StartsWith("http://schemas.xmlsoap.org/") => type.Split('/').Last(),
+           
+            _ when type == "CompanyID" => "Company ID",
+            _ when type == "CompanyCode" => "Company",
+            _ when type == "Company" => "Company (Access)",
+            _ => type,
+        };
+    }
+
+}

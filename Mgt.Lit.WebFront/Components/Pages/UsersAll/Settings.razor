@@ -1,0 +1,252 @@
+﻿@namespace Mgt.Lit.WebFront.Pages
+@page "/settings"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@using Mgt.Lit.WebFront.Models.Member
+@using Mgt.Lit.WebFront.Services.Member
+@layout AppLayout
+@rendermode InteractiveServer
+
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject NavigationManager Nav
+@inject Mgt.Lit.WebFront.Services.UiState UiState
+@inject IAccountService AccountService
+
+@implements IDisposable
+
+<div class="container-fluid p-0">
+    <h5 class="mb-3">@T("Title")</h5>
+
+    <div class="row g-3">
+        <!-- Language -->
+        <div class="col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="fw-semibold mb-2">@T("LangTitle")</div>
+                    <div class="text-muted small mb-3">@T("LangDesc")</div>
+
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="badge text-bg-light border">@T("TH")</span>
+
+                        <div class="form-check form-switch m-0">
+                            <input class="form-check-input"
+                                   type="checkbox"
+                                   role="switch"
+                                   @bind="IsEn"
+                                   @bind:after="OnLangToggled" />
+                        </div>
+
+                        <span class="badge text-bg-light border">@T("EN")</span>
+
+                        <span class="ms-2 small text-muted">@UiState.Lang</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Change password -->
+        <div class="col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="fw-semibold mb-2">@T("PwdTitle")</div>
+                    <div class="text-muted small mb-3">@T("PwdDesc")</div>
+
+                    @if (!string.IsNullOrWhiteSpace(msg))
+                    {
+                        <div class="alert @msgClass py-2 mb-3">@msg</div>
+                    }
+
+                    <div class="mb-2">
+                        <label class="form-label">@T("CurrentPwd")</label>
+                        <input class="form-control"
+                               type="password"
+                               @bind="CurrentPassword" />
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label">@T("NewPwd")</label>
+                        <input class="form-control"
+                               type="password"
+                               @bind="NewPassword" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">@T("ConfirmPwd")</label>
+                        <input class="form-control"
+                               type="password"
+                               @bind="ConfirmPassword" />
+                    </div>
+
+                    <button class="btn btn-primary"
+                            disabled="@busy"
+                            @onclick="ChangePassword">
+                        @if (busy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        @T("SavePwd")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool IsEn;
+
+    private string CurrentPassword = "";
+    private string NewPassword = "";
+    private string ConfirmPassword = "";
+
+    private bool busy;
+    private string? msg;
+    private string msgClass = "alert-info";
+
+    private static readonly Dictionary<string, Dictionary<string, string>> Text = new()
+    {
+        ["en"] = new()
+        {
+            ["Title"] = "Settings",
+            ["LangTitle"] = "Language",
+            ["LangDesc"] = "Choose your display language.",
+            ["TH"] = "TH",
+            ["EN"] = "EN",
+            ["PwdTitle"] = "Change password",
+            ["PwdDesc"] = "Set a new password for your account.",
+            ["CurrentPwd"] = "Current password",
+            ["NewPwd"] = "New password",
+            ["ConfirmPwd"] = "Confirm new password",
+            ["SavePwd"] = "Update password",
+            ["PwdMismatch"] = "New password and confirm password do not match.",
+            ["PwdEmpty"] = "Please fill all password fields.",
+            ["PwdOk"] = "Password updated successfully.",
+            ["PwdFail"] = "Cannot update password."
+        },
+        ["th"] = new()
+        {
+            ["Title"] = "ตั้งค่า",
+            ["LangTitle"] = "ภาษา",
+            ["LangDesc"] = "เลือกภาษาที่ใช้แสดงผล",
+            ["TH"] = "TH",
+            ["EN"] = "EN",
+            ["PwdTitle"] = "เปลี่ยนรหัสผ่าน",
+            ["PwdDesc"] = "ตั้งรหัสผ่านใหม่สำหรับบัญชีของคุณ",
+            ["CurrentPwd"] = "รหัสผ่านปัจจุบัน",
+            ["NewPwd"] = "รหัสผ่านใหม่",
+            ["ConfirmPwd"] = "ยืนยันรหัสผ่านใหม่",
+            ["SavePwd"] = "บันทึกรหัสผ่าน",
+            ["PwdMismatch"] = "รหัสผ่านใหม่และยืนยันรหัสผ่านไม่ตรงกัน",
+            ["PwdEmpty"] = "กรุณากรอกข้อมูลรหัสผ่านให้ครบ",
+            ["PwdOk"] = "เปลี่ยนรหัสผ่านเรียบร้อย",
+            ["PwdFail"] = "เปลี่ยนรหัสผ่านไม่สำเร็จ"
+        }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (string.IsNullOrEmpty(AuthState.Token))
+        {
+            Nav.NavigateTo("/");
+            return;
+        }
+
+        var role =
+            AuthState.User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
+            ?? AuthState.User?.FindFirst("role")?.Value;
+
+        if (!string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase))
+        {
+            Nav.NavigateTo("/sales-orders"); // หรือหน้าอื่นที่อยากให้กลับไป
+            return;
+        }
+
+        await UiState.InitAsync();
+        UiState.Changed += OnUiChanged;
+        IsEn = UiState.Lang == "en";
+    }
+
+
+    private void OnUiChanged()
+    {
+        IsEn = UiState.Lang == "en";
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        UiState.Changed -= OnUiChanged;
+    }
+
+    private string T(string key)
+    {
+        var lang = UiState.Lang ?? "en";
+        if (Text.TryGetValue(lang, out var dict) && dict.TryGetValue(key, out var value))
+        {
+            return value;
+        }
+        return key;
+    }
+
+    private async Task OnLangToggled()
+    {
+        await UiState.SetLangAsync(IsEn ? "en" : "th");
+        msg = null;
+    }
+
+    private async Task ChangePassword()
+    {
+        msg = null;
+
+        if (string.IsNullOrWhiteSpace(CurrentPassword) ||
+            string.IsNullOrWhiteSpace(NewPassword) ||
+            string.IsNullOrWhiteSpace(ConfirmPassword))
+        {
+            msg = T("PwdEmpty");
+            msgClass = "alert-warning";
+            return;
+        }
+
+        if (NewPassword != ConfirmPassword)
+        {
+            msg = T("PwdMismatch");
+            msgClass = "alert-warning";
+            return;
+        }
+
+        try
+        {
+            busy = true;
+
+            
+            var (ok, err) = await AccountService.ChangePasswordAsync(new ChangePasswordRequest
+            {
+                CurrentPassword = CurrentPassword,
+                NewPassword = NewPassword
+            });
+
+            if (ok)
+            {
+                msg = T("PwdOk");
+                msgClass = "alert-success";
+                CurrentPassword = "";
+                NewPassword = "";
+                ConfirmPassword = "";
+            }
+            else
+            {
+                msg = err ?? T("PwdFail");   // จะเห็นสาเหตุจริง เช่น 401/500
+                msgClass = "alert-danger";
+            }
+
+        }
+        catch
+        {
+            msg = T("PwdFail");
+            msgClass = "alert-danger";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

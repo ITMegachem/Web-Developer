@@ -1,0 +1,420 @@
+﻿
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Sarabun:wght@400;700&display=swap');
+.so-page-wrapper {
+    font-family: 'Inter', 'Sarabun', sans-serif;
+    background-color: white;
+    padding: clamp(1rem, 3vw, 2.5rem);
+    font-size: 85%;
+}
+
+.page-title {
+    font-weight: 800;
+    color: #1a202c;
+    letter-spacing: -0.02em;
+}
+
+.date-badge {
+    background: white;
+    padding: 6px 16px;
+    border-radius: 50px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #718096;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
+
+/* --- Filter Card (มนและแนว) --- */
+.filter-card-modern {
+    background: #e8f5e9 !important; /* เขียวพาสเทลแบบที่ต้องการ */
+    border-radius: 30px !important;
+    padding: 2rem !important;
+    border: none !important;
+}
+
+.modern-label {
+    font-size: 0.75rem !important;
+    font-weight: 700 !important;
+    color: #2d3748 !important;
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.modern-input {
+    border-radius: 15px !important;
+    border: 1px solid white !important;
+    padding: 10px 15px !important;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+}
+
+.btn-search-pill {
+    background: #4caf50 !important;
+    color: white !important;
+    border-radius: 50px !important;
+    font-weight: 700 !important;
+    height: 46px;
+    transition: all 0.3s ease;
+}
+
+/* --- Table (มนพิเศษ) --- */
+.table-card-container {
+    background: white !important;
+    border-radius: 35px !important;
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.04);
+    border: 1px solid #edf2f7;
+
+
+}
+/* ทำให้ thead เต็มแนว */
+.modern-table thead {
+    width: 100%;
+}
+.modern-table thead th {
+    background: #f8fafc !important;
+    color: #a0aec0 !important;
+    font-size: 0.7rem !important;
+    text-transform: uppercase;
+    padding: 1.25rem !important;
+    border: none !important;
+    width: auto;
+}
+
+.numeric-green {
+    color: #1b5e20 !important;
+    font-weight: 800 !important;
+    font-size: 0.90rem !important;
+}
+
+.info-stack {
+    white-space: normal !important;
+    line-height: 1.4;
+}
+
+.badge-pill-material {
+    background: #f1f5f9;
+    color: #4a5568;
+    padding: 4px 12px;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 0.75rem;
+}
+
+/* --- Footer & Buttons --- */
+.table-footer-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem 2rem;
+    background: #fafbfc;
+}
+
+.pill-nav-btn {
+    border: none;
+    background: white;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    color: #4a5568;
+}
+
+.btn-export-pill {
+    background: white !important;
+    color: #2e7d32 !important;
+    border: 2.5px solid #2e7d32 !important;
+    border-radius: 50px !important;
+    padding: 12px 35px !important;
+    font-weight: 800 !important;
+    transition: all 0.3s;
+}
+
+    .btn-export-pill:hover {
+        background: #2e7d32 !important;
+        color: white !important;
+        transform: translateY(-3px);
+    }
+/* ส่วนควบคุมการเปลี่ยนหน้า (Pagination) */
+.modern-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.25rem 2rem;
+    background: #fcfdfe;
+    border-top: 1px solid #f1f5f9;
+}
+
+.page-controls {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem; /* เว้นระยะห่างให้ดูโปร่ง */
+}
+
+/* ปุ่ม < และ > ให้ชัดและหมน */
+.pill-nav-btn {
+    border: 2px solid #2e7d32; /* ขอบสีเขียวเข้มชัดเจน */
+    background: white;
+    width: 45px;
+    height: 45px;
+    border-radius: 50%; /* กลมมนสวย */
+    color: #2e7d32;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem; /* ขนาดลูกศรใหญ่ขึ้น */
+    font-weight: bold;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 10px rgba(46, 125, 50, 0.1);
+    cursor: pointer;
+}
+
+    .pill-nav-btn:hover:not(:disabled) {
+        background-color: #2e7d32;
+        color: white;
+        transform: scale(1.1);
+        box-shadow: 0 6px 15px rgba(46, 125, 50, 0.2);
+    }
+
+    .pill-nav-btn:disabled {
+        border-color: #e2e8f0;
+        color: #cbd5e1;
+        cursor: not-allowed;
+        box-shadow: none;
+    }
+
+/* ตัวเลขแสดงเลขหน้า */
+.page-display {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #475569;
+    background: #f1f5f9;
+    padding: 8px 20px;
+    border-radius: 50px; /* มนแนวๆ กึ่งแคปซูล */
+}
+
+.current-page {
+    color: #1b5e20; /* สีเขียวเข้ม */
+    font-weight: 800;
+    font-size: 1.1rem;
+}
+
+.table-container-modern {
+    background: white !important;
+    border-radius: 35px !important;
+    /* บังคับความสูงขั้นต่ำให้ดูไม่โล่ง (ปรับตัวเลขตามความชอบ) */
+    min-height: 650px !important;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between; /* ดัน Pagination ไปล่างสุดเสมอ */
+    border: 1px solid #edf2f7;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.04);
+    overflow: hidden;
+}
+
+/* 2. บังคับให้ช่องตารางมีความกว้างคงที่ (ป้องกันตัวหนังสือยาวแล้วดันตารางขยับ) */
+.modern-table {
+    table-layout: auto; /* บังคับความกว้างคอลัมน์ */
+    width: 100% !important;
+    min-width: 100% !important;
+    border-collapse: collapse;
+}
+
+/* 3. จัดการ Loading ให้คงที่ */
+.position-relative {
+    position: relative;
+}
+
+.table-loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.6); /* พื้นหลังโปร่งแสง */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    backdrop-filter: blur(2px); /* เพิ่มความนวลแบบสมัยใหม่ */
+    border-radius: 30px;
+
+}
+
+/* ปรับแต่งแถวตารางให้สูงขึ้นเล็กน้อย (ช่วยให้ดูไม่แน่นและพื้นที่เต็มพอดี) */
+.modern-table tbody td {
+    border: none !important;
+}
+
+.modern-table tbody tr {
+    border-bottom: 1px solid #e5e7eb; /* เส้นเต็มแนว */
+}
+
+    .modern-table tbody tr:hover {
+        background-color: #f8fafc; /* ไฮไลท์แถวเวลาเอาเมาส์วาง */
+    }
+
+/* ปรับช่องว่างใน Filter ให้กว้างขึ้นเล็กน้อย */
+.filter-card-green {
+    padding: 35px !important; /* เพิ่ม Padding ให้ดูแนวๆ แบบมี Space */
+}
+
+/* กรอบวันที่ให้มนและดูสะอาด */
+    .date-input-wrapper {
+        position: relative;
+        display: flex;
+        align-items: center;
+    }
+
+    .modern-input-large[type="date"] {
+        border-radius: 18px !important; /* มนพิเศษแบบภาพซ้าย */
+        height: 55px !important;
+        font-size: 1.2rem !important; /* ตัวหนังสือวันที่ใหญ่ชัดเจน */
+        font-weight: 700 !important;
+        color: #2e7d32 !important; /* สีเขียวเข้มให้เข้ากับธีม */
+        padding: 10px 20px !important;
+        border: 1px solid #ffffff !important;
+        background-color: #ffffff !important;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.03) !important;
+        cursor: pointer;
+        font-family: 'Inter', sans-serif;
+    }
+/* ปรับขนาดวันที่ในตารางให้ใหญ่และชัดเจน */
+.date-display-large {
+    font-size: 1rem !important; /* ขนาดใหญ่ขึ้นกว่าเดิม */
+    color: #4a5568 !important; /* สีเทาเข้ม (อ่านง่ายกว่า text-muted) */
+    letter-spacing: 0.5px; /* เว้นวรรคตัวเลขเล็กน้อยให้ดูแนวๆ */
+    //vertical-align: middle;
+}
+
+/* ถ้าอยากให้วันที่เป็นสีเดียวกับตัวเลขเขียวเข้มเพื่อให้คุมโทน */
+/* .date-display-large { color: #1b5e20 !important; } */
+   /* ปรับปรุงหัวตารางให้ใหญ่และหนา (แนว Modern) */
+    .modern-header-large th {
+        background-color: #f8fafc !important; /* พื้นหลังสีเทาอ่อนสะอาดๆ */
+        color: #64748b !important;            /* สีเทา Slate ดูแพง */
+        font-size: 1rem !important;            /* ขยายขนาดตัวหนังสือหัวข้อ */
+        font-weight: 800 !important;           /* หนาพิเศษให้ดูแนว */
+        text-transform: uppercase;             /* ตัวพิมพ์ใหญ่ทั้งหมด (ถ้าเป็นภาษาอังกฤษ) */
+        letter-spacing: 0.05em;                /* เว้นระยะห่างตัวอักษรเล็กน้อย */
+        padding: 1.5rem 1rem !important;       /* เพิ่มช่องว่างให้ดูโปร่ง */
+        border: none !important;
+        vertical-align: middle;
+    }
+
+    /* เพิ่มความมนให้กับมุมบนของตาราง (ถ้า table-container-modern มี overflow: hidden) */
+    .table-card-container {
+        border-radius: 35px !important;
+        overflow: hidden;
+        border: 1px solid #edf2f7;
+    }
+
+    /* เส้นแบ่งระหว่างหัวข้อ (ถ้าต้องการให้ดูมีระเบียบ) */
+    .modern-header-large th:not(:last-child) {
+        border-right: 1px solid #f1f5f9 !important;
+    }
+
+/* ===== Column Width Control ===== */
+
+.numeric-cell {
+    text-align: right;
+    font-weight: 700;
+}
+
+.numeric-green {
+    color: #1b5e20;
+    font-weight: 800;
+}
+
+.modern-table tbody tr:nth-child(even) {
+    background-color: #fcfdfd;
+}
+
+
+.table-card-container table {
+    width: 100% !important;
+    border-collapse: collapse;
+}
+.modern-table th,
+.modern-table td {
+    vertical-align: middle;
+}
+.table-header-modern th {
+    font-size: 85%;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    color: #6c7a89;
+    background-color: #f3f6f4;
+    vertical-align: middle;
+    white-space: normal;
+    padding: 12px 8px;
+}
+.fixed-table th,
+.fixed-table td {
+    vertical-align: middle !important;
+}
+
+.fixed-table td {
+    padding: 12px 10px;
+}
+
+.fixed-table th {
+    white-space: nowrap;
+}
+
+.fixed-table td:nth-child(7),
+.fixed-table td:nth-child(9) {
+    min-width: 180px;
+}
+
+.fixed-table td:nth-child(10) {
+    min-width: 120px;
+}
+.fixed-table td:first-child {
+    white-space: nowrap;
+}
+.autocomplete-wrapper {
+    position: relative;
+}
+.autocomplete-dropdown-card {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    width: 100%;
+    background: white;
+    border-radius: 14px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.12);
+    max-height: 260px;
+    overflow-y: auto;
+    z-index: 9999;
+    padding: 6px 0;
+}
+
+/* row */
+.autocomplete-row {
+    padding: 12px 18px; /* เพิ่ม padding ซ้ายขวา */
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    transition: background 0.15s ease;
+}
+
+    /* hover */
+    .autocomplete-row:hover {
+        background: #f8fafc;
+    }
+
+    /* code */
+    .autocomplete-row .code {
+        font-weight: 700;
+        font-size: 14px;
+        color: #111827;
+    }
+
+    /* name */
+    .autocomplete-row .name {
+        font-size: 13px;
+        color: #6b7280;
+        line-height: 1.3;
+    }

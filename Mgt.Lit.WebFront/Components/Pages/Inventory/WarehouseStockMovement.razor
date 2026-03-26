@@ -1,0 +1,472 @@
+﻿@namespace Mgt.Lit.WebFront.Pages
+@page "/warehouse-stock-movement"
+@* --- 1. แก้ Error: เพิ่ม Path ของ Layout (ปรับตามโฟลเดอร์จริงของคุณ) --- *@
+@using ClosedXML.Excel
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@using Mgt.Lit.WebFront.Models.SalesOrder
+@using Mgt.Lit.WebFront.Services
+@using Mgt.Lit.WebFront.Services.Member
+@using Mgt.Lit.WebFront.Services.SalesOrder
+@inject StockService StockService
+@layout AppLayout
+@rendermode InteractiveServer
+@inject IHttpClientFactory HttpFactory
+@inject PageContext PageContext
+@inject IJSRuntime JS
+ 
+<div class="so-page-wrapper">
+    @* --- Header Section (ชื่อหน้าและวันที่ขวาสุด) --- *@
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-2">
+        <h2 class="page-title">Management - Warehouse Stock Movement</h2>
+        <div class="date-badge">@DateTime.Now.ToString("dd MMM yyyy")</div>
+    </div>
+
+    @* --- ส่วน Filter (UI เขียวพาสเทล ขอบมน) --- *@
+    <div class="filter-card-modern shadow-sm mb-4">
+        <div class="row g-3 align-items-end">
+            <div class="col-12 col-md-4">
+                <label class="modern-label">Plant</label>
+                <select class="form-select modern-input" @bind="selectedPlant">
+
+                    @foreach (var p in plants)
+                    {
+                        <option value="@p.PlantCode">
+                            @p.PlantCode - @p.PlantName
+                        </option>
+                    }
+                </select>
+            </div>
+            <div class="col-12 col-md-4">
+                <label class="modern-label">Material</label>
+
+                <div class="autocomplete-wrapper">
+
+                    <input class="form-control modern-input"
+                           value="@materialSearch"
+                           @oninput="OnMaterialSearch"
+                           @onfocus="() => showMaterialDropdown = true"
+                           placeholder="Choose Material..." />
+
+                    @if (materialResults.Any() && showMaterialDropdown)
+                    {
+                        <div class="autocomplete-dropdown-card">
+                            @foreach (var item in materialResults)
+                            {
+                                <div class="autocomplete-row"
+                                     @onclick="() => SelectMaterial(item)">
+
+                                    <div class="code">@item.Code</div>
+                                    <div class="name">@item.Name</div>
+
+                                </div>
+                            }
+                        </div>
+                    }
+
+                </div>
+            </div>
+            <div class="col-12 col-md-4 col-lg-2 ms-auto">
+                <button class="btn btn-search-pill w-100"
+                        disabled="@string.IsNullOrWhiteSpace(materialSearch)"
+                        @onclick="OnSearch">
+
+                    @if (isLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm"></span>
+                    }
+                    else
+                    {
+                        <span><i class="bi bi-search me-1"></i> Run</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @* --- ส่วนตารางข้อมูล (สไตล์เดียวกับ Sales Orders) --- *@
+    <div class="table-card-container shadow-sm">
+        <div class="table-responsive flex-grow-1">
+            <table class="table modern-table mb-0 fixed-table">
+                <thead class="table-light">
+                    <tr class="table-header-modern">
+                        <th class="text-center">Date</th>
+                        <th class="text-center">MRP<br />Element Type</th>
+                        <th class="text-center">MRP<br />Element Data</th>
+                        <th class="text-center">Receipt /<br />Reqmt</th>
+                        <th class="text-center">Available<br />Qty</th>
+                        <th class="text-center">Additional<br />Info IN</th>
+                        <th class="text-center">Vendor Code /<br />Vendor Name</th>
+                        <th class="text-center">Additional<br />Info Out</th>
+                        <th class="text-center">Customer Code /<br />Customer Name</th>
+                        <th class="text-center">Material<br />Group</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (!hasSearched)
+                    {
+                        <tr>
+                            <td colspan="9" class="text-center text-muted py-4" ">
+                                <p style="font-size : 100% !important;">กรุณากรอกข้อมูลและค้นหา</p>
+                            </td>
+                        </tr>
+                    }
+                    else if (stockData?.Detail != null && stockData.Detail.Any())
+                    {
+                        @foreach (var item in stockData.Detail)
+                        {
+                            <tr>
+                                <td class="text-center align-middle text-nowrap">
+                                    @item.DocumentDate.ToString("dd-MM-yyyy")
+                                </td>
+
+                                <td class="text-center align-middle">
+                                    @item.ElementType
+                                </td>
+
+                                <td class="text-center align-middle">
+                                    @item.RefDoc
+                                </td>
+
+                                <td class="text-center align-middle">
+                                    @item.ReceiptReqmtQty.ToString("N0")
+                                </td>
+
+                                <td class="text-center align-middle">
+                                    @item.AvailableQty.ToString("N0")
+                                </td>
+                                
+                                <td class="text-center align-middle"> 
+                                    @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoIn)) 
+                                    { 
+                                        var lines = item.AdditionalInfoIn.Split('\n'); 
+                                        foreach (var line in lines) 
+                                        {
+                                        <div>@line.Trim()</div>
+                                        }
+                                     }
+                                </td>
+
+                                <td class="align-middle">
+                                    <div class="fw-bold">@item.VendorCode</div>
+                                    <div class="text-muted small">@item.VendorName</div>
+                                </td>
+                                
+                              
+                                <td class="text-center align-middle">
+                                    @(string.IsNullOrWhiteSpace(item.AdditionalInfoIn)
+                                                                ? item.AdditionalInfoOut
+                                                                : "")
+                                </td>
+                                <td class="align-middle">
+                                    <div class="fw-bold">@item.CustomerCode</div>
+                                    <div class="text-muted small">@item.CustomerName</div>
+                                </td>
+
+                                <td class="align-middle text-center">
+                                    @if (!string.IsNullOrEmpty(item.MaterialGroup))
+                                    {
+                                        <div class="fw-bold">@item.MaterialGroup</div>
+                                        <div class="text-muted small">@item.MaterialGroupDescription</div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                    else if (!isLoading)
+                    {
+                        <tr>
+                            <td colspan="10" class="text-center text-muted py-4">
+                                No data found
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @* --- Pagination (ลูกศรหนาแบบในรูป) --- *@
+        @if (hasSearched && stockData?.Detail != null && stockData.Detail.Any())
+        {
+            <div class="table-footer-pagination">
+                <div class="text-muted small">
+                    Results: @stockData.Detail.Count items
+                </div>
+
+                <div class="pagination-controls d-flex align-items-center gap-3">
+                    <button class="pill-nav-btn">
+                        <i class="bi bi-chevron-left"></i>
+                    </button>
+
+                    <div class="page-indicator">
+                        <span class="fw-bold text-success">1</span> / 1
+                    </div>
+
+                    <button class="pill-nav-btn">
+                        <i class="bi bi-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+
+    @* --- ปุ่ม Export --- *@
+    <div class="d-flex justify-content-end mt-4 gap-3">
+
+        <button class="btn btn-export-pill shadow-sm"
+                disabled="@string.IsNullOrWhiteSpace(selectedMaterial)"
+                @onclick="ExportConsumption">
+
+            <i class="bi bi-graph-down me-2"></i> Export Consumption
+        </button>
+
+        <button class="btn btn-export-pill shadow-sm"
+                disabled="@(stockData?.Detail == null || !stockData.Detail.Any())"
+                @onclick="ExportData">
+
+            <i class="bi bi-file-earmark-excel-fill me-2"></i> Export as Excel
+        </button>
+
+    </div>
+</div>
+@code {
+    private IJSObjectReference? _jsModule;
+    private StockRequirementResponse stockData;
+    private string selectedPlant;
+    private string selectedMaterial;
+    private bool isLoading = false;
+    private string errorMessage;
+    private bool hasSearched = false;
+    private string materialSearch = "";
+    private bool showMaterialDropdown = false;
+    private List<MaterialLookup> materialResults = new();
+    private async Task OnMaterialSearch(ChangeEventArgs e)
+    {
+        materialSearch = e.Value?.ToString() ?? "";
+
+        if (string.IsNullOrWhiteSpace(materialSearch))
+        {
+            selectedMaterial = null;
+            materialResults.Clear();
+            showMaterialDropdown = false;
+            return;
+        }
+
+        if (materialSearch.Length < 2)
+        {
+            materialResults.Clear();
+            return;
+        }
+
+        materialResults = await StockService.SearchMaterialForStockMovement(materialSearch)
+            ?? new List<MaterialLookup>();
+
+        var exactMatch = materialResults
+            .FirstOrDefault(x => x.Code.Equals(materialSearch, StringComparison.OrdinalIgnoreCase));
+
+        selectedMaterial = exactMatch?.Code ?? materialSearch;
+        showMaterialDropdown = true;
+    }
+    private void SelectMaterial(MaterialLookup item)
+    {
+        selectedMaterial = item.Code;
+
+        // ✔️ แสดงเฉยๆ แต่ไม่ทำให้ search พัง
+        materialSearch = item.Code;
+
+        materialResults.Clear();
+        showMaterialDropdown = false;
+    }
+    protected override  Task OnInitializedAsync()
+    {
+        PageContext.Menu = "Sales";
+        PageContext.Page = "Stock Movement";
+        selectedPlant = plants.First().PlantCode;
+        selectedMaterial = "";
+
+        return Task.CompletedTask;
+
+       
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+        }
+    }
+    private async Task LoadData()
+    {
+        Console.WriteLine("LoadData Called");
+
+        try
+        {
+            isLoading = true;
+
+            stockData = await StockService
+                .GetStockRequirement(selectedPlant, selectedMaterial);
+
+            Console.WriteLine("stockData null? " + (stockData == null));
+            Console.WriteLine("Detail count: " + stockData?.Detail?.Count);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("ERROR: " + ex.Message);
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+    
+    private List<PlantDto> plants = new()
+{
+    new() { PlantCode = "1100", PlantName = "Megachem (Thailand) PCL" },
+    new() { PlantCode = "1900", PlantName = "MGT Riteoff Plant" },
+    new() { PlantCode = "2100", PlantName = "Green Leaf Chemical" }
+};
+    private async Task OnSearch()
+    {
+        hasSearched = true;
+
+        var input = materialSearch?.Trim();
+
+        if (string.IsNullOrWhiteSpace(input))
+            return;
+
+        // ✔️ ใช้ค่าที่ user พิมพ์ตรงๆ
+        selectedMaterial = input;
+
+        await LoadData();
+    }
+    private async Task ExportData()
+    {
+        if (stockData?.Detail == null || !stockData.Detail.Any())
+            return;
+
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("StockMovement");
+        var headerRow = ws.Row(1);
+        headerRow.Style.Font.Bold = true;
+        headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+        string[] headers =
+            {
+                "Date",
+                "MRP Element Type",
+                "MRP Element Data",
+                "Receipt/Reqmt",
+                "Available Qty",
+                "Additional Info In",
+                "Vendor Code",
+                "Vendor Name",
+                "Additional Info Out",
+                "Customer Code",
+                "Customer Name",
+                "Material Group",
+                "Material Group Description"
+            };
+
+        for (int i = 0; i < headers.Length; i++)
+            ws.Cell(1, i + 1).Value = headers[i];
+
+        int row = 2;
+
+        foreach (var item in stockData.Detail)
+        {
+            ws.Cell(row, 1).Value = item.DocumentDate.ToString("dd/MM/yyyy");
+            ws.Cell(row, 2).Value = item.ElementType;
+            ws.Cell(row, 3).Value = item.RefDoc;
+            ws.Cell(row, 4).Value = item.ReceiptReqmtQty;
+            ws.Cell(row, 5).Value = item.AvailableQty;
+
+            // เหมือน UI
+            ws.Cell(row, 6).Value = item.AdditionalInfoIn;
+            ws.Cell(row, 7).Value = item.VendorCode;
+            ws.Cell(row, 8).Value = item.VendorName;
+            
+            ws.Cell(row, 9).Value =
+                string.IsNullOrWhiteSpace(item.AdditionalInfoIn)
+                ? item.AdditionalInfoOut
+                : "";
+            ws.Cell(row, 10).Value = item.CustomerCode;
+            ws.Cell(row, 11).Value = item.CustomerName;
+            ws.Cell(row, 12).Value = item.MaterialGroup;
+            ws.Cell(row, 13).Value = item.MaterialGroupDescription;
+
+            row++;
+        }
+
+        ws.Columns().AdjustToContents();
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        var base64 = Convert.ToBase64String(ms.ToArray());
+
+        if (_jsModule != null)
+        {
+            await _jsModule.InvokeVoidAsync(
+                "downloadFileFromBytes",
+                $"StockMovement_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                base64);
+        }
+    }
+    private async Task ExportConsumption()
+    {
+        if (string.IsNullOrWhiteSpace(selectedMaterial))
+            return;
+
+        var data = await StockService.GetMaterialConsumption(selectedMaterial);
+
+        if (data == null || !data.Any())
+            return;
+
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Consumption");
+
+        string[] headers =
+        {
+        "Year","Jan","Feb","Mar","Apr","May","Jun",
+        "Jul","Aug","Sep","Oct","Nov","Dec","Total"
+    };
+
+        for (int i = 0; i < headers.Length; i++)
+            ws.Cell(1, i + 1).Value = headers[i];
+
+        ws.Row(1).Style.Font.Bold = true;
+
+        int row = 2;
+
+        foreach (var item in data)
+        {
+            ws.Cell(row, 1).Value = item.Year;
+            ws.Cell(row, 2).Value = item.January;
+            ws.Cell(row, 3).Value = item.February;
+            ws.Cell(row, 4).Value = item.March;
+            ws.Cell(row, 5).Value = item.April;
+            ws.Cell(row, 6).Value = item.May;
+            ws.Cell(row, 7).Value = item.June;
+            ws.Cell(row, 8).Value = item.July;
+            ws.Cell(row, 9).Value = item.August;
+            ws.Cell(row, 10).Value = item.September;
+            ws.Cell(row, 11).Value = item.October;
+            ws.Cell(row, 12).Value = item.November;
+            ws.Cell(row, 13).Value = item.December;
+            ws.Cell(row, 14).Value = item.Total;
+            row++;
+        }
+
+        ws.Columns().AdjustToContents();
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+
+        var base64 = Convert.ToBase64String(ms.ToArray());
+
+        await _jsModule.InvokeVoidAsync(
+            "downloadFileFromBytes",
+            $"MaterialConsumption_{selectedMaterial}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            base64);
+    }
+}

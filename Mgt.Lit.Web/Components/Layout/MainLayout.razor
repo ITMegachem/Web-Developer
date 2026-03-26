@@ -1,0 +1,26 @@
+﻿
+@inherits LayoutComponentBase
+
+<div class="container-fluid">
+    <div class="row">
+
+        <nav class="col-2 bg-dark min-vh-100 text-white p-3">
+            <NavMenu />
+        </nav>
+
+        <main class="col-10">
+            <div class="border-bottom mb-3 p-2 text-end">
+                <a href="https://learn.microsoft.com/aspnet/core/"
+                   target="_blank"
+                   class="text-decoration-none">
+                    About
+                </a>
+            </div>
+
+            <article class="px-3">
+                @Body
+            </article>
+        </main>
+
+    </div>
+</div>

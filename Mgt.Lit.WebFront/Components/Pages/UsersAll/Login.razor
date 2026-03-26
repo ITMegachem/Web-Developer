@@ -1,0 +1,168 @@
+﻿@page "/"
+@* ใช้ Layout เป็น LoginLayout เฉพาะตอนยังไม่ได้ Login *@
+@layout LoginLayout
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/siteLogin.css" />
+
+@inject AuthService Auth
+@using Mgt.Lit.WebFront.Components.Layout.Data
+@using Mgt.Lit.WebFront.Services
+@using Mgt.Lit.WebFront.Services.Member
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@using Microsoft.JSInterop
+@using System.Security.Claims
+@using System.IdentityModel.Tokens.Jwt
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+@if (!_isInitialized)
+{
+    <div class="d-flex justify-content-center align-items-center" style="height: 100vh; background: #f8f9fa;">
+        <div class="spinner-border text-success" role="status"></div>
+    </div>
+}
+else
+{
+    <div class="login-bg">
+        <div class="login-card">
+            <div class="login-card-inner">
+                <div class="login-left">
+                    <div class="logo-stack">
+                        <img src="images/MGT-Logo-jpg.jpg" class="mgt-logo" alt="MGT Logo">
+                    </div>
+                </div>
+
+                <div class="login-right">
+                    <img src="images/one-report.png" class="one-report-logo" alt="OneReport Logo">
+                    <div class="login-title">Welcome Back!</div>
+
+                    @if (showAlert)
+                    {
+                        <div class="alert alert-@(alertType) alert-dismissible fade show text-start" role="alert">
+                            <i class="bi bi-exclamation-triangle-fill me-2"></i> @alertMessage
+                            <button type="button" class="btn-close" @onclick="() => showAlert = false"></button>
+                        </div>
+                    }
+
+                    <div class="text-start">
+                        <label class="form-label">Username</label>
+                        <input class="form-control mb-3" placeholder="Enter username" @bind="username" />
+
+                        <label class="form-label">Password</label>
+                        <input class="form-control mb-3" type="password" placeholder="Enter password" @bind="password" @onkeyup="HandleKeyUp" />
+                    </div>
+
+                    <div class="d-grid mt-3">
+                        <button class="btn btn-login" @onclick="DoLogin" disabled="@isLoading">
+                            @if (isLoading)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                                <span>Logging in...</span>
+                            }
+                            else
+                            {
+                                <span>Login</span>
+                            }
+                        </button>
+                    </div>
+
+                    <div class="forgot-password mt-3 text-center">
+                        <a href="#">Forgotten password?</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    string username = "";
+    string password = "";
+    bool isLoading = false;
+    bool showAlert = false;
+    string alertType = "success";
+    string alertMessage = "";
+    bool _isInitialized = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        await AuthState.InitializeAsync();
+        _isInitialized = true;
+        StateHasChanged();
+
+        if (!string.IsNullOrEmpty(AuthState.Token))
+        {
+            Nav.NavigateTo("/Main", forceLoad: true);
+        }
+    }
+
+    private async Task HandleKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await DoLogin();
+    }
+
+    async Task DoLogin()
+    {
+        try
+        {
+            showAlert = false;
+            isLoading = true;
+
+            var result = await Auth.LoginAsync(new()
+            {
+                Username = username,
+                Password = password
+            });
+
+            if (result == null)
+            {
+                alertType = "danger";
+                alertMessage = "Username หรือ Password ไม่ถูกต้อง";
+                showAlert = true;
+                return;
+            }
+
+            var handler = new JwtSecurityTokenHandler();
+            var jwt = handler.ReadJwtToken(result.Token);
+            var claims = jwt.Claims.ToList();
+
+            claims.Add(new Claim("FullName", result.FullName ?? ""));
+            claims.Add(new Claim("CompanyID", result.PrimaryCompanyID?.ToString() ?? "0"));
+            claims.Add(new Claim("CompanyCode", result.PrimaryCompanyCode ?? ""));
+
+            foreach (var c in result.Companies)
+            {
+                claims.Add(new Claim("Company", c.CompanyCode));
+                claims.Add(new Claim("CompanyIDAllowed", c.CompanyID.ToString()));
+            }
+
+            if (result.Permission is not null)
+            {
+                claims.Add(new Claim("RoleKey", result.Permission.RoleKey ?? ""));
+                claims.Add(new Claim("Tier", result.Permission.Tier ?? ""));
+                claims.Add(new Claim("Page1Access", result.Permission.Page1Access.ToString()));
+                claims.Add(new Claim("Page2Access", result.Permission.Page2Access.ToString()));
+                claims.Add(new Claim("Page3Access", result.Permission.Page3Access.ToString()));
+                claims.Add(new Claim("DataScope", result.Permission.DataScope ?? ""));
+                claims.Add(new Claim("CanViewVendor", result.Permission.CanViewVendor.ToString()));
+                claims.Add(new Claim("CanViewCost", result.Permission.CanViewCost.ToString()));
+            }
+
+            AuthState.Token = result.Token;
+            AuthState.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "jwt"));
+
+            Nav.NavigateTo("/Main", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            alertType = "danger";
+            alertMessage = ex.Message;
+            showAlert = true;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Mgt.Lit.Core/Mgt.Lit.Core.csproj" />
+  <Project Path="Mgt.Lit.WebApi/Mgt.Lit.WebApi.csproj" />
+  <Project Path="Mgt.Lit.WebFront/Mgt.Lit.WebFront.csproj" Id="32da24bb-91c7-4b55-91d5-80ba7effcd17" />
+</Solution>

@@ -1,0 +1,821 @@
+﻿@namespace Mgt.Lit.WebFront.Pages
+@page "/warehouse-stock-material"
+@layout AppLayout
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+@using ClosedXML.Excel
+@using Mgt.Lit.Core.Entities
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@using Mgt.Lit.WebFront.Models.SalesOrder
+@using Mgt.Lit.WebFront.Services.Member
+@using Mgt.Lit.WebFront.Services.Models
+@using Mgt.Lit.WebFront.Services.SalesOrder
+@inject StockService stockService
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject NavigationManager Nav
+@inject Mgt.Lit.WebFront.Services.UiState UiState
+@inject IHttpClientFactory HttpFactory
+@inject PageContext PageContext
+
+
+<div class="so-page-wrapper">
+
+    <!-- HEADER -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-2">
+        <h2 class="page-title">@T("Title")</h2>
+        <div class="date-badge">@DateTime.Now.ToString("dd MMM yyyy")</div>
+    </div>
+
+    <!-- FILTER CARD -->
+    <div class="filter-card-modern shadow-sm mb-4">
+        <div class="row g-3 align-items-end">
+
+            <div class="col-6 col-md-4 col-lg-2">
+                <label class="modern-label">@T("Plant")</label>
+                <select class="form-select modern-input" @bind="filters.Plant" @bind:after="OnPlantChanged">
+                    <option value="">@T("ChoosePlant")</option>
+                    @foreach (var p in plants)
+                    {
+                        <option value="@p.PlantCode">
+                            @p.PlantCode - @p.PlantName
+                        </option>
+                    }
+                </select>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <label class="modern-label">@T("Material Group")</label>
+                <input class="form-control modern-input"
+                       list="materialGroupList"
+                       @bind="filters.MaterialGroup"
+                       placeholder="@T("ChooseMaterialGroup")" />
+
+                <datalist id="materialGroupList">
+                    @foreach (var g in filteredMaterialGroups)
+                    {
+                        <option value="@g.Name">@g.Code - @g.Name</option>
+                    }
+                </datalist>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <div class="d-flex align-items-center justify-content-between">
+                    <label class="modern-label mb-0">@T("Material")</label>
+
+                    @if (!string.IsNullOrEmpty(materialError))
+                    {
+                        <span class="text-danger small">
+                            @materialError
+                        </span>
+                    }
+                </div>
+                <div class="autocomplete-wrapper">
+
+                    <input class="form-control modern-input"
+                           value="@materialSearch"
+                           @oninput="OnMaterialSearch"
+                           @onfocus="OnMaterialFocus"
+                           placeholder="Choose Material" />
+
+                    @if (materialResults.Any() && showMaterialDropdown)
+                    {
+                        <div class="autocomplete-dropdown-card">
+                            @foreach (var item in materialResults)
+                            {
+                                <div class="autocomplete-row"
+                                     @onclick="() => SelectMaterial(item)">
+                                    <div class="code">@item.Code</div>
+                                    <div class="name">@item.Name</div>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <label class="modern-label">@T("Batch")</label>
+                <input class="form-control modern-input"
+                       @bind="filters.Batch"
+                       placeholder="@T("ChooseBatch")" />
+            </div>
+
+            <div class="col-12 col-lg-2">
+                <button class="btn btn-search-pill w-100"
+                        disabled="@isLoading"
+                        @onclick="RunSearch">
+                    @if (isLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm"></span>
+                    }
+                    else
+                    {
+                        <span><i class="bi bi-search me-1"></i> @T("Run")</span>
+                    }
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- TABLE CARD -->
+    <div class="table-card-container shadow-sm">
+        <div class="table-responsive flex-grow-1">
+            <table class="table modern-table mb-0">
+                <thead>
+                    <tr>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" >@T("MaterialCode")</th>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" >@T("MaterialDescription")</th>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("BatchNo")</th>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("Unresticted Stock")</th>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Block Stock</th>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Quality Inspection</th>
+                        
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("Unit")</th>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("EXPDate")</th>
+                        @if (!HideCostColumns)
+        {
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Packet/Price</th>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Cost / KG</th>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("TotalValue")</th>
+        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (pagedItems.Any())
+                    {
+                        @foreach (var r in pagedItems)
+                        {
+                            <tr>
+                                <td class="numeric-green">@r.MaterialCode</td>
+                                <td>@r.MaterialDescription</td>
+                                <td class="text-center">@r.BatchNo</td>
+                                <td class="text-center">@r.Unrestricted_Stock.ToString("N0")</td>
+                                <td class="text-center">@r.Blocked_Stock</td>
+                                <td class="text-center">@r.Stock_in_QI</td>
+                                <td class="text-center">@r.Unit</td>
+                                <td class="text-center">@r.ExpDate?.ToString("dd/MM/yyyy")</td>
+                                @if (!HideCostColumns)
+                                {
+                                    <td class="text-center">@r.CostPerKg.ToString("N2")</td>
+                                    <td class="text-center fw-bold">@r.UnitKg.ToString("N2")</td>
+                                    <td class="text-center">
+                                        @(r.TotalValue > 0 ? r.TotalValue.ToString("N2") : "")
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    }
+                    else if (!isLoading)
+                    {
+                        <tr>
+                            <td colspan="11" class="text-center py-5">
+                                @T("NoData")
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <!-- PAGINATION -->
+        <div class="table-footer-pagination">
+            <div class="text-muted small">
+                Page @filters.Page of @totalPages
+            </div>
+
+            <div class="pagination-controls d-flex align-items-center gap-3">
+                <button class="pill-nav-btn"
+                        disabled="@(filters.Page <= 1 || isLoading)"
+                        @onclick="PrevPage">
+                    <i class="bi bi-chevron-left"></i> 
+                   
+                </button>
+
+                <button class="pill-nav-btn"
+                        disabled="@(filters.Page >= totalPages || isLoading)"
+                        @onclick="NextPage">
+                    <i class="bi bi-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- EXPORT -->
+    <div class="d-flex justify-content-end mt-4">
+        <button class="btn btn-export-pill shadow-sm"
+                disabled="@(isLoading || !pagedItems.Any())"
+                @onclick="ExportData">
+            <i class="bi bi-file-earmark-excel-fill me-2"></i>
+            @T("ExportAs") Excel
+        </button>
+    </div>
+
+</div>
+
+@code {
+    private string materialSearch = string.Empty;
+    private bool showMaterialDropdown = false;
+    private List<MaterialLookup> materialResults = new();
+    private WarehouseStockFilter filters = new() { Page = 1, PageSize = 10 };
+    private List<WarehouseStockDto> pagedItems = new();
+    private string? materialError;
+
+    private readonly List<PlantDto> plants = new()
+    {
+        new() { PlantCode = "1100", PlantName = "Megachem (Thailand) PCL" },
+        new() { PlantCode = "1900", PlantName = "MGT Riteoff Plant" },
+        new() { PlantCode = "2100", PlantName = "Green Leaf Chemical" }
+    };
+
+    private List<WarehouseStockDto> allItems = new();
+    private List<MaterialGroupDto> filteredMaterialGroups = new();
+    private int totalItems;
+    private int totalPages = 1;
+
+    private bool isLoading;
+    private bool _isDisposed;
+    private IJSObjectReference? _jsModule;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _isDisposed)
+            return;
+
+        try
+        {
+            PageContext.Menu = "Sales";
+            PageContext.Page = "Stock Material";
+
+            await AuthState.InitializeAsync();
+
+            if (string.IsNullOrWhiteSpace(AuthState.Token))
+            {
+                Nav.NavigateTo("/", replace: true);
+                return;
+            }
+
+            await UiState.InitAsync();
+
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+            filteredMaterialGroups = materialGroups;
+
+            if (!_isDisposed)
+                await InvokeAsync(StateHasChanged);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    private void OnMaterialFocus()
+    {
+        showMaterialDropdown = true;
+    }
+
+    private async Task OnMaterialSearch(ChangeEventArgs e)
+    {
+        materialSearch = e.Value?.ToString() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(materialSearch))
+        {
+            filters.Material = null;
+            materialResults.Clear();
+            showMaterialDropdown = false;
+            return;
+        }
+
+        if (materialSearch.Length < 2)
+        {
+            materialResults.Clear();
+            showMaterialDropdown = false;
+            return;
+        }
+
+        try
+        {
+            var apiPlant = GetStockApiPlantCode(filters.Plant);
+
+            var result = await stockService.GetWarehouseStockCostByBatch(
+                apiPlant,
+                filters.MaterialGroup,
+                materialSearch,
+                null);
+
+            materialResults = result?.Items?
+                .Select(x => new MaterialLookup
+                {
+                    Code = x.MaterialCode,
+                    Name = x.MaterialDescription
+                })
+                .Where(x => !string.IsNullOrWhiteSpace(x.Code))
+                .DistinctBy(x => x.Code)
+                .Take(10)
+                .ToList() ?? new();
+
+            showMaterialDropdown = materialResults.Any();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Nav.NavigateTo("/", replace: true);
+        }
+        catch
+        {
+            materialResults.Clear();
+            showMaterialDropdown = false;
+        }
+    }
+
+    private async Task LoadDataAsync()
+    {
+        try
+        {
+            isLoading = true;
+
+            if (!_isDisposed)
+                await InvokeAsync(StateHasChanged);
+
+            var apiPlant = GetStockApiPlantCode(filters.Plant);
+            var apiMaterial = NormalizeMaterialForApi(filters.Material);
+
+            var result = await stockService.GetWarehouseStockCostByBatch(
+                apiPlant,
+                filters.MaterialGroup,
+                apiMaterial,
+                filters.Batch);
+
+            allItems = result?.Items?
+                .Where(x =>
+                    PlantMatches(x.Plant, filters.Plant) &&
+                    (string.IsNullOrEmpty(filters.MaterialGroup) ||
+                        (!string.IsNullOrEmpty(x.MaterialGroup) &&
+                         x.MaterialGroup.Contains(filters.MaterialGroup, StringComparison.OrdinalIgnoreCase))) &&
+                    (string.IsNullOrEmpty(apiMaterial) ||
+                        (!string.IsNullOrEmpty(x.MaterialCode) &&
+                         x.MaterialCode.Contains(apiMaterial, StringComparison.OrdinalIgnoreCase)) ||
+                        (!string.IsNullOrEmpty(x.MaterialDescription) &&
+                         x.MaterialDescription.Contains(apiMaterial, StringComparison.OrdinalIgnoreCase))) &&
+                    (string.IsNullOrEmpty(filters.Batch) ||
+                        (!string.IsNullOrEmpty(x.BatchNo) &&
+                         x.BatchNo.Replace(".", "")
+                            .Contains((filters.Batch ?? string.Empty).Replace(".", ""), StringComparison.OrdinalIgnoreCase))))
+                .Select(x => new WarehouseStockDto
+                {
+                    MaterialCode = x.MaterialCode,
+                    MaterialDescription = x.MaterialDescription,
+                    BatchNo = x.BatchNo,
+                    Unrestricted_Stock = x.Unrestricted_Stock,
+                    Blocked_Stock = x.Blocked_Stock ?? 0,
+                    Unit = x.Unit,
+                    ExpDate = x.ExpDate,
+                    TotalValue = x.TotalValue ?? 0,
+                    CostPerKg = x.costPerKg ?? 0,
+                    UnitKg = x.UnitKg ?? 0,
+                    Stock_in_QI = x.Stock_in_QI ?? 0
+                })
+                .ToList() ?? new();
+
+            totalItems = allItems.Count;
+            totalPages = Math.Max(1, (int)Math.Ceiling((double)totalItems / filters.PageSize));
+
+            if (filters.Page > totalPages)
+                filters.Page = totalPages;
+
+            ApplyPaging();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Nav.NavigateTo("/", replace: true);
+        }
+        finally
+        {
+            isLoading = false;
+
+            if (!_isDisposed)
+                await InvokeAsync(StateHasChanged);
+        }
+    }
+    private void SelectMaterial(MaterialLookup item)
+    {
+        filters.Material = item.Code;
+        materialSearch = $"{item.Code} {item.Name}";
+        materialResults.Clear();
+        showMaterialDropdown = false;
+        materialError = null;
+    }
+
+    private async Task RunSearch()
+    {
+        materialError = null;
+
+        var normalizedMaterial = NormalizeMaterialForApi(filters.Material);
+
+        if (string.IsNullOrWhiteSpace(normalizedMaterial))
+            normalizedMaterial = NormalizeMaterialForApi(materialSearch);
+
+        if (string.IsNullOrWhiteSpace(normalizedMaterial))
+        {
+            materialError = "Please enter Material";
+            return;
+        }
+
+        filters.Material = normalizedMaterial;
+        filters.Page = 1;
+
+        await LoadDataAsync();
+    }
+    private Task PrevPage()
+    {
+        if (filters.Page > 1)
+        {
+            filters.Page--;
+            ApplyPaging();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void ApplyPaging()
+    {
+        pagedItems = allItems
+            .Skip((filters.Page - 1) * filters.PageSize)
+            .Take(filters.PageSize)
+            .ToList();
+    }
+
+    private Task NextPage()
+    {
+        if (filters.Page < totalPages)
+        {
+            filters.Page++;
+            ApplyPaging();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ExportData()
+    {
+        if (!allItems.Any())
+            return;
+
+        try
+        {
+            isLoading = true;
+
+            if (!_isDisposed)
+                await InvokeAsync(StateHasChanged);
+
+            if (_jsModule == null)
+                _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("WarehouseStock");
+
+            var headers = new List<string>
+        {
+            "Material Code",
+            "Description",
+            "Batch No",
+            "Unrestricted Stock",
+            "Block Stock",
+            "Quality Inspection",
+            "Unit",
+            "EXP Date"
+        };
+
+            if (!HideCostColumns)
+            {
+                headers.Add("Packet/Price");
+                headers.Add("Cost / KG");
+                headers.Add("Total Value");
+            }
+
+            for (int i = 0; i < headers.Count; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+
+            var headerRow = ws.Row(1);
+            headerRow.Style.Font.Bold = true;
+            headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+
+            int row = 2;
+            foreach (var r in allItems)
+            {
+                int col = 1;
+
+                ws.Cell(row, col++).Value = r.MaterialCode;
+                ws.Cell(row, col++).Value = r.MaterialDescription;
+                ws.Cell(row, col++).Value = r.BatchNo;
+                ws.Cell(row, col++).Value = r.Unrestricted_Stock;
+                ws.Cell(row, col++).Value = r.Blocked_Stock;
+                ws.Cell(row, col++).Value = r.Stock_in_QI;
+                ws.Cell(row, col++).Value = r.Unit;
+                ws.Cell(row, col++).Value = r.ExpDate?.ToString("dd/MM/yyyy");
+
+                if (!HideCostColumns)
+                {
+                    ws.Cell(row, col++).Value = r.UnitKg;
+                    ws.Cell(row, col++).Value = r.CostPerKg;
+                    ws.Cell(row, col++).Value = r.TotalValue;
+                }
+
+                row++;
+            }
+
+            ws.Columns().AdjustToContents();
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+
+            if (_jsModule is not null && !_isDisposed)
+            {
+                try
+                {
+                    await _jsModule.InvokeVoidAsync(
+                        "downloadFileFromBytes",
+                        $"WarehouseStock_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        base64);
+                }
+                catch (JSDisconnectedException)
+                {
+                }
+                catch (TaskCanceledException)
+                {
+                }
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Nav.NavigateTo("/", replace: true);
+        }
+        finally
+        {
+            isLoading = false;
+
+            if (!_isDisposed)
+                await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static readonly Dictionary<string, string> Text = new()
+    {
+        ["Title"] = "Management - Warehouse Stock",
+        ["Plant"] = "Plant",
+        ["ChoosePlant"] = "Choose Plant",
+        ["MaterialGroup"] = "Material Group",
+        ["ChooseMaterialGroup"] = "Choose Material Group",
+        ["Material"] = "Material",
+        ["ChooseMaterial"] = "Choose Material",
+        ["Batch"] = "Batch",
+        ["ChooseBatch"] = "Choose Batch",
+        ["Run"] = "Run",
+        ["MaterialCode"] = "Material Code",
+        ["MaterialDescription"] = "Description",
+        ["BatchNo"] = "Batch No",
+        ["UnrestrictedStock"] = "Unrestricted Stock",
+        ["Quality"] = "Quality",
+        ["Unit"] = "Unit",
+        ["MFGDate"] = "MFG Date",
+        ["EXPDate"] = "EXP Date",
+        ["TotalValue"] = "Total Value",
+        ["UnitPerKg"] = "Unit / KG",
+        ["NoData"] = "No data found",
+        ["ExportAs"] = "Export as"
+    };
+
+    private string T(string key)
+    {
+        return Text.TryGetValue(key, out var value) ? value : key;
+    }
+
+    private void OnPlantChanged()
+    {
+        var selectedPlant = filters.Plant;
+        var currentPageSize = filters.PageSize;
+
+        filters = new WarehouseStockFilter
+        {
+            Plant = selectedPlant,
+            Page = 1,
+            PageSize = currentPageSize
+        };
+
+        materialSearch = string.Empty;
+        materialResults.Clear();
+        showMaterialDropdown = false;
+        materialError = null;
+        allItems.Clear();
+        pagedItems.Clear();
+        totalItems = 0;
+        totalPages = 1;
+
+        var companyCode = GetCompanyCode(selectedPlant);
+
+        filteredMaterialGroups = materialGroups
+            .Where(x => string.Equals(x.Plant, companyCode, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+    private readonly List<MaterialGroupDto> materialGroups = new()
+    {
+        new() { Plant="1000", Code="001", Name="Coating Additive"},
+        new() { Plant="1000", Code="002", Name="Acid"},
+        new() { Plant="1000", Code="003", Name="Alkali"},
+        new() { Plant="1000", Code="004", Name="Amine"},
+        new() { Plant="1000", Code="005", Name="Antioxidant"},
+        new() { Plant="1000", Code="006", Name="Asphalt additive"},
+        new() { Plant="1000", Code="007", Name="Cement Additive"},
+        new() { Plant="1000", Code="008", Name="Defoamer"},
+        new() { Plant="1000", Code="009", Name="EP additive"},
+        new() { Plant="1000", Code="010", Name="Filler"},
+        new() { Plant="1000", Code="011", Name="Flame retardant"},
+        new() { Plant="1000", Code="012", Name="Fragrance"},
+        new() { Plant="1000", Code="013", Name="Friction Modifier"},
+        new() { Plant="1000", Code="014", Name="Isocyanate"},
+        new() { Plant="1000", Code="015", Name="Monomer"},
+        new() { Plant="1000", Code="016", Name="Optical Brightener"},
+        new() { Plant="1000", Code="017", Name="Organic Peroxide"},
+        new() { Plant="1000", Code="018", Name="Persulphate"},
+        new() { Plant="1000", Code="019", Name="Petroleum resin"},
+        new() { Plant="1000", Code="020", Name="Photo Initiator"},
+        new() { Plant="1000", Code="021", Name="Pigment"},
+        new() { Plant="1000", Code="022", Name="Plastic Additive"},
+        new() { Plant="1000", Code="023", Name="Plasticizer"},
+        new() { Plant="1000", Code="024", Name="Polymerization Additive"},
+        new() { Plant="1000", Code="025", Name="Preservative"},
+        new() { Plant="1000", Code="026", Name="Resin / Binder"},
+        new() { Plant="1000", Code="027", Name="Rubber Additive"},
+        new() { Plant="1000", Code="028", Name="Solvent"},
+        new() { Plant="1000", Code="029", Name="Surfactant"},
+        new() { Plant="1000", Code="030", Name="Tackifier"},
+        new() { Plant="1000", Code="031", Name="Wax"},
+        new() { Plant="1000", Code="032", Name="Other"},
+        new() { Plant="2000", Code="500", Name="Active Ingredient"},
+        new() { Plant="2000", Code="501", Name="Additive"},
+        new() { Plant="2000", Code="502", Name="Amino Acid"},
+        new() { Plant="2000", Code="503", Name="Bead/Scrub"},
+        new() { Plant="2000", Code="504", Name="Bleaching agent"},
+        new() { Plant="2000", Code="505", Name="Botanical & Herb"},
+        new() { Plant="2000", Code="506", Name="Color"},
+        new() { Plant="2000", Code="507", Name="Bulking Agent"},
+        new() { Plant="2000", Code="508", Name="Clay"},
+        new() { Plant="2000", Code="509", Name="Cocoa & Chocolate"},
+        new() { Plant="2000", Code="510", Name="Dispersing agent"},
+        new() { Plant="2000", Code="511", Name="Emollient"},
+        new() { Plant="2000", Code="512", Name="Emulsifier"},
+        new() { Plant="2000", Code="513", Name="Essential Oil"},
+        new() { Plant="2000", Code="514", Name="Excipient"},
+        new() { Plant="2000", Code="515", Name="Fibre"},
+        new() { Plant="2000", Code="516", Name="Film former"},
+        new() { Plant="2000", Code="517", Name="Flavor"},
+        new() { Plant="2000", Code="518", Name="Flavor Enhancer"},
+        new() { Plant="2000", Code="519", Name="Fragance"},
+        new() { Plant="2000", Code="520", Name="Hair conditioning"},
+        new() { Plant="2000", Code="521", Name="Hair dye"},
+        new() { Plant="2000", Code="522", Name="Humectant"},
+        new() { Plant="2000", Code="523", Name="Mushroom"},
+        new() { Plant="2000", Code="524", Name="Neutralizer"},
+        new() { Plant="2000", Code="525", Name="Moisturizer"},
+        new() { Plant="2000", Code="526", Name="Natural Oil"},
+        new() { Plant="2000", Code="527", Name="Pigment"},
+        new() { Plant="2000", Code="528", Name="Powder"},
+        new() { Plant="2000", Code="529", Name="Coffee &Tea"},
+        new() { Plant="2000", Code="530", Name="Protein-Animal"},
+        new() { Plant="2000", Code="531", Name="Protein-Plant"},
+        new() { Plant="2000", Code="532", Name="Silicone"},
+        new() { Plant="2000", Code="533", Name="Solubilizer"},
+        new() { Plant="2000", Code="534", Name="Sunscreen"},
+        new() { Plant="2000", Code="535", Name="Surfactant"},
+        new() { Plant="2000", Code="536", Name="Sweetener/ Sugar replacement"},
+        new() { Plant="2000", Code="537", Name="Thickener"},
+        new() { Plant="2000", Code="538", Name="Mineral/Vitamin"},
+        new() { Plant="2000", Code="539", Name="Wax"},
+        new() { Plant="2000", Code="540", Name="Abrasive"},
+        new() { Plant="2000", Code="541", Name="Acidulant"},
+        new() { Plant="2000", Code="542", Name="Anti oxidant"},
+        new() { Plant="2000", Code="543", Name="Enzyme"},
+        new() { Plant="2000", Code="544", Name="Fat & Oil-Algae"},
+        new() { Plant="2000", Code="545", Name="Fat & Oil-Plant"},
+        new() { Plant="2000", Code="546", Name="Firming Agent"},
+        new() { Plant="2000", Code="547", Name="Herb and Spice"},
+        new() { Plant="2000", Code="548", Name="Home care-Conditioning"},
+        new() { Plant="2000", Code="549", Name="Lipid/ Fatty Acid"},
+        new() { Plant="2000", Code="550", Name="Omega"},
+        new() { Plant="2000", Code="551", Name="Pearl pigment"},
+        new() { Plant="2000", Code="552", Name="Pearling agent"},
+        new() { Plant="2000", Code="553", Name="Phytonutrient"},
+        new() { Plant="2000", Code="554", Name="Pigment dispersion"},
+        new() { Plant="2000", Code="555", Name="Prebiotic"},
+        new() { Plant="2000", Code="556", Name="Preservative"},
+        new() { Plant="2000", Code="557", Name="Probiotic"},
+        new() { Plant="2000", Code="558", Name="Stabilizer"},
+        new() { Plant="2000", Code="559", Name="Starch"},
+        new() { Plant="2000", Code="560", Name="Vitamin"}
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_isDisposed)
+            return;
+
+        _isDisposed = true;
+
+        var module = _jsModule;
+        _jsModule = null;
+
+        try
+        {
+            if (module is not null)
+                await module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (TaskCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+    }
+    private static readonly Dictionary<string, string> DisplayPlantToCompany = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["1100"] = "1000",
+        ["1900"] = "1000",
+        ["2100"] = "2000"
+    };
+
+    private string? GetCompanyCode(string? displayPlant)
+    {
+        if (string.IsNullOrWhiteSpace(displayPlant))
+            return null;
+
+        return DisplayPlantToCompany.TryGetValue(displayPlant, out var companyCode)
+            ? companyCode
+            : displayPlant;
+    }
+
+    // ใช้กับ stock API โดยส่ง plant จริงจากหน้าจอ
+    private string? GetStockApiPlantCode(string? displayPlant)
+    {
+        return string.IsNullOrWhiteSpace(displayPlant)
+            ? null
+            : displayPlant;
+    }
+
+    private static string? NormalizeMaterialForApi(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var trimmed = value.Trim();
+        var firstSpace = trimmed.IndexOf(' ');
+
+        return firstSpace > 0
+            ? trimmed[..firstSpace]
+            : trimmed;
+    }
+
+    private bool PlantMatches(string? itemPlant, string? selectedDisplayPlant)
+    {
+        if (string.IsNullOrWhiteSpace(selectedDisplayPlant))
+            return true;
+
+        if (string.IsNullOrWhiteSpace(itemPlant))
+            return false;
+
+        var companyCode = GetCompanyCode(selectedDisplayPlant);
+
+        return itemPlant.Equals(selectedDisplayPlant, StringComparison.OrdinalIgnoreCase)
+            || (!string.IsNullOrWhiteSpace(companyCode)
+                && itemPlant.Equals(companyCode, StringComparison.OrdinalIgnoreCase));
+    }
+
+
+    private string? GetApiPlantCode(string? displayPlant)
+    {
+        if (string.IsNullOrWhiteSpace(displayPlant))
+            return null;
+
+        return DisplayPlantToCompany.TryGetValue(displayPlant, out var companyCode)
+            ? companyCode
+            : displayPlant;
+    }
+
+    private bool HideCostColumns
+    {
+        get
+        {
+            var userIsGreenLeaf = AuthState.CurrentCompanyID == 2;
+            var selectedPlantIs2000 = string.Equals(GetCompanyCode(filters.Plant), "2000", StringComparison.OrdinalIgnoreCase);
+            var cannotViewCost = AuthState.Permission?.CanViewCost == false;
+
+            return userIsGreenLeaf || selectedPlantIs2000 || cannotViewCost;
+        }
+    }
+
+    private int VisibleColumnCount => HideCostColumns ? 8 : 11;
+}

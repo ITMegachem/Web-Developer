@@ -1,0 +1,30 @@
+﻿@using Mgt.Lit.WebFront.Models
+@using Mgt.Lit.WebFront.Services
+@inject ApiHttpClient Api
+
+<h3>Users</h3>
+
+@if (users == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <ul>
+        @foreach (var u in users)
+        {
+            <li>@u.Username - @u.UserRole</li>
+        }
+    </ul>
+}
+
+@code {
+    List<UserViewModel>? users;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var http = await Api.CreateAsync();
+        users = await http.GetFromJsonAsync<List<UserViewModel>>("api/users");
+    }
+}
+

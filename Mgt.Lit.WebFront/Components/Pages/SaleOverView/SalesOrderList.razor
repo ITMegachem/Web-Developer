@@ -1,0 +1,690 @@
+﻿@namespace Mgt.Lit.WebFront.Pages
+@page "/sales-orders"
+@layout AppLayout
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+@using ClosedXML.Excel
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@using Mgt.Lit.WebFront.Models.SalesOrder
+@using Mgt.Lit.WebFront.Services.Member
+@using Mgt.Lit.WebFront.Services.SalesOrder
+@inject PageContext PageContext
+@inject ISalesOrderService SalesOrderService
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject NavigationManager Nav
+@inject Mgt.Lit.WebFront.Services.UiState UiState
+@inject IHttpClientFactory HttpFactory
+@implements IAsyncDisposable
+
+<div class="so-page-wrapper">
+    @* --- Header Section --- *@
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-2">
+        <h2 class="page-title">@T("Title")</h2>
+        <div class="date-badge">@DateTime.Now.ToString("dd MMM yyyy")</div>
+    </div>
+
+    @* --- ส่วน Filter (UI เขียวพาสเทล ขอบมน) --- *@
+    <div class="filter-card-modern shadow-sm mb-4">
+        <div class="row g-3 align-items-end">
+            <div class="col-6 col-md-4 col-lg-2">
+                <label class="modern-label mb-0">@T("SalesOrg")</label>
+                <br />
+                @if (!string.IsNullOrEmpty(salesOrgError))
+                {
+                    <span class="text-danger small">
+                        @salesOrgError
+                    </span>
+                }
+                <select class="form-select modern-input" @bind="filters.SalesOrganization">
+                    <option value="">@T("ChooseSalesOrg")</option>
+                    @foreach (var x in salesOrgs)
+                    {
+                        <option value="@x.PlantCode">
+                            @x.PlantCode - @x.PlantName
+                        </option>
+                    }
+                </select>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <label class="modern-label">@T("Document")</label>
+                <input class="form-control modern-input" @bind="filters.Document" placeholder="Choose Sales Order or Billing No." />
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <label class="modern-label">Billing Date</label>
+                <input id="dateRange"
+                       class="form-control modern-input @(!string.IsNullOrEmpty(dateRangeError) ? "is-invalid" : "")"
+                       placeholder="Select date range" 
+                       autocomplete="off" />
+                @if (!string.IsNullOrEmpty(dateRangeError))
+                {
+                    <span class="text-danger small">@dateRangeError</span>
+                }
+            </div>
+            <div class="col-12 col-md-6 col-lg-3">
+                <label class="modern-label">@T("SoldToParty")</label>
+
+                <div class="autocomplete-wrapper">
+                    <input class="form-control modern-input"
+                           value="@soldToSearch"
+                           @oninput="OnSoldToSearch"
+                           @onfocus="OnSoldToFocus"
+                           placeholder="Choose Sold-to party" />
+
+                    @if (soldToResults.Any() && showSoldToDropdown)
+                    {
+                        <div class="autocomplete-dropdown-card">
+                            @foreach (var item in soldToResults)
+                            {
+                                <div class="autocomplete-row"
+                                     @onclick="() => SelectSoldTo(item)">
+                                    <div class="code">@item.Code</div>
+                                    <div class="name">@item.Name</div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+            <div class="col-6 col-md-6 col-lg-2">
+                <label class="modern-label">@T("Material")</label>
+                <div class="autocomplete-wrapper">
+
+                    <input class="form-control modern-input"
+                           value="@materialSearch"
+                           @oninput="OnMaterialSearch"
+                           @onfocus="() => showMaterialDropdown = true"
+                           placeholder="Choose Material" />
+
+                    @if (materialResults.Any() && showMaterialDropdown)
+                    {
+                        <div class="autocomplete-dropdown-card">
+                            @foreach (var item in materialResults)
+                            {
+                                <div class="autocomplete-row"
+                                     @onclick="() => SelectMaterial(item)">
+                                    <div class="code">@item.Code</div>
+                                    <div class="name">@item.Name</div>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                </div>
+            </div>
+            <div class="col-12 col-lg-2 ms-lg-auto">
+                <button class="btn btn-search-pill w-100" disabled="@isLoading" @onclick="RunSearch">
+                    @if (isLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm"></span>
+                    }
+                    else
+                    {
+
+                        <span><i class="bi bi-search me-1"></i> @T("Run")</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @* --- ส่วนตารางข้อมูล (บังคับความสูงคงที่เพื่อให้ Layout ไม่ขยับ) --- *@
+    <div class="table-card-container shadow-sm">
+        <div class="table-responsive flex-grow-1">
+            <table class="table modern-table mb-0 fixed-table">
+                <thead>
+                    <tr>
+                        <th style="font-size: 100% !important; font-weight: 800 !important;">@T("DocDate")</th>
+                        <th style="font-size: 100% !important; font-weight: 800 !important;">@T("BillingDocument")</th>
+                        
+                        <th style="font-size: 100% !important; font-weight: 800 !important;">@T("SalesOrderDocument")</th>
+                        <th style="font-size: 100% !important; font-weight: 800 !important;">@T("SoldTo") / Description</th>
+                        <th style="font-size: 100% !important; font-weight: 800 !important;">@T("ShipTo") / Description</th>
+                        <th style="font-size: 100% !important; font-weight: 800 !important;">@T("MaterialCode")</th>
+                        <th class="d-none d-md-table-cell" style="font-size: 100% !important; font-weight: 800 !important;">@T("SalesEmployee")</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (pagedItems.Any())
+                    {
+                        @foreach (var r in pagedItems)
+                        {
+                            <tr>
+                                <td class="text-nowrap fw-bold date-display-large">@r.DocDate.ToString("dd/MM/yyyy")</td>
+                                <td class="numeric-green">@r.BillingDocument</td>
+                                
+                                <td class="numeric-green">@r.SalesOrderDocument</td>
+                                <td>
+                                    <div class="full-data-display"><strong>@r.SoldTo</strong></div>
+                                    <div class="full-data-display text-muted small">@r.SoldToDescription</div>
+                                </td>
+                                <td>
+                                    <div class="full-data-display"><strong>@r.ShipTo</strong></div>
+                                    <div class="full-data-display text-muted small">@r.ShipToDescription</div>
+                                </td>
+                                <td>
+                                    <span class="badge-pill-material">@r.MaterialCode</span>
+                                    <div class="full-data-display x-small text-muted mt-1">@r.MaterialDescription</div>
+                                </td>
+                                <td class="d-none d-md-table-cell fw-bold">@r.SalesEmployee</td>
+                            </tr>
+                        }
+                    }
+                    else if (!isLoading)
+                    {
+                        <tr><td colspan="7" class="text-center py-5">@T("NoData")</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @* --- Pagination (ลูกศรหนาและชัดเจน) --- *@
+        <div class="table-footer-pagination">
+            <div class="text-muted small">Results: @totalItems</div>
+            <div class="pagination-controls d-flex align-items-center gap-3">
+                <button class="pill-nav-btn" disabled="@(filters.Page <= 1 || isLoading)" @onclick="PrevPage">
+                    <i class="bi bi-chevron-left"></i>
+                </button>
+                <div class="page-indicator">
+                    <span class="fw-bold text-success">@filters.Page</span> / @totalPages
+                </div>
+                <button class="pill-nav-btn" disabled="@(filters.Page >= totalPages || isLoading)" @onclick="NextPage">
+                    <i class="bi bi-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @* --- ปุ่ม Export --- *@
+    <div class="d-flex justify-content-end mt-4">
+        <button class="btn btn-export-pill shadow-sm" disabled="@(isLoading || !pagedItems.Any())" @onclick="ExportData">
+            <i class="bi bi-file-earmark-excel-fill me-2"></i> @T("ExportAs") Excel
+        </button>
+    </div>
+</div>
+
+@code {
+    private SalesOrderFilter filters = new() { Page = 1, PageSize = 10 };
+    private List<SalesOrderDto> pagedItems = new();
+    private string? salesOrgError;
+    private string soldToSearch = "";
+    private bool showSoldToDropdown = false;
+    private List<SoldToLookupDto> soldToResults = new();
+    private string materialSearch = "";
+    private bool showMaterialDropdown = false;
+    private List<MaterialLookup> materialResults = new();
+    private string? dateRangeError;
+    private readonly List<PlantDto> salesOrgs = new()
+    {
+        new() { PlantCode = "1000", PlantName = "Megachem (Thailand) PCL" },
+        new() { PlantCode = "2000", PlantName = "Green Leaf Chemical" }
+    };
+
+    private int totalItems;
+    private int totalPages = 1;
+    private bool isLoading;
+    private bool _isDisposed;
+
+    private IJSObjectReference? _jsModule;
+    private DotNetObjectReference<Mgt.Lit.WebFront.Pages.SalesOrderList>? _dotNetRef;
+
+    private DateTime? DocDateFrom;
+    private DateTime? DocDateTo;
+
+    [JSInvokable]
+    public void SetDateRange(string start, string end)
+    {
+        if (DateTime.TryParse(start, out var startDate))
+            DocDateFrom = startDate;
+
+        if (DateTime.TryParse(end, out var endDate))
+            DocDateTo = endDate;
+    }
+
+    private static readonly Dictionary<string, Dictionary<string, string>> Text = new()
+    {
+        ["en"] = new()
+        {
+            ["Title"] = "Management - List of Sales Order",
+            ["SalesOrg"] = "Sales Organization",
+            ["ChooseSalesOrg"] = "Choose Sales Organization",
+            ["Document"] = "Document",
+            ["ChooseDocument"] = "Choose Document",
+            ["DocumentDate"] = "Document Date",
+            ["SoldToParty"] = "Sold-To Party",
+            ["ChooseSoldToParty"] = "Choose Sold-To Party",
+            ["Material"] = "Material",
+            ["ChooseMaterial"] = "Choose Material",
+            ["Run"] = "Run",
+            ["Loading"] = "Loading data...",
+            ["NoData"] = "No data found",
+            ["BillingDocument"] = "Billing Document",
+            ["DocDate"] = "Doc. Date",
+            ["SalesOrderDocument"] = "Sales Order Document",
+            ["SoldTo"] = "Sold to",
+            ["SoldToDescription"] = "Sold to Description",
+            ["ShipTo"] = "Ship to",
+            ["ShipToDescription"] = "Ship to Description",
+            ["MaterialCode"] = "Material Code",
+            ["MaterialDescription"] = "Material Description",
+            ["SalesEmployee"] = "Sales Employee",
+            ["Page"] = "Page",
+            ["Of"] = "of",
+            ["Pages"] = "pages",
+            ["Items"] = "items",
+            ["ExportAs"] = "Export as"
+        },
+        ["th"] = new()
+        {
+            ["Title"] = "การจัดการ - รายการใบสั่งขาย",
+            ["SalesOrg"] = "องค์กรขาย",
+            ["ChooseSalesOrg"] = "เลือกองค์กรขาย",
+            ["Document"] = "เอกสาร",
+            ["ChooseDocument"] = "เลือกเอกสาร",
+            ["DocumentDate"] = "วันที่เอกสาร",
+            ["SoldToParty"] = "ผู้ซื้อ",
+            ["ChooseSoldToParty"] = "เลือกผู้ซื้อ",
+            ["Material"] = "วัสดุ",
+            ["ChooseMaterial"] = "เลือกวัสดุ",
+            ["Run"] = "ค้นหา",
+            ["Loading"] = "กำลังโหลดข้อมูล...",
+            ["NoData"] = "ไม่พบข้อมูล",
+            ["BillingDocument"] = "เอกสารวางบิล",
+            ["DocDate"] = "วันที่เอกสาร",
+            ["SalesOrderDocument"] = "เอกสารใบสั่งขาย",
+            ["SoldTo"] = "ผู้ซื้อ",
+            ["SoldToDescription"] = "ชื่อผู้ซื้อ",
+            ["ShipTo"] = "ผู้รับสินค้า",
+            ["ShipToDescription"] = "ชื่อผู้รับสินค้า",
+            ["MaterialCode"] = "รหัสวัสดุ",
+            ["MaterialDescription"] = "ชื่อวัสดุ",
+            ["SalesEmployee"] = "พนักงานขาย",
+            ["Page"] = "หน้า",
+            ["Of"] = "จาก",
+            ["Pages"] = "หน้า",
+            ["Items"] = "รายการ",
+            ["ExportAs"] = "ส่งออกเป็น"
+        }
+    };
+
+    protected override void OnInitialized()
+    {
+        UiState.Changed += OnUiChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _isDisposed)
+            return;
+
+        await AuthState.InitializeAsync();
+
+        if (string.IsNullOrWhiteSpace(AuthState.Token))
+            return;
+
+        await UiState.InitAsync();
+
+        try
+        {
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+            _dotNetRef = DotNetObjectReference.Create(this);
+
+            await _jsModule.InvokeVoidAsync("initDateRange", _dotNetRef);
+
+            if (!_isDisposed)
+                await InvokeAsync(StateHasChanged);
+        }
+        catch (JSDisconnectedException)
+        {
+            // ผู้ใช้ออกจากหน้า / logout / circuit ถูกตัด
+        }
+        catch (TaskCanceledException)
+        {
+            // ปล่อยผ่านได้
+        }
+    }
+
+    private void OnUiChanged()
+    {
+        if (_isDisposed)
+            return;
+
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private string T(string key)
+    {
+        return Text.TryGetValue(UiState.Lang ?? "en", out var dict) && dict.TryGetValue(key, out var value)
+            ? value
+            : key;
+    }
+
+    private void OnSoldToFocus()
+    {
+        showSoldToDropdown = true;
+    }
+
+    private async Task OnMaterialSearch(ChangeEventArgs e)
+    {
+        materialSearch = e.Value?.ToString() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(materialSearch))
+        {
+            filters.Material = null;
+            materialResults.Clear();
+            showMaterialDropdown = false;
+            return;
+        }
+
+        if (materialSearch.Length < 2)
+        {
+            materialResults.Clear();
+            showMaterialDropdown = false;
+            return;
+        }
+
+        try
+        {
+            materialResults = await SalesOrderService.SearchMaterialAsync(materialSearch);
+            showMaterialDropdown = materialResults.Any();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Nav.NavigateTo("/", replace: true);
+        }
+        catch
+        {
+            materialResults.Clear();
+            showMaterialDropdown = false;
+        }
+    }
+
+    private void SelectMaterial(MaterialLookup item)
+    {
+        filters.Material = item.Code;
+        materialSearch = $"{item.Code} {item.Name}";
+        materialResults.Clear();
+        showMaterialDropdown = false;
+    }
+
+    private async Task OnSoldToSearch(ChangeEventArgs e)
+    {
+        soldToSearch = e.Value?.ToString() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(soldToSearch))
+        {
+            filters.SoldToParty = null;
+            soldToResults.Clear();
+            showSoldToDropdown = false;
+            return;
+        }
+
+        if (soldToSearch.Length < 2)
+        {
+            soldToResults.Clear();
+            showSoldToDropdown = false;
+            return;
+        }
+
+        try
+        {
+            soldToResults = await SalesOrderService.SearchSoldToAsync(soldToSearch);
+            showSoldToDropdown = soldToResults.Any();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Nav.NavigateTo("/", replace: true);
+        }
+        catch
+        {
+            soldToResults.Clear();
+            showSoldToDropdown = false;
+        }
+    }
+
+    private void SelectSoldTo(SoldToLookupDto item)
+    {
+        filters.SoldToParty = item.Code;
+        soldToSearch = $"{item.Code} {item.Name}";
+        soldToResults.Clear();
+        showSoldToDropdown = false;
+    }
+
+    private async Task LoadDataAsync()
+    {
+        if (_isDisposed || string.IsNullOrWhiteSpace(AuthState.Token))
+            return;
+
+        try
+        {
+            isLoading = true;
+            await InvokeAsync(StateHasChanged);
+
+            var result = await SalesOrderService.GetSalesOrdersAsync(filters);
+
+            pagedItems = result.Items ?? new List<SalesOrderDto>();
+            totalItems = result.TotalItems;
+            totalPages = Math.Max(1, (int)Math.Ceiling((double)totalItems / filters.PageSize));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Nav.NavigateTo("/", replace: true);
+        }
+        finally
+        {
+            isLoading = false;
+
+            if (!_isDisposed)
+                await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RunSearch()
+    {
+        salesOrgError = null;
+        dateRangeError = null;
+
+        if (string.IsNullOrWhiteSpace(filters.SalesOrganization))
+        {
+            salesOrgError = "Please select Sales Organization";
+            // Clear ข้อมูลเก่าออก
+            pagedItems.Clear();
+            totalItems = 0;
+            totalPages = 1;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (DocDateFrom is null || DocDateTo is null)
+        {
+            dateRangeError = "Please select Billing Date range";
+            // Clear ข้อมูลเก่าออก
+            pagedItems.Clear();
+            totalItems = 0;
+            totalPages = 1;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        filters.Page = 1;
+        filters.DocDateFrom = DocDateFrom;
+        filters.DocDateTo = DocDateTo;
+
+        await LoadDataAsync();
+    }
+
+    private async Task PrevPage()
+    {
+        if (filters.Page <= 1 || isLoading)
+            return;
+
+        filters.Page--;
+        await LoadDataAsync();
+    }
+
+    private async Task NextPage()
+    {
+        if (filters.Page >= totalPages || isLoading)
+            return;
+
+        filters.Page++;
+        await LoadDataAsync();
+    }
+
+    private async Task ExportData()
+    {
+        try
+        {
+            isLoading = true;
+
+            var all = await GetAllForExport();
+
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("SalesOrders");
+
+            string[] headers =
+            {
+                "Doc. Date",
+                "Billing Document",
+                "Sales Order Document",
+                "Sold to",
+                "Sold to Description",
+                "Ship to",
+                "Ship to Description",
+                "Material Code",
+                "Material Description",
+                "Sales Employee"
+            };
+
+            for (int i = 0; i < headers.Length; i++)
+            {
+                ws.Cell(1, i + 1).Value = headers[i];
+            }
+
+            var headerRow = ws.Row(1);
+            headerRow.Style.Font.Bold = true;
+            headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+
+            var row = 2;
+            foreach (var r in all)
+            {
+                ws.Cell(row, 1).Value = r.DocDate.ToString("dd/MM/yyyy");
+                ws.Cell(row, 2).Value = r.BillingDocument;
+                ws.Cell(row, 3).Value = r.SalesOrderDocument;
+                ws.Cell(row, 4).Value = r.SoldTo;
+                ws.Cell(row, 5).Value = r.SoldToDescription;
+                ws.Cell(row, 6).Value = r.ShipTo;
+                ws.Cell(row, 7).Value = r.ShipToDescription;
+                ws.Cell(row, 8).Value = r.MaterialCode;
+                ws.Cell(row, 9).Value = r.MaterialDescription;
+                ws.Cell(row, 10).Value = r.SalesEmployee;
+                row++;
+            }
+
+            ws.Columns().AdjustToContents();
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+
+            var base64 = Convert.ToBase64String(ms.ToArray());
+
+            if (_jsModule is not null && !_isDisposed)
+            {
+                try
+                {
+                    await _jsModule.InvokeVoidAsync(
+                        "downloadFileFromBytes",
+                        $"SalesOrders_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        base64);
+                }
+                catch (JSDisconnectedException)
+                {
+                    // logout / refresh / ปิดหน้า ระหว่าง export
+                }
+                catch (TaskCanceledException)
+                {
+                    // ปล่อยผ่านได้
+                }
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Nav.NavigateTo("/", replace: true);
+        }
+        finally
+        {
+            isLoading = false;
+
+            if (!_isDisposed)
+                await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task<List<SalesOrderDto>> GetAllForExport()
+    {
+        var exportFilters = new SalesOrderFilter
+        {
+            SalesOrganization = filters.SalesOrganization,
+            Document = filters.Document,
+            SoldToParty = filters.SoldToParty,
+            Material = filters.Material,
+            DocDateFrom = DocDateFrom,
+            DocDateTo = DocDateTo,
+            Page = 1,
+            PageSize = 500
+        };
+
+        var all = new List<SalesOrderDto>();
+
+        while (!_isDisposed)
+        {
+            var result = await SalesOrderService.GetSalesOrdersAsync(exportFilters);
+
+            if (result.Items == null || !result.Items.Any())
+                break;
+
+            all.AddRange(result.Items);
+
+            if (all.Count >= result.TotalItems)
+                break;
+
+            exportFilters.Page++;
+        }
+
+        return all;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_isDisposed)
+            return;
+
+        _isDisposed = true;
+
+        UiState.Changed -= OnUiChanged;
+
+        var module = _jsModule;
+        _jsModule = null;
+
+        var dotNetRef = _dotNetRef;
+        _dotNetRef = null;
+
+        try
+        {
+            if (module is not null)
+                await module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // ปกติมากใน Blazor Server ตอน logout / refresh / ปิด tab
+        }
+        catch (TaskCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        dotNetRef?.Dispose();
+    }
+}

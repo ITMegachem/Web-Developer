@@ -1,0 +1,306 @@
+﻿@using Mgt.Lit.WebFront.Auth
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject Mgt.Lit.WebFront.Services.AuthService Auth
+@inject NavigationManager Nav
+@inject Mgt.Lit.WebFront.Services.UiState UiState
+@implements IDisposable
+
+<nav class="sidebar-modern @(IsCollapsed ? "collapsed" : "")">
+    <div class="sidebar-inner d-flex flex-column h-100">
+        <div class="profile-container px-3 pt-4">
+            <div class="dropdown">
+                <button class="profile-pill-white d-flex align-items-center w-100 @(IsCollapsed ? "collapsed-profile" : "")"
+                        type="button"
+                        data-bs-toggle="dropdown">
+                    <div class="avatar-circle">
+                        <img src="/images/icon-person.png" alt="MGT" />
+                    </div>
+
+                    @if (!IsCollapsed)
+                    {
+                        <div class="user-meta ms-2 text-start">
+                            <span class="user-name-dark">@(AuthState.User?.FindFirst("FullName")?.Value ?? "Loading...")</span>
+                            <span class="user-role-green d-block">
+                                @(AuthState.User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? "")
+                            </span>
+                        </div>
+                        <i class="bi bi-chevron-down ms-auto opacity-50 text-dark"></i>
+                    }
+                </button>
+
+                <ul class="dropdown-menu premium-dropdown shadow border-0">
+                    <li><a class="dropdown-item" href="#">@T("NewProject")</a></li>
+
+                    @if (IsAdmin)
+                    {
+                        <li><a class="dropdown-item" href="/settings">@T("Settings")</a></li>
+                    }
+
+                    <li><a class="dropdown-item" href="/profile">@T("Profile")</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><button class="dropdown-item text-danger" @onclick="Logout">@T("SignOut")</button></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="menu-content mt-3 px-2 flex-grow-1">
+            <ul class="nav-list list-unstyled">
+
+                @* ── Dashboards Section ── *@
+                @if (HasAnyDashboard)
+                {
+                    <li class="section-label-white">@(!IsCollapsed ? T("Dashboards") : "•••")</li>
+
+                    @* DB1 — Admin & Manager ของ companyID=1 *@
+                    @if (CanViewDB1)
+                    {
+                        <li class="nav-item">
+                            <NavLink href="/dashboard" class="modern-link-item active-dash">
+                                <img src="/images/chart-histogram.png" class="menu-icon-img" />
+                                @if (!IsCollapsed)
+                                {
+                                    <span class="ms-3">@T("DB1")</span>
+                                }
+                            </NavLink>
+                        </li>
+                    }
+
+                    @* DB2 — Leader ของ companyID=1 และ division=BU2 *@
+                    @if (CanViewDB2)
+                    {
+                        <li class="nav-item">
+                            <NavLink href="/dashboard2" class="modern-link-item active-dash">
+                                <img src="/images/chart-histogram.png" class="menu-icon-img" />
+                                @if (!IsCollapsed)
+                                {
+                                    <span class="ms-3">@T("DB2")</span>
+                                }
+                            </NavLink>
+                        </li>
+                    }
+
+                    @* DB3 — Leader ของ companyID=1 และ division=BU3 *@
+                    @if (CanViewDB3)
+                    {
+                        <li class="nav-item">
+                            <NavLink href="/dashboard3" class="modern-link-item active-dash">
+                                <img src="/images/chart-histogram.png" class="menu-icon-img" />
+                                @if (!IsCollapsed)
+                                {
+                                    <span class="ms-3">@T("DB3")</span>
+                                }
+                            </NavLink>
+                        </li>
+                    }
+                }
+
+                @* ── Pages / Management Section ── *@
+                @if (HasAnyManagementPage)
+                {
+                    <li class="section-label-white">@(!IsCollapsed ? T("Pages") : "•••")</li>
+
+                    <li class="nav-item">
+                        <div class="modern-link-item"
+                             data-bs-toggle="collapse"
+                             data-bs-target="#mgtMenu"
+                             style="cursor:pointer">
+                            <img src="/images/user-gear.png" class="menu-icon-img" />
+                            @if (!IsCollapsed)
+                            {
+                                <span class="ms-3 flex-grow-1">@T("Management")</span>
+                                <i class="bi bi-chevron-down small opacity-70"></i>
+                            }
+                        </div>
+
+                        <div class="collapse @(!IsCollapsed ? "show" : "")" id="mgtMenu">
+                            <ul class="list-unstyled ms-2">
+                                @if (CanPage1)
+                                {
+                                    <li>
+                                        <NavLink href="/sales-orders" class="sub-pill-link">
+                                            <img src="/images/inventory-alt.png" class="sub-icon-img" />
+                                            @if (!IsCollapsed)
+                                            {
+                                                <span>@T("SalesOrderList")</span>
+                                            }
+                                        </NavLink>
+                                    </li>
+                                }
+
+                                @if (CanPage2)
+                                {
+                                    <li>
+                                        <NavLink href="/warehouse-stock-material" class="sub-pill-link">
+                                            <img src="/images/user-gear.png" class="sub-icon-img" />
+                                            @if (!IsCollapsed)
+                                            {
+                                                <span>@T("StockMaterial")</span>
+                                            }
+                                        </NavLink>
+                                    </li>
+                                }
+
+                                @if (CanPage3)
+                                {
+                                    <li>
+                                        <NavLink href="/warehouse-stock-movement" class="sub-pill-link">
+                                            <img src="/images/users-alt.png" class="sub-icon-img" />
+                                            @if (!IsCollapsed)
+                                            {
+                                                <span>@T("StockMovement")</span>
+                                            }
+                                        </NavLink>
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    </li>
+                }
+
+            </ul>
+        </div>
+
+        <div class="sidebar-footer mt-auto p-4" @onclick="ToggleSidebar">
+            <div class="footer-white-circle">
+                <img src="/images/mgt-logo.png"
+                     style="width: @(IsCollapsed ? "40px" : "90px"); transition: 0.3s;" />
+            </div>
+        </div>
+    </div>
+</nav>
+
+@code {
+    private bool IsCollapsed = false;
+    private bool IsEn;
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    // JWT encodes role via ClaimTypes.Role (long URI) — value e.g. "Admin", "Leader"
+    private string? Role =>
+        AuthState.User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
+        ?? AuthState.User?.FindFirst("userRole")?.Value
+        ?? AuthState.User?.FindFirst("role")?.Value;
+
+    // JWT encodes division as "Division" (Pascal-case)
+    private string? Division =>
+        AuthState.User?.FindFirst("Division")?.Value
+        ?? AuthState.User?.FindFirst("division")?.Value;
+
+    // JWT encodes companyID as "CompanyID" (Pascal-case)
+    private int PrimaryCompanyID =>
+        int.TryParse(AuthState.User?.FindFirst("CompanyID")?.Value, out var id) ? id
+        : int.TryParse(AuthState.User?.FindFirst("primaryCompanyID")?.Value, out var id2) ? id2 : 0;
+
+    private bool IsAdmin =>
+        string.Equals(Role, "admin", StringComparison.OrdinalIgnoreCase);
+
+    private bool IsManager =>
+        string.Equals(Role, "manager", StringComparison.OrdinalIgnoreCase);
+
+    private bool IsLeader =>
+        string.Equals(Role, "leader", StringComparison.OrdinalIgnoreCase);
+
+    // ── Dashboard permissions ─────────────────────────────────────────────────
+
+    /// DB1 : Admin หรือ Manager ของ companyID = 1
+    private bool CanViewDB1 =>
+        PrimaryCompanyID == 1 && (IsAdmin || IsManager);
+
+    /// DB2 : Leader ของ companyID = 1 และ division = BU2
+    private bool CanViewDB2 =>
+        PrimaryCompanyID == 1 &&
+        IsLeader &&
+        string.Equals(Division, "BU2", StringComparison.OrdinalIgnoreCase);
+
+    /// DB3 : Leader ของ companyID = 1 และ division = BU3
+    private bool CanViewDB3 =>
+        PrimaryCompanyID == 1 &&
+        IsLeader &&
+        string.Equals(Division, "BU3", StringComparison.OrdinalIgnoreCase);
+
+    private bool HasAnyDashboard => CanViewDB1 || CanViewDB2 || CanViewDB3;
+
+    // ── Page permissions ──────────────────────────────────────────────────────
+
+    private bool CanPage1 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 1);
+    private bool CanPage2 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 2);
+    private bool CanPage3 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 3);
+
+    private bool HasAnyManagementPage => CanPage1 || CanPage2 || CanPage3;
+
+    // ── lifecycle ─────────────────────────────────────────────────────────────
+
+    private void ToggleSidebar() => IsCollapsed = !IsCollapsed;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        await AuthState.InitializeAsync();
+        await UiState.InitAsync();
+
+        IsEn = UiState.Lang == "en";
+        UiState.Changed += OnUiChanged;
+
+        StateHasChanged();
+    }
+
+    private void OnUiChanged()
+    {
+        IsEn = UiState.Lang == "en";
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task Logout()
+    {
+        await Auth.LogoutAsync();
+        Nav.NavigateTo("/", replace: true);
+    }
+
+    public void Dispose()
+    {
+        UiState.Changed -= OnUiChanged;
+    }
+
+    // ── i18n ──────────────────────────────────────────────────────────────────
+
+    private string T(string key) =>
+        (Text.TryGetValue(UiState.Lang ?? "th", out var dict) && dict.TryGetValue(key, out var value))
+            ? value : key;
+
+    private static readonly Dictionary<string, Dictionary<string, string>> Text = new()
+    {
+        ["en"] = new()
+        {
+            ["DB1"] = "Overview",
+            ["DB2"] = "BU2 Dashboard",
+            ["DB3"] = "BU3 Dashboard",
+            ["Dashboards"] = "Dashboards",
+            ["Pages"] = "Pages",
+            ["Management"] = "Management",
+            ["SalesOrderList"] = "List of Sales",
+            ["StockMaterial"] = "Stock Material",
+            ["StockMovement"] = "Stock Movement",
+            ["NewProject"] = "New Project",
+            ["Settings"] = "Settings",
+            ["Profile"] = "Profile",
+            ["SignOut"] = "Sign Out",
+        },
+        ["th"] = new()
+        {
+            ["DB1"] = "ภาพรวม",
+            ["DB2"] = "แดชบอร์ด BU2",
+            ["DB3"] = "แดชบอร์ด BU3",
+            ["Dashboards"] = "แดชบอร์ด",
+            ["Pages"] = "หน้า",
+            ["Management"] = "การจัดการ",
+            ["SalesOrderList"] = "รายการขาย",
+            ["StockMaterial"] = "สต็อกวัตถุดิบ",
+            ["StockMovement"] = "การเคลื่อนไหวสต็อก",
+            ["NewProject"] = "โปรเจกต์ใหม่",
+            ["Settings"] = "ตั้งค่า",
+            ["Profile"] = "โปรไฟล์",
+            ["SignOut"] = "ออกจากระบบ",
+        }
+    };
+}

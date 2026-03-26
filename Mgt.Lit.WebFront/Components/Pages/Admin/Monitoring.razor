@@ -1,0 +1,10 @@
+﻿@using Microsoft.AspNetCore.Authorization
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@attribute [Authorize(Roles = "admin")]
+@page "/admin/monitoring"
+@layout AppLayout
+<h3>Monitoring</h3>
+
+@code {
+
+}

@@ -1,0 +1,28 @@
+﻿@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Routing
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+
+    <!-- Bootstrap -->
+    <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.css" />
+
+    <!-- App CSS -->
+    <link rel="stylesheet" href="app.css" />
+
+    <HeadOutlet />
+    <title>Mgt.Lit.Web</title>
+</head>
+
+<body>
+    @*@<component type="typeof(App)" render-mode="InteractiveServer" />*@
+    <Router AppAssembly="@typeof(App).Assembly"> <Found Context="routeData"> <RouteView RouteData="@routeData" DefaultLayout="@typeof(Layout.MainLayout)" /> </Found> <NotFound> <LayoutView Layout="@typeof(Layout.MainLayout)"> <p>ไม่พบหน้านี้</p> </LayoutView> </NotFound> </Router>
+    <script src="lib/bootstrap/dist/js/bootstrap.js"></script>
+    <script src="_framework/blazor.web.js"></script>
+</body>
+
+</html>

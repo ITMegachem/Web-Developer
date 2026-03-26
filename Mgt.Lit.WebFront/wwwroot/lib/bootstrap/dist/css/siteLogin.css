@@ -1,0 +1,145 @@
+﻿/* Background เป็นสีเขียวแบบภาพ */
+.login-bg {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    background: radial-gradient(circle at 30% 20%, #d7e57a 0 110px, transparent 111px), radial-gradient(circle at 70% 60%, #cfe06b 0 140px, transparent 141px), radial-gradient(circle at 20% 75%, #c3d657 0 160px, transparent 161px), radial-gradient(circle at 85% 30%, #b7cc4b 0 120px, transparent 121px), linear-gradient(180deg, #e7f1a9 0%, #cfe06b 100%);
+}
+
+
+/* กล่องหลักสีขาว */
+.login-card {
+    width: min(1100px, 92vw);
+    background: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+    overflow: hidden;
+}
+
+/* แบ่งซ้ายโล่งใส่โลโก้ และขวาเป็นฟอร์ม */
+.login-card-inner {
+    display: flex;
+    min-height: 560px;
+}
+
+.login-left {
+    flex: 1.1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 50px 40px;
+    background: #ffffff;
+}
+
+.login-right {
+    flex: 0.9;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 50px 70px;
+}
+
+@media (max-width: 992px) {
+    .login-card-inner {
+        flex-direction: column;
+        min-height: auto;
+    }
+
+    .login-right {
+        padding: 40px 30px;
+    }
+
+    .login-left {
+        padding: 40px 30px 10px;
+    }
+}
+
+/* โลโก้ในพื้นที่ขาว ๆ */
+.logo-stack {
+    width: 100%;
+    max-width: 520px;
+    text-align: center;
+}
+
+.mgt-logo {
+    width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto 18px;
+}
+
+.one-report-logo {
+    width: 72%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+
+/* Title */
+.login-title {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: #111827;
+    margin-bottom: 26px;
+    text-align: center;
+}
+
+/* Inputs ให้โค้งมนแบบภาพ */
+.form-label {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #374151;
+}
+
+.form-control {
+    height: 48px !important;
+    border-radius: 999px !important;
+    border: 1px solid #d1d5db !important;
+    padding: 0 18px !important;
+    font-size: 1rem !important;
+}
+
+    .form-control:focus {
+        box-shadow: none !important;
+        border-color: #22c55e !important;
+    }
+
+/* ปุ่ม Login เป็นพื้นขาว กรอบเขียว ตัวหนังสือเขียว */
+.btn-login {
+    height: 48px !important;
+    border-radius: 999px !important;
+    background: #ffffff !important;
+    border: 2px solid #22c55e !important;
+    color: #16a34a !important;
+    font-weight: 700 !important;
+    font-size: 1rem !important;
+}
+
+    .btn-login:hover {
+        background: #16a34a !important;
+        border-color: #16a34a !important;
+        color: #ffffff !important;
+    }
+
+    .btn-login:disabled {
+        opacity: 0.7;
+    }
+
+/* ลิงก์ลืมรหัสผ่าน */
+.forgot-password a {
+    color: #16a34a;
+    text-decoration: none;
+}
+
+    .forgot-password a:hover {
+        text-decoration: underline;
+    }
+
+/* Alert */
+.alert {
+    margin-bottom: 18px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+}

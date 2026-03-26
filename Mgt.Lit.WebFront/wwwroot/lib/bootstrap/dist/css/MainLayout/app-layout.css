@@ -1,0 +1,442 @@
+﻿
+/* ปุ่ม Toggle ลอยตัว */
+.toggle-control {
+    position: absolute;
+    right: -15px;
+    top: 30px;
+    width: 30px;
+    height: 30px;
+    background: white;
+    color: #8BC34A;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    z-index: 100;
+}
+
+/* Profile Card สีขาวมน */
+.profile-card-pill {
+    background: white;
+    border: none;
+    padding: 10px;
+    border-radius: 16px;
+    transition: 0.3s;
+}
+.profile-card-pill.collapsed-profile {
+    background: transparent;
+    padding: 0;
+    justify-content: center;
+}
+
+
+.user-name-dark {
+    font-weight: 700;
+    font-size: 18px;
+    color: #0f172a;
+}
+
+.user-role-green {
+    color: #65a30d;
+    font-weight: 600;
+}
+/* Tab Favorites/Recently (UX เดิมแต่สไตล์ใหม่) */
+.tab-pill-wrapper {
+    position: relative;
+    display: flex;
+    background: rgba(255,255,255,0.2);
+    padding: 4px;
+    border-radius: 12px;
+}
+.tab-pill-bg {
+    position: absolute;
+    width: calc(50% - 4px);
+    height: calc(100% - 8px);
+    background: white;
+    border-radius: 10px;
+    transition: 0.3s ease;
+}
+.pos-left { transform: translateX(0); }
+.pos-right { transform: translateX(100%); }
+.tab-pill-btn {
+    flex: 1; border: none; background: transparent;
+    font-size: 12px; font-weight: 600; color: white;
+    z-index: 1; transition: 0.3s;
+}
+.tab-pill-btn.active { color: #8BC34A; }
+
+
+
+.modern-nav-link {
+    display: flex;
+    align-items: center;
+    padding: 12px 15px;
+    color: white;
+    text-decoration: none;
+    border-radius: 12px;
+    margin: 4px 8px;
+    transition: 0.2s;
+}
+.modern-nav-link:hover, .active-highlight {
+    background: rgba(255,255,255,0.2);
+}
+.menu-icon { width: 22px; height: 22px; object-fit: contain; filter: brightness(0) invert(1); }
+
+/* Submenu แบบภาพตัวอย่าง */
+.submenu-modern {
+    margin: 5px 15px;
+    padding-left: 10px;
+    border-left: 1px dashed rgba(255,255,255,0.3);
+}
+.sub-link-modern {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    color: white;
+    font-size: 13px;
+    text-decoration: none;
+    border-radius: 10px;
+    margin-bottom: 5px;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+.sub-link-modern.active { background: white; color: #8BC34A; font-weight: 700; }
+.sub-icon { width: 18px; height: 18px; margin-right: 10px; filter: brightness(0) invert(1); }
+.sub-link-modern.active .sub-icon { filter: none; } /* โชว์สีจริงเมื่อ active */
+
+/* Footer Logo Circle */
+.footer-logo-circle {
+    background: white;
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+.collapsed .footer-logo-circle { width: 45px; height: 45px; }
+
+
+/* ปุ่ม Toggle ลอยตัว */
+.toggle-control {
+    position: absolute;
+    right: -15px;
+    top: 30px;
+    width: 30px;
+    height: 30px;
+    background: white;
+    color: #8BC34A;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    z-index: 100;
+}
+
+/* Profile Card สีขาวมน */
+.profile-card-pill {
+    background: white;
+    border: none;
+    padding: 10px;
+    border-radius: 16px;
+    transition: 0.3s;
+}
+
+    .profile-card-pill.collapsed-profile {
+        background: transparent;
+        padding: 0;
+        justify-content: center;
+    }
+
+.avatar-circle img {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.user-name-dark {
+    font-weight: 700;
+    color: #333;
+    font-size: 14px;
+}
+
+
+
+/* Tab Favorites/Recently (UX เดิมแต่สไตล์ใหม่) */
+.tab-pill-wrapper {
+    position: relative;
+    display: flex;
+    background: rgba(255,255,255,0.2);
+    padding: 4px;
+    border-radius: 12px;
+}
+
+.tab-pill-bg {
+    position: absolute;
+    width: calc(50% - 4px);
+    height: calc(100% - 8px);
+    background: white;
+    border-radius: 10px;
+    transition: 0.3s ease;
+}
+
+.pos-left {
+    transform: translateX(0);
+}
+
+.pos-right {
+    transform: translateX(100%);
+}
+
+.tab-pill-btn {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 600;
+    color: white;
+    z-index: 1;
+    transition: 0.3s;
+}
+
+    .tab-pill-btn.active {
+        color: #8BC34A;
+    }
+
+/* Menu Styling */
+.section-label-white {
+    padding: 20px 15px 5px;
+    font-size: 10px;
+    font-weight: 800;
+    color: rgba(255,255,255,0.6);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.modern-nav-link {
+    display: flex;
+    align-items: center;
+    padding: 12px 15px;
+    color: white;
+    text-decoration: none;
+    border-radius: 12px;
+    margin: 4px 8px;
+    transition: 0.2s;
+}
+
+    .modern-nav-link:hover, .active-highlight {
+        background: rgba(255,255,255,0.2);
+    }
+
+.menu-icon {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+    filter: brightness(0) invert(1);
+}
+
+
+/* sidebar fixed */
+.sidebar-modern {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 270px;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+    .sidebar-modern.collapsed {
+        width: 90px;
+    }
+
+/* ปุ่ม Toggle สีขาวตัวอักษรเขียว */
+.toggle-control {
+    position: absolute;
+    right: -15px;
+    top: 35px;
+    width: 30px;
+    height: 30px;
+    background: white;
+    color: #8BC34A;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    z-index: 100;
+}
+.app-content h1 {
+    margin-top: 0;
+}
+
+
+    .profile-pill-white.collapsed-profile {
+        background: transparent;
+        padding: 0;
+        justify-content: center;
+    }
+
+
+
+.user-role-green {
+    font-size: 11px;
+    color: #8BC34A;
+    font-weight: 600;
+}
+
+/* Tab Favorites (สไตล์เดิมแต่สีใหม่) */
+.tab-pill-wrapper {
+    position: relative;
+    display: flex;
+    background: rgba(255,255,255,0.25);
+    padding: 4px;
+    border-radius: 12px;
+}
+
+.tab-pill-bg {
+    position: absolute;
+    width: calc(50% - 4px);
+    height: calc(100% - 8px);
+    background: white;
+    border-radius: 10px;
+    transition: 0.3s ease;
+}
+
+.tab-pill-btn {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 600;
+    color: white;
+    z-index: 1;
+    transition: 0.3s;
+}
+
+    .tab-pill-btn.active {
+        color: #8BC34A;
+    }
+
+/* Menu Items */
+.section-label-white {
+    padding: 20px 15px 5px;
+    font-size: 10px;
+    font-weight: 800;
+    color: rgba(255,255,255,0.7);
+    text-transform: uppercase;
+}
+
+    
+
+
+/* ===== SUB MENU ===== */
+.sub-pill-link {
+    display: flex;
+    align-items: center;
+    padding: 10px 16px;
+    margin: 5px 20px;
+    border-radius: 10px;
+    color: #475569;
+    text-decoration: none;
+    font-size: 14px;
+    transition: 0.2s;
+}
+   
+
+
+.active-dash .menu-icon-img {
+    filter: none;
+}
+
+
+
+.sub-pill-link.active .sub-icon-img {
+    filter: none;
+}
+
+
+.collapsed .footer-white-circle {
+    width: 60px;
+    height: 60px;
+    right: 15px; /* เมื่อพับให้กลับมาอยู่ตรงกลาง */
+}
+.premium-dropdown {
+    border-radius: 16px;
+    padding: 10px;
+    min-width: 220px;
+    animation: fadeIn 0.2s ease-out;
+}
+
+    .premium-dropdown .dropdown-item {
+        padding: 10px 15px;
+        border-radius: 10px;
+        font-size: 14px;
+        color: #475569;
+        transition: 0.2s;
+    }
+
+        .premium-dropdown .dropdown-item:hover {
+            background-color: #F0FDF4;
+            color: #16A34A;
+        }
+
+        .premium-dropdown .dropdown-item i {
+            font-size: 1.1rem;
+            vertical-align: middle;
+        }
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+/* เต็มจอ */
+.app-shell {
+    
+    min-height: 100vh;
+}
+
+.app-body {
+    display: block; /* ไม่ต้อง flex แล้ว */
+}
+
+
+
+.content-wrapper {
+    flex: 1;
+    display: flex;
+    justify-content: flex-start; /* ไม่ต้องจัดกลาง */
+    margin-left: 270px; /* เท่ากับ width sidebar */
+}
+/* content ชิด sidebar (ไม่มีช่องว่างขาว) */
+.app-content {
+    margin-left: 270px; /* ดันเท่ากับ sidebar */
+    min-height: 100vh;
+    padding: 0; /* กัน gap จาก padding */
+    background: #ffffff; /* สีพื้นของ content */
+    box-shadow: -1px 0 18px rgba(15, 23, 42, 0.06); /* เงาฝั่งซ้ายของแผ่น */
+    transition: all .3s ease;
+    width: calc(100% - 270px);
+}
+/* ถ้าต้องการเว้นระยะด้านใน ให้ทำเป็น inner wrapper */
+.page-inner {
+    padding: 24px 32px; /* เว้นด้านในแทน */
+}
+html, body {
+    margin: 0;
+    padding: 0;
+    background: #ffffff; /* หรือสีเดียวกับหน้า */
+}

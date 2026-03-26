@@ -1,0 +1,10 @@
+﻿@using Microsoft.AspNetCore.Authorization
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@attribute [Authorize(Roles = "admin")]
+@page "/admin/errors"
+@layout AppLayout
+<h3>ErrorLogs</h3>
+
+@code {
+
+}

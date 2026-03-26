@@ -1,0 +1,21 @@
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Mgt.Lit.WebApi/Dockerfile
+    container_name: myapi
+    ports:
+      - "9001:8080"
+    restart: always
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Mgt.Lit.WebFront/Dockerfile
+    container_name: myfrontend
+    ports:
+      - "9000:8080"
+    depends_on:
+      - api
+    restart: always

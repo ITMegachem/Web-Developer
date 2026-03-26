@@ -1,0 +1,82 @@
+﻿@page "/login"
+
+@using Mgt.Lit.Core.DTOs
+@using Mgt.Lit.WebFront.Services
+@using Microsoft.JSInterop
+@inject AuthService Auth
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<h3>Login</h3>
+
+<input class="form-control mb-2"
+       @bind="username"
+       placeholder="Username" />
+
+<input class="form-control mb-2"
+       type="password"
+       @bind="password"
+       placeholder="Password" />
+
+<button class="btn btn-primary" @onclick="DoLogin">
+    Login
+</button>
+<button class="btn btn-danger"
+        type="button"
+        @onclick="TestClick">
+    TEST CLICK
+</button>
+<p>สถานะ: @debugMessage</p>
+
+@if (!string.IsNullOrEmpty(error))
+{
+    <p class="text-danger mt-2">@error</p>
+}
+
+@code {
+    string username = "";
+    string password = "";
+    string? error;
+
+    string debugMessage = "ยังไม่ได้กด";
+    void TestClick()
+    {
+        debugMessage = $"ปุ่มถูกกดแล้ว! เวลา: {DateTime.Now:T}";
+        Console.WriteLine(debugMessage);
+        StateHasChanged(); // Force render (แม้จะไม่จำเป็นใน Blazor Server ปกติ)
+    }
+    async Task DoLogin()
+    {
+        try
+        {
+            Console.WriteLine("CLICK LOGIN");
+
+            var result = await Auth.LoginAsync(new LoginRequestDto
+            {
+                Username = username,
+                Password = password
+            });
+
+            if (result == null)
+            {
+                error = "Username หรือ Password ไม่ถูกต้อง";
+                return;
+            }
+
+            // เก็บ token
+            await JS.InvokeVoidAsync(
+                "localStorage.setItem", "token", result.Token);
+
+            // เก็บ role
+            await JS.InvokeVoidAsync(
+                "localStorage.setItem", "role", result.UserRole);
+
+            Nav.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"LOGIN ERROR: {ex.Message}");
+            error = "เกิดข้อผิดพลาด: " + ex.Message;
+        }
+    }
+}
