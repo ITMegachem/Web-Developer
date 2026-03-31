@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using System.Runtime;
 using System.Security.Claims;
 using System.Text.Json;
 using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
@@ -207,55 +208,70 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
             var sapData = sapResponse?._Detail ?? new List<SapWarehouseStockDetailDto>();
 
+            var salesOrg = GetCompanySalesOrg(permission.CompanyID);
+
             var materialGroups = await _context.View_MGT_GLC_ALL_Sales
                 .AsNoTracking()
-                .Where(x => x.Material != null)
+                .Where(x => x.Material != null && x.SalesGroup != null)
+                .Where(x => string.IsNullOrWhiteSpace(salesOrg) || x.SalesOrganization == salesOrg)
                 .Select(x => new
                 {
                     x.Material,
-                    x.MaterialGroupName
+                    x.MaterialGroupName,
+                    x.SalesGroup,
+                    x.IndustryName,      // [Industry Name]
+                    x.SalesEmployeeID    // Sales_Name
                 })
                 .ToListAsync();
 
             var materialGroupDict = materialGroups
                 .GroupBy(x => x.Material!)
-                .ToDictionary(g => g.Key, g => g.First().MaterialGroupName ?? "");
+                .ToDictionary(
+                    g => g.Key,
+                    g => new
+                    {
+                        MaterialGroupName = g.First().MaterialGroupName ?? "",
+                        SalesGroup = string.Join(", ",
+                            g.Where(x => !string.IsNullOrWhiteSpace(x.SalesGroup))
+                             .Select(x => x.SalesGroup)
+                             .Distinct())
+                    }
+                );
 
             var items = sapData
-                .Select(s =>
-                {
-                    sqlDict.TryGetValue(s.Material_Code ?? "", out var sql);
+     .Select(s =>
+     {
+         sqlDict.TryGetValue(s.Material_Code ?? "", out var sql);
+         materialGroupDict.TryGetValue(s.Material_Code ?? "", out var matInfo); // ✅ เพิ่มบรรทัดนี้
 
-                    decimal unitKg = 0;
-                    if (sql?.NetWeight != null && sql.NetWeight > 0)
-                    {
-                        unitKg = s.Price_KG / sql.NetWeight.Value;
-                    }
+         decimal unitKg = 0;
+         if (sql?.NetWeight != null && sql.NetWeight > 0)
+         {
+             unitKg = s.Price_KG / sql.NetWeight.Value;
+         }
 
-                    return new MaterialStockResponseDto
-                    {
-                        MaterialCode = s.Material_Code,
-                        MaterialDescription = s.Material_Name,
-                        BatchNo = s.Batch_Code?.Trim().TrimEnd('.'),
-                        Plant = s.Plant,
-                        StorageLocation = "-",
-                        Unrestricted_Stock = s.Unrestricted_Stock,
-                        QualityInspection = s.Stock_in_QI,
-
-                        TotalValue = permission.CanViewCost
-                            ? s.Value_of_Unrestricted_Stock + s.Value_of_Blocked_Stock + s.Value_of_Stock_in_QI
-                            : 0,
-
-                        CostPerKg = permission.CanViewCost ? s.Price_KG : 0,
-
-                        ExpDate = s.EXP_Date,
-                        Unit = sql?.Unit ?? s.Unit,
-                        MaterialGroup = materialGroupDict.GetValueOrDefault(s.Material_Code ?? "", ""),
-                        ConversionText = sql?.NetWeight?.ToString("G29") ?? "0",
-                        UnitKg = unitKg
-                    };
-                })
-                .GroupBy(x => new { x.BatchNo, x.Unrestricted_Stock })
+         return new MaterialStockResponseDto
+         {
+             MaterialCode = s.Material_Code,
+             MaterialDescription = s.Material_Name,
+             BatchNo = s.Batch_Code?.Trim().TrimEnd('.'),
+             Plant = s.Plant,
+             StorageLocation = "-",
+             Unrestricted_Stock = s.Unrestricted_Stock,
+             QualityInspection = s.Stock_in_QI,
+             TotalValue = permission.CanViewCost
+                 ? s.Value_of_Unrestricted_Stock + s.Value_of_Blocked_Stock + s.Value_of_Stock_in_QI
+                 : 0,
+             CostPerKg = permission.CanViewCost ? s.Price_KG : 0,
+             ExpDate = s.EXP_Date,
+             Unit = sql?.Unit ?? s.Unit,
+             MaterialGroup = matInfo.MaterialGroupName,  // ✅ แก้จาก GetValueOrDefault
+             SalesGroup = matInfo.SalesGroup,            // ✅ ใช้ matInfo แทน
+             ConversionText = sql?.NetWeight?.ToString("G29") ?? "0",
+             UnitKg = unitKg
+         };
+     })
+                 .GroupBy(x => new { x.BatchNo, x.Unrestricted_Stock })
                 .Select(g => g.First())
                 .OrderBy(x => x.BatchNo)
                 .ToList();
@@ -364,8 +380,30 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         .ToListAsync();
 
                     var materialDict = materialInfo
-                        .GroupBy(x => x.Material)
-                        .ToDictionary(g => g.Key, g => g.First());
+    .GroupBy(x => x.Material)
+    .ToDictionary(
+        g => g.Key,
+        g => new
+        {
+            g.First().MaterialGroup1,
+            g.First().MaterialGroupName,
+            SalesGroup = string.Join(", ",
+                g.Where(x => !string.IsNullOrWhiteSpace(x.SalesGroup))
+                 .Select(x => x.SalesGroup)
+                 .Distinct())
+        }
+    );
+
+                    foreach (var item in mergedSapData._Detail)
+                    {
+                        if (!string.IsNullOrWhiteSpace(item.Material_Code) &&
+                            materialDict.TryGetValue(item.Material_Code, out var info))
+                        {
+                            item.MaterialGroup = info.MaterialGroup1;
+                            item.MaterialGroupDescription = info.MaterialGroupName;
+                            item.SalesGroup = info.SalesGroup;   // ✅
+                        }
+                    }
 
                     foreach (var item in mergedSapData._Detail)
                     {

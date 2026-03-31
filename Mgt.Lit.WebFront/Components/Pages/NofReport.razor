@@ -26,7 +26,6 @@
     <div class="filter-card-modern shadow-sm mb-4">
         <div class="row g-3 align-items-end">
 
-            @* Billing Date *@
             <div class="col-6 col-md-4 col-lg-3">
                 <label class="modern-label">Billing Date</label>
                 <input id="dateRange"
@@ -39,7 +38,6 @@
                 }
             </div>
 
-            @* Material *@
             <div class="col-6 col-md-4 col-lg-3">
                 <label class="modern-label">@T("Material")</label>
                 <div class="autocomplete-wrapper">
@@ -64,7 +62,6 @@
                 </div>
             </div>
 
-            @* Run Button *@
             <div class="col-12 col-lg-2 ms-lg-auto">
                 <button class="btn btn-search-pill w-100" disabled="@isLoading" @onclick="RunSearch">
                     @if (isLoading)
@@ -90,8 +87,6 @@
                         <th rowspan="2" style="font-weight:800; vertical-align:middle; min-width:160px;">Material Name</th>
                         <th rowspan="2" style="font-weight:800; vertical-align:middle; min-width:110px;">Sold-To Party</th>
                         <th rowspan="2" style="font-weight:800; vertical-align:middle; min-width:160px;">Sold-To Name</th>
-
-                        @* ✅ header แค่วนชื่อเดือน — ไม่มี r *@
                         @foreach (var m in MonthColumns)
                         {
                             <th style="font-weight:800; text-align:right; min-width:80px;">@m</th>
@@ -99,6 +94,7 @@
                         <th style="font-weight:800; text-align:right; min-width:90px;">Total (KG)</th>
                     </tr>
                 </thead>
+
                 <tbody>
                     @if (pagedItems.Any())
                     {
@@ -109,7 +105,6 @@
                                 <td class="text-muted small">@r.MaterialName</td>
                                 <td class="numeric-green">@r.SoldToParty</td>
                                 <td class="text-muted small">@r.SoldToName</td>
-
                                 @foreach (var m in MonthColumns)
                                 {
                                     var qty = r.MonthlyQty.TryGetValue(m, out var q) ? q : 0;
@@ -117,7 +112,6 @@
                                         @(qty == 0 ? "-" : qty.ToString("N2"))
                                     </td>
                                 }
-
                                 <td style="text-align:right; font-weight:500;">
                                     @{
                                         var total = MonthColumns
@@ -131,9 +125,40 @@
                     }
                     else if (!isLoading)
                     {
-                        <tr><td colspan="@(4 + MonthColumns.Count + 1)" class="text-center py-5">@T("NoData")</td></tr>
+                        <tr>
+                            <td colspan="@(4 + MonthColumns.Count + 1)" class="text-center py-5">
+                                @T("NoData")
+                            </td>
+                        </tr>
                     }
                 </tbody>
+
+                @if (pagedItems.Any())
+                {
+                    <tfoot>
+                        <tr style="background: var(--color-background-secondary); font-weight:600; border-top: 2px solid var(--color-border-primary);">
+                            <td colspan="4" style="font-weight:700;">Grand Total</td>
+                            @foreach (var m in MonthColumns)
+                            {
+                                var colTotal = pagedItems
+                                    .Where(r => r.MonthlyQty.ContainsKey(m))
+                                    .Sum(r => r.MonthlyQty[m]);
+                                <td style="text-align:right; font-weight:700;">
+                                    @(colTotal == 0 ? "-" : colTotal.ToString("N2"))
+                                </td>
+                            }
+                            <td style="text-align:right; font-weight:700; color: var(--color-text-success);">
+                                @{
+                                    var grandTotal = pagedItems
+                                        .SelectMany(r => r.MonthlyQty.Values)
+                                        .Sum();
+                                }
+                                @grandTotal.ToString("N2")
+                            </td>
+                        </tr>
+                    </tfoot>
+                }
+
             </table>
         </div>
 
@@ -162,8 +187,8 @@
             <i class="bi bi-file-earmark-excel-fill me-2"></i> @T("ExportAs") Excel
         </button>
     </div>
-</div>
 
+</div>
 @code {
 
     // ── State ──────────────────────────────────────────────────────────────────
@@ -405,13 +430,14 @@
             var ws = wb.Worksheets.Add("NOF Report");
 
             var exportMonths = all
-    .SelectMany(r => r.MonthlyQty.Keys)
-    .Distinct()
-    .OrderBy(k => k)
-    .ToList();
+                .SelectMany(r => r.MonthlyQty.Keys)
+                .Distinct()
+                .OrderBy(k => k)
+                .ToList();
 
+            // ── Header row ────────────────────────────────────────────────────
             var headers = new List<string> { "Material", "Material Name", "Sold-To Party", "Sold-To Name" };
-            headers.AddRange(exportMonths);   // ✅ ใช้ exportMonths แทน MonthColumns
+            headers.AddRange(exportMonths);
             headers.Add("Total (KG)");
 
             for (int i = 0; i < headers.Count; i++)
@@ -421,6 +447,7 @@
             headerRow.Style.Font.Bold = true;
             headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
 
+            // ── Data rows ─────────────────────────────────────────────────────
             var row = 2;
             foreach (var r in all)
             {
@@ -430,16 +457,44 @@
                 ws.Cell(row, 4).Value = r.SoldToName;
 
                 var col = 5;
-                foreach (var m in exportMonths)   // ✅ ใช้ exportMonths
+                foreach (var m in exportMonths)
                 {
-                    ws.Cell(row, col).Value = r.MonthlyQty.TryGetValue(m, out var q) ? (double)q : 0;
+                    ws.Cell(row, col).Value =
+                        r.MonthlyQty.TryGetValue(m, out var q) ? (double)q : 0;
                     col++;
                 }
-                ws.Cell(row, col).Value = (double)exportMonths
+
+                // Total ต่อ row
+                var rowTotal = exportMonths
                     .Where(m => r.MonthlyQty.ContainsKey(m))
                     .Sum(m => r.MonthlyQty[m]);
+                ws.Cell(row, col).Value = (double)rowTotal;
+
                 row++;
             }
+
+            // ── Grand Total row (เขียนหลังลูปเสร็จ) ─────────────────────────
+            ws.Cell(row, 1).Value = "Grand Total";
+
+            var gtCol = 5;
+            foreach (var m in exportMonths)
+            {
+                var colSum = all
+                    .Where(r => r.MonthlyQty.ContainsKey(m))
+                    .Sum(r => r.MonthlyQty[m]);
+                ws.Cell(row, gtCol).Value = (double)colSum;
+                gtCol++;
+            }
+
+            var grandTotal = all
+                .SelectMany(r => r.MonthlyQty.Values)
+                .Sum();
+            ws.Cell(row, gtCol).Value = (double)grandTotal;
+
+            // Style Grand Total row
+            var gtRow = ws.Row(row);
+            gtRow.Style.Font.Bold = true;
+            gtRow.Style.Fill.BackgroundColor = XLColor.LightGray;
 
             ws.Columns().AdjustToContents();
 
