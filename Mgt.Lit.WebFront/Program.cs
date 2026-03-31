@@ -44,7 +44,7 @@ builder.Services
     })
     .AddBootstrap5Providers()
     .AddFontAwesomeIcons();
-
+builder.Services.AddScoped<INofReportService, NofReportService>();
 builder.Services.AddHttpClient<StockService>(client =>
 {
     client.BaseAddress = new Uri(apiBaseUrl);//

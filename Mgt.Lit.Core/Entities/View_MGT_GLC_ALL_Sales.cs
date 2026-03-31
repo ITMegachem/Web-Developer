@@ -10,7 +10,11 @@ public class View_MGT_GLC_ALL_Sales
     public string? BillingDocumentType { get; set; }
     public DateTime? BillingDocumentDate { get; set; } // ใช้ DateTime? เผื่อวันที่ว่าง
     public DateTime? DeliveryDate { get; set; }
+    [Column("Soldto-MappingAddress")]
+    public string? SoldtoMappingAddress { get; set; }
 
+    [Column("Shipto-MappingAddress")]
+    public string? ShiptoMappingAddress { get; set; }
     public string? SoldToParty { get; set; }
     public string? ShiptoCode { get; set; }
     public string? CustomerFullName { get; set; }

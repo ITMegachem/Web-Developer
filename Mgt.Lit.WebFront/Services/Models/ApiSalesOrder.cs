@@ -17,5 +17,8 @@
         public string Material { get; set; } = "";
         public string MaterialName { get; set; } = "";
         public string SalesEmployee { get; set; } = "";
+        public string? SoldToMappingAddress { get; set; }  // ✅ เพิ่ม
+        public string? ShipToMappingAddress { get; set; }  // ✅ เพิ่ม
+
     }
 }

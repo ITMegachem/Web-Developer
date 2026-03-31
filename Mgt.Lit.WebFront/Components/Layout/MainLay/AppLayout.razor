@@ -3,6 +3,7 @@
 @using Mgt.Lit.WebFront.Auth
 @inject Mgt.Lit.WebFront.Auth.AuthState AuthState
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 <div class="app-shell @(IsCollapsed ? "collapsed" : "")">
 
     @* ── Hamburger button (mobile only) ── *@
@@ -93,7 +94,23 @@
             background: #157347;
         }
 </style>
-
+@* ต่อท้าย HTML ก่อน @code *@
+<script>
+    window.showConsoleBranding = function () {
+        console.log(
+            '%c MGT - DO IT RIGHT ',
+            'background: linear-gradient(135deg, #3a7d44, #1a3a5c); color: white; font-size: 22px; font-weight: bold; padding: 12px 24px; border-radius: 8px;'
+        );
+        console.log(
+            '%c \u00A9 2025 Megachem (Thailand) Co., Ltd. | dashboard.megachem.co.th ',
+            'color: #3a7d44; font-size: 11px;'
+        );
+        console.log(
+            '%c \u26A0\uFE0F STOP! \u0E2B\u0E32\u0E01\u0E21\u0E35\u0E43\u0E04\u0E23\u0E1A\u0E2D\u0E01\u0E43\u0E2B\u0E49\u0E27\u0E32\u0E07\u0E42\u0E04\u0E49\u0E14\u0E17\u0E35\u0E48\u0E19\u0E35\u0E48 \u0E19\u0E31\u0E48\u0E19\u0E04\u0E37\u0E2D\u0E01\u0E32\u0E23\u0E2B\u0E25\u0E2D\u0E01\u0E25\u0E27\u0E07! ',
+            'color: red; font-weight: bold; font-size: 13px;'
+        );
+    };
+</script>
 @code {
     private bool IsCollapsed = false;
     private bool _initialized;
@@ -121,7 +138,7 @@
     {
         if (!firstRender)
             return;
-
+        await JS.InvokeVoidAsync("showConsoleBranding");
         await AuthState.InitializeAsync();
         _initialized = true;
 

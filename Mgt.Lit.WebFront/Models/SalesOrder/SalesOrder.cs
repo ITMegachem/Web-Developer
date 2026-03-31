@@ -14,6 +14,8 @@ namespace Mgt.Lit.WebFront.Models.SalesOrder
         public string MaterialCode { get; set; } = string.Empty;
         public string MaterialDescription { get; set; } = string.Empty;
         public string SalesEmployee { get; set; } = string.Empty;
+        public string SoldToMappingAddress { get; set; } = string.Empty;
+        public string ShipToMappingAddress { get; set; } = string.Empty;
     }
 
     public sealed class SalesOrderFilter
@@ -238,6 +240,27 @@ namespace Mgt.Lit.WebFront.Models.SalesOrder
         public decimal November { get; set; }
         public decimal December { get; set; }
         public decimal Total { get; set; }
+    }
+    // NofReportRowDto.cs
+    public class NofReportRowDto
+    {
+        public string? Material { get; set; }
+        public string? MaterialName { get; set; }
+        public string? SoldToParty { get; set; }
+        public string? SoldToName { get; set; }
+
+        // key = "2026/01" ... "2026/12"
+        public Dictionary<string, decimal> MonthlyQty { get; set; } = new();
+    }
+
+    // NofReportFilter.cs
+    public class NofReportFilter
+    {
+        public string? Material { get; set; }
+        public DateTime? DateFrom { get; set; }
+        public DateTime? DateTo { get; set; }
+        public int Page { get; set; } = 1;
+        public int PageSize { get; set; } = 50;
     }
 
 }

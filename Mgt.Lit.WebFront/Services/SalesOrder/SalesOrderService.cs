@@ -58,8 +58,10 @@ public sealed class SalesOrderService : ISalesOrderService
                     SalesOrderDocument = x.SalesOrderDocument ?? string.Empty,
                     SoldTo = x.SoldToParty ?? string.Empty,
                     SoldToDescription = x.SoldToName ?? string.Empty,
+                    SoldToMappingAddress = x.SoldToMappingAddress ?? string.Empty,  // ✅ เพิ่ม
                     ShipTo = x.ShiptoCode ?? string.Empty,
                     ShipToDescription = x.ShipToName ?? string.Empty,
+                    ShipToMappingAddress = x.ShipToMappingAddress ?? string.Empty,  // ✅ เพิ่ม
                     MaterialCode = x.Material ?? string.Empty,
                     MaterialDescription = x.MaterialName ?? string.Empty,
                     SalesEmployee = x.SalesEmployee ?? string.Empty

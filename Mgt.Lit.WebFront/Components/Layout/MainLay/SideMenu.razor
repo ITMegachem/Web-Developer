@@ -148,6 +148,16 @@
                                             </NavLink>
                                         </li>
                                     }
+                                    @if (CanPage4)
+                                    {
+                                        <li>
+                                            <NavLink href="/nof-report" class="sub-pill-link">
+                                                <img src="/images/inventory-alt.png" class="sub-icon-img" />
+                                                <span>@T("NofReport")</span>
+                                            </NavLink>
+                                        </li>
+                                    }
+                                    
                                 </ul>
                             </div>
                         }
@@ -177,6 +187,13 @@
                                     <NavLink href="/warehouse-stock-movement" class="flyout-item">
                                         <span class="flyout-dot"></span>
                                         @T("StockMovement")
+                                    </NavLink>
+                                }
+                                @if (CanPage4)
+                                {
+                                    <NavLink href="/nof-report" class="flyout-item">
+                                        <span class="flyout-dot"></span>
+                                        @T("NofReport")
                                     </NavLink>
                                 }
                             </div>
@@ -253,8 +270,9 @@
     private bool CanPage1 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 1);
     private bool CanPage2 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 2);
     private bool CanPage3 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 3);
+    private bool CanPage4 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 4);
 
-    private bool HasAnyManagementPage => CanPage1 || CanPage2 || CanPage3;
+    private bool HasAnyManagementPage => CanPage1 || CanPage2 || CanPage3 || CanPage4;
 
     // ── lifecycle ─────────────────────────────────────────────────────────────
 

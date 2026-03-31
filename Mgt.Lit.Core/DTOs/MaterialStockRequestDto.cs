@@ -50,6 +50,7 @@ namespace Mgt.Lit.Core.DTOs
 
         public string ConversionText { get; set; }
         public decimal UnitKg { get; set; }
+        //public string? SalesGroup { get; set; }
     }
 
     public class StockMaterialRequestDto

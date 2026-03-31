@@ -5,6 +5,7 @@ using Mgt.Lit.Core.Services;
 using Mgt.Lit.WebApi.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Text.Json;
@@ -54,13 +55,28 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             var totalCount = await distinctQuery.CountAsync();
 
             var items = await distinctQuery
-                .OrderByDescending(x => x.BillingDocumentDate)
-                .ThenBy(x => x.BillingDocument)
-                .ThenBy(x => x.SalesOrderDocument)
-                .ThenBy(x => x.Material)
-                .Skip((request.Page - 1) * request.PageSize)
-                .Take(request.PageSize)
-                .ToListAsync();
+            .OrderByDescending(x => x.BillingDocumentDate)
+            .ThenBy(x => x.BillingDocument)
+            .ThenBy(x => x.SalesOrderDocument)
+            .ThenBy(x => x.Material)
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .Select(x => new SalesOrderResponseDto        // ✅ เพิ่มตรงนี้
+            {
+                BillingDocument = x.BillingDocument,
+                BillingDocumentDate = x.BillingDocumentDate,
+                SalesOrderDocument = x.SalesOrderDocument,
+                SoldToParty = x.SoldToParty,
+                SoldToName = x.SoldToName,
+                SoldToMappingAddress = x.SoldToMappingAddress,  // ✅ ที่อยู่ Sold-to
+                ShiptoCode = x.ShiptoCode,
+                ShipToName = x.ShipToName,
+                ShipToMappingAddress = x.ShipToMappingAddress,  // ✅ ที่อยู่ Ship-to
+                Material = x.Material,
+                MaterialName = x.MaterialName,
+                SalesEmployee = x.SalesEmployee
+            })
+            .ToListAsync();
 
             return Ok(new
             {
@@ -145,8 +161,10 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     x.SalesOrderDocument,
                     x.SoldToParty,
                     x.SoldToName,
+                    x.SoldToMappingAddress,
                     x.ShiptoCode,
                     x.ShipToName,
+                    x.ShipToMappingAddress,
                     x.Material,
                     x.MaterialName,
                     x.SalesEmployee
@@ -487,6 +505,130 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
             return Ok(items);
         }
+        [Authorize]
+        [HttpPost("nofreport")]
+        public async Task<IActionResult> GetNofReport([FromBody] NofReportRequestDto request)
+        {
+            var permission = await GetCurrentPermissionAsync();
+            if (permission == null)
+                return Unauthorized();
+
+            if (!permission.Page1Access)
+                return Forbid();
+
+            var query = _context.View_MGT_GLC_ALL_Sales
+                .AsNoTracking()
+                .Where(x => x.ProductGroup == "NOF");
+
+            if (!string.IsNullOrWhiteSpace(request.Material))
+            {
+                var keyword = $"%{request.Material.Trim()}%";
+                query = query.Where(x =>
+                    EF.Functions.Like(x.Material, keyword) ||
+                    EF.Functions.Like(x.MaterialName, keyword));
+            }
+
+            if (request.DateFrom.HasValue)
+            {
+                var from = request.DateFrom.Value.Date;
+                query = query.Where(x => x.BillingDocumentDate >= from);
+            }
+
+            if (request.DateTo.HasValue)
+            {
+                var to = request.DateTo.Value.Date.AddDays(1);
+                query = query.Where(x => x.BillingDocumentDate < to);
+            }
+
+            query = ApplySalesPermission(query, permission);
+
+            // ── ❌ ลบ GroupJoin ออกทั้งหมด แล้วใช้ 2 query แทน ────────────────────
+
+            // Step 1: count และดึง sales data
+            var totalCount = await query.CountAsync();
+
+            var salesItems = await query
+                .OrderByDescending(x => x.BillingDocumentDate)
+                .ThenBy(x => x.BillingDocument)
+                .ThenBy(x => x.Material)
+                .Skip((request.Page - 1) * request.PageSize)
+                .Take(request.PageSize)
+                .Select(x => new
+                {
+                    x.BillingDocument,
+                    x.BillingDocumentDate,
+                    x.SoldToParty,
+                    x.SoldToName,
+                    x.Material,
+                    x.MaterialName,
+                    x.ProductGroup,
+                    x.Quantity,
+                    x.Unit,
+                    x.NetAmount,
+                    x.CostAmount,
+                    x.GrossProfit,
+                    x.SalesEmployeeID
+                })
+                .ToListAsync();
+
+            // Step 2: หา material codes จาก sales ที่ดึงมา
+            var materialCodes = salesItems
+                .Where(x => x.Material != null)
+                .Select(x => x.Material!)
+                .Distinct()
+                .ToList();
+
+            // Step 3: ดึง NetWeight แยกต่างหาก → ไม่ join ใน DB
+            var weightDict = new Dictionary<string, decimal?>();
+
+            if (materialCodes.Any())
+            {
+                var weights = await _context.View_MaterialStock_WeightKG
+                    .AsNoTracking()
+                    .Where(x => x.Material != null && materialCodes.Contains(x.Material))
+                    .Select(x => new { x.Material, x.NetWeight })
+                    .ToListAsync();
+
+                weightDict = weights
+                    .GroupBy(x => x.Material!)
+                    .ToDictionary(g => g.Key, g => g.First().NetWeight);
+            }
+
+            // Step 4: map รวมกันใน memory
+            var items = salesItems.Select(x =>
+            {
+                weightDict.TryGetValue(x.Material ?? "", out var netWeight);
+
+                return new NofReportResponseDto
+                {
+                    BillingDocument = x.BillingDocument,
+                    BillingDocumentDate = x.BillingDocumentDate,
+                    SoldToParty = x.SoldToParty,
+                    SoldToName = x.SoldToName,
+                    Material = x.Material,
+                    MaterialName = x.MaterialName,
+                    ProductGroup = x.ProductGroup,
+                    Quantity = x.Quantity,
+                    Unit = x.Unit,
+                    NetAmount = x.NetAmount,
+                    CostAmount = x.CostAmount,
+                    GrossProfit = x.GrossProfit,
+                    SalesEmployee = x.SalesEmployeeID,
+                    NetWeight = netWeight,
+                    QuantityKG = (x.Quantity.HasValue && netWeight.HasValue)
+                                              ? x.Quantity.Value * netWeight.Value
+                                              : (decimal?)null
+                };
+            }).ToList();
+
+            return Ok(new
+            {
+                totalCount,
+                page = request.Page,
+                pageSize = request.PageSize,
+                items
+            });
+        }
         private IQueryable<View_MGT_GLC_ALL_Sales> ApplySalesPermission(
      IQueryable<View_MGT_GLC_ALL_Sales> query,
      View_UserPermission permission)
@@ -661,27 +803,6 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             _ => null
         };
 
-        private bool HasPlantAccess(View_UserPermission permission, string? plant)
-        {
-            var scope = ResolveScope(permission);
-
-            if (scope == DataScopes.CrossCompany)
-            {
-                if (string.IsNullOrWhiteSpace(plant))
-                    return true;
-
-                return CompanyPlants.Values.Any(x => x.Contains(plant));
-            }
-
-            if (string.IsNullOrWhiteSpace(plant))
-                return false;
-
-            if (!permission.CompanyID.HasValue)
-                return false;
-
-            return CompanyPlants.TryGetValue(permission.CompanyID.Value, out var plants)
-                   && plants.Contains(plant);
-        }
         private IEnumerable<string> GetPlantsForStockMovement(
     View_UserPermission permission,
     string? requestedPlant)
@@ -730,8 +851,10 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     x.SalesDocument,
                     x.SoldToParty,
                     x.SoldToName,
+                    x.SoldtoMappingAddress,
                     x.ShiptoCode,
                     x.ShipToName,
+                    x.ShiptoMappingAddress,
                     x.Material
                 })
                 .Select(g => new SalesOrderResponseDto
@@ -741,8 +864,10 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     SalesOrderDocument = g.Key.SalesDocument ?? "-",
                     SoldToParty = g.Key.SoldToParty ?? "-",
                     SoldToName = g.Key.SoldToName ?? "-",
+                    SoldToMappingAddress = g.Key.SoldtoMappingAddress ?? "-",
                     ShiptoCode = g.Key.ShiptoCode ?? "-",
                     ShipToName = g.Key.ShipToName ?? "-",
+                    ShipToMappingAddress = g.Key.ShiptoMappingAddress ?? "-",
                     Material = g.Key.Material ?? "-",
 
                     // ไม่เอา MaterialName เป็น key แต่เก็บมาแสดง 1 ค่า
