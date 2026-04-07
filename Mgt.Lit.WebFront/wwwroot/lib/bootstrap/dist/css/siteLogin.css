@@ -123,22 +123,40 @@ body {
     padding: 56px 64px;
 }
 
-.one-report-logo {
-    width: 64%;
-    height: auto;
-    display: block;
-    margin: 0 auto 6px;
+/* Header */
+.login-eyebrow {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #639922;
+    margin-bottom: 8px;
     animation: fadeUp 0.6s cubic-bezier(0.16,1,0.3,1) 0.25s both;
 }
 
 .login-title {
-    font-size: 2rem;
-    font-weight: 800;
+    font-size: 2.255rem;
+    font-weight: 700;
     color: #1a2e05;
-    margin-bottom: 28px;
-    text-align: center;
+    line-height: 1.1;
     letter-spacing: -0.4px;
+    margin-bottom: 0;
+    text-align: left;
     animation: fadeUp 0.6s cubic-bezier(0.16,1,0.3,1) 0.35s both;
+}
+
+.login-title-em {
+    font-style: normal;
+    color: #16a34a;
+    display: block;
+}
+
+.login-sub {
+    font-size: 14.5px;
+    color: #6b7280;
+    margin-top: 8px;
+    margin-bottom: 28px;
+    animation: fadeUp 0.6s cubic-bezier(0.16,1,0.3,1) 0.4s both;
 }
 
 @keyframes fadeUp {
@@ -221,10 +239,9 @@ body {
 
 .form-label {
     display: block;
-    font-size: 0.78rem;
-    font-weight: 700;
-    letter-spacing: 1.3px;
-    text-transform: uppercase;
+    font-size: 0.92rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
     color: #4b5e16;
     margin-bottom: 7px;
 }
@@ -300,7 +317,7 @@ body {
     color: #16a34a;
     font-family: 'Nunito', sans-serif;
     font-size: 0.95rem;
-    font-weight: 800;
+    font-weight: 700;
     letter-spacing: 0.4px;
     cursor: pointer;
     display: flex;
@@ -369,6 +386,7 @@ body {
             text-decoration: underline;
         }
 
+/* Loader */
 .init-loader {
     height: 100vh;
     display: flex;
@@ -386,19 +404,15 @@ body {
     animation: spin 0.8s linear infinite;
 }
 
-/* เพิ่ม/แก้ไข ใน siteLogin.css */
-
+/* Mobile */
 @media (max-width: 768px) {
 
-    /* เปลี่ยนจาก row → column */
     .login-card-inner {
         flex-direction: column;
         min-height: auto;
     }
 
-    /* ฝั่งซ้าย: เปลี่ยนจาก flex:1.15 → แถบด้านบน */
     .login-left {
-        display: flex; /* ไม่ซ่อนแล้ว */
         flex: none;
         width: 100%;
         padding: 32px 40px 24px;
@@ -408,11 +422,10 @@ body {
     }
 
     .logo-stack {
-        max-width: 200px; /* โลโก้เล็กลงพอดีมือถือ */
+        max-width: 200px;
         margin: 0 auto;
     }
 
-    /* ฝั่งขวา: ฟอร์มเต็มความกว้าง */
     .login-right {
         flex: 1;
         padding: 32px 28px 44px;
@@ -424,14 +437,7 @@ body {
         border-radius: 20px;
     }
 
-    .one-report-logo {
-        width: 50%;
-        margin-bottom: 8px;
-    }
-
     .login-title {
-        font-size: 1.6rem;
-        margin-bottom: 20px;
+        font-size: 1.5rem;
     }
-}
 }

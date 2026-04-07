@@ -28,6 +28,7 @@ namespace Mgt.Lit.Core.Data
                 entity.HasNoKey();
                 entity.ToView("View_UserPermission");
             });
+
             // 🔍 1. จัดการ View (เนื่องจากไม่มี Primary Key และต้องการ Query อย่างเดียว)
             modelBuilder.Entity<View_MGT_GLC_ALL_Sales>(entity =>
             {
@@ -56,6 +57,11 @@ namespace Mgt.Lit.Core.Data
                 // การระบุประเภทข้อมูลที่ชัดเจนจะช่วยให้ Index ใน SQL ทำงานได้เร็วขึ้น
                 // entity.Property(e => e.SalesOrganization).HasColumnType("char(4)"); 
             });
+            modelBuilder.Entity<View_Sales_with_Op_SalesOrder>(entity =>
+            {
+                entity.HasNoKey();
+                entity.ToView("View_Sales_with_Op_SalesOrder");
+            });
             // 🔑 2. จัดการ Composite Key สำหรับ MsUserCompany
             modelBuilder.Entity<MsUserCompany>()
                 .HasKey(x => new { x.UserID, x.CompanyID });
@@ -77,6 +83,8 @@ namespace Mgt.Lit.Core.Data
 
         public DbSet<Ms_Product> Ms_Product { get; set; }
         public DbSet<Ms_MaterialGroup1> Ms_MaterialGroup1 { get; set; }
+        public DbSet<View_Sales_with_Op_SalesOrder> View_Sales_with_Op_SalesOrder { get; set; }
+
 
     }
 }

@@ -35,6 +35,7 @@ namespace Mgt.Lit.WebFront.Models.SalesOrder
     {
         public List<T> Items { get; set; } = new();
         public int TotalItems { get; set; }
+        public List<string> AvailableMonths { get; set; } = new();
     }
 
     public sealed class StockRequirementResponse
@@ -227,6 +228,8 @@ namespace Mgt.Lit.WebFront.Models.SalesOrder
     public sealed class MaterialConsumptionDto
     {
         public int Year { get; set; }
+
+        // Quantity (เดิม)
         public decimal January { get; set; }
         public decimal February { get; set; }
         public decimal March { get; set; }
@@ -240,6 +243,23 @@ namespace Mgt.Lit.WebFront.Models.SalesOrder
         public decimal November { get; set; }
         public decimal December { get; set; }
         public decimal Total { get; set; }
+
+        // ✅ KG (เพิ่มใหม่)
+        public decimal? JanuaryKG { get; set; }
+        public decimal? FebruaryKG { get; set; }
+        public decimal? MarchKG { get; set; }
+        public decimal? AprilKG { get; set; }
+        public decimal? MayKG { get; set; }
+        public decimal? JuneKG { get; set; }
+        public decimal? JulyKG { get; set; }
+        public decimal? AugustKG { get; set; }
+        public decimal? SeptemberKG { get; set; }
+        public decimal? OctoberKG { get; set; }
+        public decimal? NovemberKG { get; set; }
+        public decimal? DecemberKG { get; set; }
+        public decimal? TotalKG { get; set; }
+
+        public decimal? NetWeight { get; set; }
     }
     // NofReportRowDto.cs
     public class NofReportRowDto

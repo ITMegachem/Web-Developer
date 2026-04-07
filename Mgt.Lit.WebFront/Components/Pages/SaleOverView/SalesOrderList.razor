@@ -94,8 +94,8 @@
                     <input class="form-control modern-input"
                            value="@materialSearch"
                            @oninput="OnMaterialSearch"
-                           @onfocus="() => showMaterialDropdown = true"
-                           @onblur="OnSoldToBlur"
+                           @onfocus="OnMaterialFocus"
+                           @onblur="OnMaterialBlur"
                            placeholder="Choose Material" />
 
                     @if (materialResults.Any() && showMaterialDropdown)
@@ -218,6 +218,9 @@
     private bool showMaterialDropdown = false;
     private List<MaterialLookup> materialResults = new();
     private string? dateRangeError;
+    private MaterialLookup? _lastSelectedMaterial;
+    private SoldToLookupDto? _lastSelectedSoldTo;
+
     private readonly List<PlantDto> salesOrgs = new()
     {
         new() { PlantCode = "1000", PlantName = "Megachem (Thailand) PCL" },
@@ -320,9 +323,16 @@
             ["ExportAs"] = "ส่งออกเป็น"
         }
     };
+    private async Task OnMaterialBlur()
+    {
+        await Task.Delay(200);
+        showMaterialDropdown = false;
+        // ✅ ไม่ clear materialResults เพื่อให้ RunSearch ใช้ได้
+        await InvokeAsync(StateHasChanged);
+    }
+
     private async Task OnSoldToBlur()
     {
-        // หน่วงเวลาเล็กน้อยเพื่อให้ @onclick ของ row ทำงานก่อน
         await Task.Delay(200);
         showSoldToDropdown = false;
         await InvokeAsync(StateHasChanged);
@@ -390,18 +400,26 @@
     }
 
     private CancellationTokenSource? _materialCts;
-
+    private void OnMaterialFocus()
+    {
+        // ✅ เปิด dropdown เฉพาะเมื่อยังไม่ได้เลือก และมี results อยู่
+        if (string.IsNullOrWhiteSpace(filters.Material) && materialResults.Any())
+            showMaterialDropdown = true;
+    }
     private async Task OnMaterialSearch(ChangeEventArgs e)
     {
         materialSearch = e.Value?.ToString() ?? string.Empty;
-        filters.Material = null; // clear ทันทีเมื่อพิมพ์ใหม่
+        filters.Material = null;
+        _lastSelectedMaterial = null;
         materialResults.Clear();
         showMaterialDropdown = false;
 
         if (string.IsNullOrWhiteSpace(materialSearch) || materialSearch.Length < 2)
+        {
+            await InvokeAsync(StateHasChanged);
             return;
+        }
 
-        // Debounce 300ms
         _materialCts?.Cancel();
         _materialCts = new CancellationTokenSource();
         var token = _materialCts.Token;
@@ -409,27 +427,33 @@
         try
         {
             await Task.Delay(300, token);
-
             if (token.IsCancellationRequested) return;
 
             materialResults = await SalesOrderService.SearchMaterialAsync(materialSearch);
-            showMaterialDropdown = materialResults.Any();
+
+            // ✅ ถ้า exact match เจอ 1 รายการ → auto-select และไม่เปิด dropdown
+            var exact = materialResults.FirstOrDefault(x =>
+                x.Code.Equals(materialSearch.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            if (exact != null)
+            {
+                SelectMaterial(exact);  // ปิด dropdown ใน SelectMaterial อยู่แล้ว
+            }
+            else
+            {
+                showMaterialDropdown = materialResults.Any();
+            }
+
             await InvokeAsync(StateHasChanged);
         }
         catch (TaskCanceledException) { }
-        catch (UnauthorizedAccessException)
-        {
-            Nav.NavigateTo("/", replace: true);
-        }
-        catch
-        {
-            materialResults.Clear();
-            showMaterialDropdown = false;
-        }
+        catch (UnauthorizedAccessException) { Nav.NavigateTo("/", replace: true); }
+        catch { materialResults.Clear(); showMaterialDropdown = false; }
     }
 
     private void SelectMaterial(MaterialLookup item)
     {
+        _lastSelectedMaterial = item;         // ✅ cache ไว้ก่อน
         filters.Material = item.Code;
         materialSearch = $"{item.Code} {item.Name}";
         materialResults.Clear();
@@ -441,14 +465,17 @@
     private async Task OnSoldToSearch(ChangeEventArgs e)
     {
         soldToSearch = e.Value?.ToString() ?? string.Empty;
-        filters.SoldToParty = null; // clear ทันทีเมื่อพิมพ์ใหม่
+        filters.SoldToParty = null;
+        _lastSelectedSoldTo = null;
         soldToResults.Clear();
         showSoldToDropdown = false;
 
         if (string.IsNullOrWhiteSpace(soldToSearch) || soldToSearch.Length < 2)
+        {
+            await InvokeAsync(StateHasChanged);
             return;
+        }
 
-        // Debounce 300ms
         _soldToCts?.Cancel();
         _soldToCts = new CancellationTokenSource();
         var token = _soldToCts.Token;
@@ -456,27 +483,33 @@
         try
         {
             await Task.Delay(300, token);
-
             if (token.IsCancellationRequested) return;
 
             soldToResults = await SalesOrderService.SearchSoldToAsync(soldToSearch);
-            showSoldToDropdown = soldToResults.Any();
+
+            // ✅ ถ้า exact match → auto-select ไม่เปิด dropdown
+            var exact = soldToResults.FirstOrDefault(x =>
+                x.Code.Equals(soldToSearch.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            if (exact != null)
+            {
+                SelectSoldTo(exact);
+            }
+            else
+            {
+                showSoldToDropdown = soldToResults.Any();
+            }
+
             await InvokeAsync(StateHasChanged);
         }
         catch (TaskCanceledException) { }
-        catch (UnauthorizedAccessException)
-        {
-            Nav.NavigateTo("/", replace: true);
-        }
-        catch
-        {
-            soldToResults.Clear();
-            showSoldToDropdown = false;
-        }
+        catch (UnauthorizedAccessException) { Nav.NavigateTo("/", replace: true); }
+        catch { soldToResults.Clear(); showSoldToDropdown = false; }
     }
 
     private void SelectSoldTo(SoldToLookupDto item)
     {
+        _lastSelectedSoldTo = item;
         filters.SoldToParty = item.Code;
         soldToSearch = $"{item.Code} {item.Name}";
         soldToResults.Clear();
@@ -525,25 +558,79 @@
         if (string.IsNullOrWhiteSpace(soldToSearch))
         {
             filters.SoldToParty = null;
+            _lastSelectedSoldTo = null;
         }
-        else if (string.IsNullOrWhiteSpace(filters.SoldToParty))
+        else if (!string.IsNullOrWhiteSpace(filters.SoldToParty))
         {
-            // มีข้อความใน input แต่ไม่ได้เลือก → clear input ออก
-            soldToSearch = string.Empty;
-            soldToResults.Clear();
+            // ✅ เลือกจาก dropdown แล้ว → ใช้ได้เลย
         }
+        else if (_lastSelectedSoldTo != null)
+        {
+            // ✅ cache ยังอยู่ → restore
+            SelectSoldTo(_lastSelectedSoldTo);
+        }
+        else
+        {
+            // ✅ ใช้ค่าที่พิมพ์ตรงๆ เป็น filter
+            var normalized = soldToSearch.Trim();
 
+            var matched = soldToResults.FirstOrDefault(x =>
+                x.Code.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+
+            if (matched != null)
+            {
+                SelectSoldTo(matched);
+            }
+            else
+            {
+                filters.SoldToParty = normalized.Contains(' ')
+                    ? normalized[..normalized.IndexOf(' ')]
+                    : normalized;
+                soldToSearch = filters.SoldToParty;
+            }
+        }
+        
         if (string.IsNullOrWhiteSpace(materialSearch))
         {
             filters.Material = null;
+            _lastSelectedMaterial = null;
         }
-        else if (string.IsNullOrWhiteSpace(filters.Material))
+        else if (!string.IsNullOrWhiteSpace(filters.Material))
         {
-            // มีข้อความใน input แต่ไม่ได้เลือก → clear input ออก
-            materialSearch = string.Empty;
-            materialResults.Clear();
+            // ✅ เลือกจาก dropdown แล้ว → ใช้ได้เลย
+        }
+        else if (_lastSelectedMaterial != null)
+        {
+            // ✅ blur ไปแต่ cache ยังอยู่ → restore
+            SelectMaterial(_lastSelectedMaterial);
+        }
+        else
+        {
+            // ✅ พิมพ์ค้างโดยไม่เลือก → ลอง match exact จาก results ก่อน
+            var normalized = materialSearch.Trim();
+
+            var matched = materialResults.FirstOrDefault(x =>
+                x.Code.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+
+            if (matched != null)
+            {
+                // ตรงกับ item ใน list → เลือกเลย
+                SelectMaterial(matched);
+            }
+            else
+            {
+                // ✅ ไม่มีใน list → ใช้ค่าที่พิมพ์ตรงๆ เป็น filter โดยไม่บังคับเลือก
+                filters.Material = normalized.Contains(' ')
+                    ? normalized[..normalized.IndexOf(' ')]
+                    : normalized;
+                materialSearch = filters.Material;
+            }
         }
 
+        showSoldToDropdown = false;
+        showMaterialDropdown = false;
+        soldToResults.Clear();
+        materialResults.Clear();
         // validate date จาก JS input
         if (_jsModule is not null)
         {
@@ -571,18 +658,22 @@
 
         if (DocDateFrom is null || DocDateTo is null)
         {
-            dateRangeError = "Please select Billing Date range";
-            pagedItems.Clear();
-            totalItems = 0;
-            totalPages = 1;
-            await InvokeAsync(StateHasChanged);
-            return;
+            
+            if (string.IsNullOrWhiteSpace(filters.Document))
+            {
+                dateRangeError = "Please select Billing Date range";
+                pagedItems.Clear();
+                totalItems = 0;
+                totalPages = 1;
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
         }
 
         filters.Page = 1;
         filters.DocDateFrom = DocDateFrom;
         filters.DocDateTo = DocDateTo;
-
+        await InvokeAsync(StateHasChanged);
         await LoadDataAsync();
     }
     private async Task PrevPage()
@@ -623,8 +714,10 @@
                 "Sales Order Document",
                 "Sold to",
                 "Sold to Description",
+                "Sold to Address",        // ✅ เพิ่ม
                 "Ship to",
                 "Ship to Description",
+                "Ship to Address",        // ✅ เพิ่ม
                 "Material Code",
                 "Material Description",
                 "Sales Employee"
@@ -647,11 +740,13 @@
                 ws.Cell(row, 3).Value = r.SalesOrderDocument;
                 ws.Cell(row, 4).Value = r.SoldTo;
                 ws.Cell(row, 5).Value = r.SoldToDescription;
-                ws.Cell(row, 6).Value = r.ShipTo;
-                ws.Cell(row, 7).Value = r.ShipToDescription;
-                ws.Cell(row, 8).Value = r.MaterialCode;
-                ws.Cell(row, 9).Value = r.MaterialDescription;
-                ws.Cell(row, 10).Value = r.SalesEmployee;
+                ws.Cell(row, 6).Value = r.SoldToMappingAddress;   // ✅ เพิ่ม
+                ws.Cell(row, 7).Value = r.ShipTo;
+                ws.Cell(row, 8).Value = r.ShipToDescription;
+                ws.Cell(row, 9).Value = r.ShipToMappingAddress;   // ✅ เพิ่ม
+                ws.Cell(row, 10).Value = r.MaterialCode;
+                ws.Cell(row, 11).Value = r.MaterialDescription;
+                ws.Cell(row, 12).Value = r.SalesEmployee;
                 row++;
             }
 

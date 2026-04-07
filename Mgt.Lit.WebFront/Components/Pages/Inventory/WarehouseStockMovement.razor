@@ -46,7 +46,8 @@
                     <input class="form-control modern-input"
                            value="@materialSearch"
                            @oninput="OnMaterialSearch"
-                           @onfocus="() => showMaterialDropdown = true"
+                           @onfocus="OnMaterialFocus"
+                           @onblur="OnMaterialBlur"
                            placeholder="Choose Material..." />
 
                     @if (materialResults.Any() && showMaterialDropdown)
@@ -90,6 +91,10 @@
         <div class="table-responsive flex-grow-1">
             <table class="table modern-table mb-0 fixed-table">
                 <thead class="table-light">
+                    @{
+                        var colCount = 8 + (CanViewVendor ? 1 : 0) + (CanViewCustomer ? 1 : 0);
+                    }
+
                     <tr class="table-header-modern">
                         <th class="text-center">Date</th>
                         <th class="text-center">MRP<br />Element Type</th>
@@ -97,9 +102,15 @@
                         <th class="text-center">Receipt /<br />Reqmt</th>
                         <th class="text-center">Available<br />Qty</th>
                         <th class="text-center">Additional<br />Info IN</th>
-                        <th class="text-center">Vendor Code /<br />Vendor Name</th>
+                        @if (CanViewVendor)
+                        {
+                            <th class="text-center">Vendor Code /<br />Vendor Name</th>
+                        }
                         <th class="text-center">Additional<br />Info Out</th>
-                        <th class="text-center">Customer Code /<br />Customer Name</th>
+                        @if (CanViewCustomer)
+                        {
+                            <th class="text-center">Customer Code /<br />Customer Name</th>
+                        }
                         <th class="text-center">Material<br />Group</th>
                     </tr>
                 </thead>
@@ -120,23 +131,10 @@
                                 <td class="text-center align-middle text-nowrap">
                                     @item.DocumentDate.ToString("dd-MM-yyyy")
                                 </td>
-
-                                <td class="text-center align-middle">
-                                    @item.ElementType
-                                </td>
-
-                                <td class="text-center align-middle">
-                                    @item.RefDoc
-                                </td>
-
-                                <td class="text-center align-middle">
-                                    @item.ReceiptReqmtQty.ToString("N0")
-                                </td>
-
-                                <td class="text-center align-middle">
-                                    @item.AvailableQty.ToString("N0")
-                                </td>
-                                
+                                <td class="text-center align-middle">@item.ElementType</td>
+                                <td class="text-center align-middle">@item.RefDoc</td>
+                                <td class="text-center align-middle">@item.ReceiptReqmtQty.ToString("N0")</td>
+                                <td class="text-center align-middle">@item.AvailableQty.ToString("N0")</td>
                                 <td class="text-center align-middle">
                                     @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoIn))
                                     {
@@ -147,24 +145,21 @@
                                         }
                                     }
                                 </td>
-
-                                <td class="align-middle">
-                                    <div class="fw-bold">@item.VendorCode</div>
-                                    <div class="text-muted small">@item.VendorName</div>
-                                </td>
-                                
-                              
+                                @if (CanViewVendor)
+                                {
+                                    <td class="align-middle">
+                                        <div class="fw-bold">@item.VendorCode</div>
+                                        <div class="text-muted small">@item.VendorName</div>
+                                    </td>
+                                }
                                 <td class="text-center align-middle">
                                     @{
                                         var infoOut = string.IsNullOrWhiteSpace(item.AdditionalInfoIn)
-                                            ? item.AdditionalInfoOut
-                                            : "";
-
+                                            ? item.AdditionalInfoOut : "";
                                         var filteredLines = (infoOut ?? "")
                                             .Split('\n')
                                             .Where(line => !line.Trim().StartsWith("WCD", StringComparison.OrdinalIgnoreCase))
                                             .ToList();
-
                                         var displayText = string.Join("\n", filteredLines).Trim();
                                     }
                                     @if (!string.IsNullOrWhiteSpace(displayText))
@@ -172,11 +167,13 @@
                                         @displayText
                                     }
                                 </td>
-                                <td class="align-middle">
-                                    <div class="fw-bold">@item.CustomerCode</div>
-                                    <div class="text-muted small">@item.CustomerName</div>
-                                </td>
-
+                                @if (CanViewCustomer)
+                                {
+                                    <td class="align-middle">
+                                        <div class="fw-bold">@item.CustomerCode</div>
+                                        <div class="text-muted small">@item.CustomerName</div>
+                                    </td>
+                                }
                                 <td class="align-middle text-center">
                                     @if (!string.IsNullOrEmpty(item.MaterialGroup))
                                     {
@@ -190,7 +187,11 @@
                     else if (!isLoading)
                     {
                         <tr>
-                            <td colspan="10" class="text-center text-muted py-4">
+                            <td colspan="@colCount" class="text-center text-muted py-4">
+                                กรุณากรอกข้อมูลและค้นหา
+                            </td>
+
+                            <td colspan="@colCount" class="text-center text-muted py-4">
                                 No data found
                             </td>
                         </tr>
@@ -254,40 +255,91 @@
     private string materialSearch = "";
     private bool showMaterialDropdown = false;
     private List<MaterialLookup> materialResults = new();
+    private CancellationTokenSource? _materialCts;
+    private bool CanViewVendor => AuthState.Permission?.CanViewVendor ?? false;
+    private bool CanViewCustomer => AuthState.Permission?.CanViewCustomer ?? false;
+    private MaterialLookup? _lastSelectedMaterial;
     private async Task OnMaterialSearch(ChangeEventArgs e)
     {
         materialSearch = e.Value?.ToString() ?? "";
+        selectedMaterial = null;
+        _lastSelectedMaterial = null;  // ✅ reset cache
+        materialResults.Clear();
+        showMaterialDropdown = false;
+        stockData = null;
+        hasSearched = false;
 
-        if (string.IsNullOrWhiteSpace(materialSearch))
+        if (string.IsNullOrWhiteSpace(materialSearch) || materialSearch.Length < 2)
         {
-            selectedMaterial = null;
-            materialResults.Clear();
-            showMaterialDropdown = false;
+            await InvokeAsync(StateHasChanged);
             return;
         }
 
-        if (materialSearch.Length < 2)
+        _materialCts?.Cancel();
+        _materialCts = new CancellationTokenSource();
+        var token = _materialCts.Token;
+
+        try
         {
-            materialResults.Clear();
-            return;
+            await Task.Delay(150, token);
+            if (token.IsCancellationRequested) return;
+
+            materialResults = await StockService.SearchMaterialForStockMovement(materialSearch)
+                ?? new();
+
+            // ✅ exact match → auto-select ปิด dropdown ทันที
+            var exact = materialResults.FirstOrDefault(x =>
+                x.Code.Equals(materialSearch.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            if (exact != null)
+            {
+                SelectMaterial(exact);
+            }
+            else
+            {
+                showMaterialDropdown = materialResults.Any();
+            }
+
+            await InvokeAsync(StateHasChanged);
         }
+        catch (TaskCanceledException) { }
+    }
+    public async ValueTask DisposeAsync()
+    {
+        _materialCts?.Cancel();
+        _materialCts?.Dispose();
 
-        materialResults = await StockService.SearchMaterialForStockMovement(materialSearch)
-            ?? new List<MaterialLookup>();
+        try
+        {
+            if (_jsModule is not null)
+                await _jsModule.DisposeAsync();
+        }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+    }
+    private void OnMaterialFocus()
+    {
+        // ✅ ไม่เปิดถ้า input ตรงกับ selectedMaterial แล้ว (แสดงว่าเลือกแล้ว)
+        if (!string.IsNullOrWhiteSpace(selectedMaterial) &&
+            materialSearch.StartsWith(selectedMaterial, StringComparison.OrdinalIgnoreCase))
+            return;
 
-        var exactMatch = materialResults
-            .FirstOrDefault(x => x.Code.Equals(materialSearch, StringComparison.OrdinalIgnoreCase));
+        if (materialResults.Any())
+            showMaterialDropdown = true;
+    }
 
-        selectedMaterial = exactMatch?.Code ?? materialSearch;
-        showMaterialDropdown = true;
+    private async Task OnMaterialBlur()
+    {
+        await Task.Delay(200);
+        showMaterialDropdown = false;
+        // ✅ ไม่ clear materialResults เพื่อให้ OnSearch ใช้ match ได้
+        await InvokeAsync(StateHasChanged);
     }
     private void SelectMaterial(MaterialLookup item)
     {
+        _lastSelectedMaterial = item;  // ✅ cache
         selectedMaterial = item.Code;
-
-        // ✔️ แสดงเฉยๆ แต่ไม่ทำให้ search พัง
         materialSearch = item.Code;
-
         materialResults.Clear();
         showMaterialDropdown = false;
     }
@@ -343,15 +395,41 @@
     private async Task OnSearch()
     {
         hasSearched = true;
+        showMaterialDropdown = false;
 
         var input = materialSearch?.Trim();
+        if (string.IsNullOrWhiteSpace(input)) return;
 
-        if (string.IsNullOrWhiteSpace(input))
-            return;
+        if (!string.IsNullOrWhiteSpace(selectedMaterial))
+        {
+            // ✅ เลือกจาก dropdown แล้ว → ใช้ได้เลย
+        }
+        else if (_lastSelectedMaterial != null)
+        {
+            // ✅ cache ยังอยู่ → restore
+            SelectMaterial(_lastSelectedMaterial);
+        }
+        else
+        {
+            // ✅ พิมพ์ค้าง → exact match จาก results ก่อน
+            var matched = materialResults.FirstOrDefault(x =>
+                x.Code.Equals(input, StringComparison.OrdinalIgnoreCase));
 
-        // ✔️ ใช้ค่าที่ user พิมพ์ตรงๆ
-        selectedMaterial = input;
+            if (matched != null)
+            {
+                SelectMaterial(matched);
+            }
+            else
+            {
+                // ✅ ใช้ค่าที่พิมพ์ตรงๆ ไม่บังคับเลือก
+                selectedMaterial = input.Contains(' ') ? input[..input.IndexOf(' ')] : input;
+                materialSearch = selectedMaterial;
+            }
+        }
 
+        materialResults.Clear();
+
+        await InvokeAsync(StateHasChanged); // ✅ ปิด dropdown ก่อน load
         await LoadData();
     }
     private async Task ExportData()
@@ -447,43 +525,104 @@
         using var wb = new XLWorkbook();
         var ws = wb.Worksheets.Add("Consumption");
 
+        // ── Header ────────────────────────────────────────────────────────────
         string[] headers =
-        {
-        "Year","Jan","Feb","Mar","Apr","May","Jun",
-        "Jul","Aug","Sep","Oct","Nov","Dec","Total"
-    };
+{
+    "Year",
+    "January", "January (KG)",
+    "February", "February (KG)",
+    "March", "March (KG)",
+    "April", "April (KG)",
+    "May", "May (KG)",
+    "June", "June (KG)",
+    "July", "July (KG)",
+    "August", "August (KG)",
+    "September", "September (KG)",
+    "October", "October (KG)",
+    "November", "November (KG)",
+    "December", "December (KG)",
+    "Total", "Total (KG)"
+};
 
         for (int i = 0; i < headers.Length; i++)
             ws.Cell(1, i + 1).Value = headers[i];
 
         ws.Row(1).Style.Font.Bold = true;
+        ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightGreen;
 
+        // ── Data Rows ─────────────────────────────────────────────────────────
         int row = 2;
-
         foreach (var item in data)
         {
             ws.Cell(row, 1).Value = item.Year;
             ws.Cell(row, 2).Value = item.January;
-            ws.Cell(row, 3).Value = item.February;
-            ws.Cell(row, 4).Value = item.March;
-            ws.Cell(row, 5).Value = item.April;
-            ws.Cell(row, 6).Value = item.May;
-            ws.Cell(row, 7).Value = item.June;
-            ws.Cell(row, 8).Value = item.July;
-            ws.Cell(row, 9).Value = item.August;
-            ws.Cell(row, 10).Value = item.September;
-            ws.Cell(row, 11).Value = item.October;
-            ws.Cell(row, 12).Value = item.November;
-            ws.Cell(row, 13).Value = item.December;
-            ws.Cell(row, 14).Value = item.Total;
+            ws.Cell(row, 3).Value = item.JanuaryKG;
+            ws.Cell(row, 4).Value = item.February;
+            ws.Cell(row, 5).Value = item.FebruaryKG;
+            ws.Cell(row, 6).Value = item.March;
+            ws.Cell(row, 7).Value = item.MarchKG;
+            ws.Cell(row, 8).Value = item.April;
+            ws.Cell(row, 9).Value = item.AprilKG;
+            ws.Cell(row, 10).Value = item.May;
+            ws.Cell(row, 11).Value = item.MayKG;
+            ws.Cell(row, 12).Value = item.June;
+            ws.Cell(row, 13).Value = item.JuneKG;
+            ws.Cell(row, 14).Value = item.July;
+            ws.Cell(row, 15).Value = item.JulyKG;
+            ws.Cell(row, 16).Value = item.August;
+            ws.Cell(row, 17).Value = item.AugustKG;
+            ws.Cell(row, 18).Value = item.September;
+            ws.Cell(row, 19).Value = item.SeptemberKG;
+            ws.Cell(row, 20).Value = item.October;
+            ws.Cell(row, 21).Value = item.OctoberKG;
+            ws.Cell(row, 22).Value = item.November;
+            ws.Cell(row, 23).Value = item.NovemberKG;
+            ws.Cell(row, 24).Value = item.December;
+            ws.Cell(row, 25).Value = item.DecemberKG;
+            ws.Cell(row, 26).Value = item.Total;
+            ws.Cell(row, 27).Value = item.TotalKG;
             row++;
         }
 
+        // ── Total Row ─────────────────────────────────────────────────────────
+        ws.Cell(row, 1).Value = "Total";
+        ws.Cell(row, 2).Value = data.Sum(x => x.January);
+        ws.Cell(row, 3).Value = data.Sum(x => x.JanuaryKG ?? 0);
+        ws.Cell(row, 4).Value = data.Sum(x => x.February);
+        ws.Cell(row, 5).Value = data.Sum(x => x.FebruaryKG ?? 0);
+        ws.Cell(row, 6).Value = data.Sum(x => x.March);
+        ws.Cell(row, 7).Value = data.Sum(x => x.MarchKG ?? 0);
+        ws.Cell(row, 8).Value = data.Sum(x => x.April);
+        ws.Cell(row, 9).Value = data.Sum(x => x.AprilKG ?? 0);
+        ws.Cell(row, 10).Value = data.Sum(x => x.May);
+        ws.Cell(row, 11).Value = data.Sum(x => x.MayKG ?? 0);
+        ws.Cell(row, 12).Value = data.Sum(x => x.June);
+        ws.Cell(row, 13).Value = data.Sum(x => x.JuneKG ?? 0);
+        ws.Cell(row, 14).Value = data.Sum(x => x.July);
+        ws.Cell(row, 15).Value = data.Sum(x => x.JulyKG ?? 0);
+        ws.Cell(row, 16).Value = data.Sum(x => x.August);
+        ws.Cell(row, 17).Value = data.Sum(x => x.AugustKG ?? 0);
+        ws.Cell(row, 18).Value = data.Sum(x => x.September);
+        ws.Cell(row, 19).Value = data.Sum(x => x.SeptemberKG ?? 0);
+        ws.Cell(row, 20).Value = data.Sum(x => x.October);
+        ws.Cell(row, 21).Value = data.Sum(x => x.OctoberKG ?? 0);
+        ws.Cell(row, 22).Value = data.Sum(x => x.November);
+        ws.Cell(row, 23).Value = data.Sum(x => x.NovemberKG ?? 0);
+        ws.Cell(row, 24).Value = data.Sum(x => x.December);
+        ws.Cell(row, 25).Value = data.Sum(x => x.DecemberKG ?? 0);
+        ws.Cell(row, 26).Value = data.Sum(x => x.Total);
+        ws.Cell(row, 27).Value = data.Sum(x => x.TotalKG ?? 0);
+
+        var totalRow = ws.Row(row);
+        totalRow.Style.Font.Bold = true;
+        totalRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+        totalRow.Style.Border.TopBorder = XLBorderStyleValues.Medium;
+
         ws.Columns().AdjustToContents();
 
+        // ── Download ──────────────────────────────────────────────────────────
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
-
         var base64 = Convert.ToBase64String(ms.ToArray());
 
         await _jsModule.InvokeVoidAsync(

@@ -18,6 +18,7 @@
 @inject IHttpClientFactory HttpFactory
 @inject DownloadLogService DownloadLogSvc
 @inject PageContext PageContext
+@inject ISalesOrderService SalesOrderService
 
 
 <div class="so-page-wrapper">
@@ -232,7 +233,8 @@
     private List<MaterialGroupDto> filteredMaterialGroups = new();
     private int totalItems;
     private int totalPages = 1;
-
+    private MaterialLookup? _lastSelectedMaterial;
+    private CancellationTokenSource? _materialCts;
     private bool isLoading;
     private bool _isDisposed;
     private IJSObjectReference? _jsModule;
@@ -273,62 +275,57 @@
 
     private void OnMaterialFocus()
     {
-        showMaterialDropdown = true;
+        // ✅ เปิด dropdown เฉพาะเมื่อยังไม่ได้เลือก
+        if (string.IsNullOrWhiteSpace(filters.Material) && materialResults.Any())
+            showMaterialDropdown = true;
     }
 
     private async Task OnMaterialSearch(ChangeEventArgs e)
     {
         materialSearch = e.Value?.ToString() ?? string.Empty;
+        filters.Material = null;
+        _lastSelectedMaterial = null;
+        materialResults.Clear();
+        showMaterialDropdown = false;
 
-        if (string.IsNullOrWhiteSpace(materialSearch))
+        if (string.IsNullOrWhiteSpace(materialSearch) || materialSearch.Length < 2)
         {
-            filters.Material = null;
-            materialResults.Clear();
-            showMaterialDropdown = false;
+            await InvokeAsync(StateHasChanged);
             return;
         }
 
-        if (materialSearch.Length < 2)
-        {
-            materialResults.Clear();
-            showMaterialDropdown = false;
-            return;
-        }
+        // Debounce 300ms
+        _materialCts?.Cancel();
+        _materialCts = new CancellationTokenSource();
+        var token = _materialCts.Token;
 
         try
         {
-            var apiPlant = GetStockApiPlantCode(filters.Plant);
+            await Task.Delay(300, token);
+            if (token.IsCancellationRequested) return;
 
-            var result = await stockService.GetWarehouseStockCostByBatch(
-                apiPlant,
-                filters.MaterialGroup,
-                materialSearch,
-                null);
+            // เป็น
+            materialResults = await stockService.SearchMaterialAsync(materialSearch) ?? new();
 
-            materialResults = result?.Items?
-                .Select(x => new MaterialLookup
-                {
-                    Code = x.MaterialCode,
-                    Name = x.MaterialDescription
-                })
-                .Where(x => !string.IsNullOrWhiteSpace(x.Code))
-                .DistinctBy(x => x.Code)
-                .Take(10)
-                .ToList() ?? new();
+            // ✅ exact match → auto-select ปิด dropdown ทันที
+            var exact = materialResults.FirstOrDefault(x =>
+                x.Code.Equals(materialSearch.Trim(), StringComparison.OrdinalIgnoreCase));
 
-            showMaterialDropdown = materialResults.Any();
+            if (exact != null)
+            {
+                SelectMaterial(exact);
+            }
+            else
+            {
+                showMaterialDropdown = materialResults.Any();
+            }
+
+            await InvokeAsync(StateHasChanged);
         }
-        catch (UnauthorizedAccessException)
-        {
-            Nav.NavigateTo("/", replace: true);
-        }
-        catch
-        {
-            materialResults.Clear();
-            showMaterialDropdown = false;
-        }
+        catch (TaskCanceledException) { }
+        catch (UnauthorizedAccessException) { Nav.NavigateTo("/", replace: true); }
+        catch { materialResults.Clear(); showMaterialDropdown = false; }
     }
-
     private async Task LoadDataAsync()
     {
         try
@@ -400,6 +397,7 @@
     }
     private void SelectMaterial(MaterialLookup item)
     {
+        _lastSelectedMaterial = item;  // ✅ cache
         filters.Material = item.Code;
         materialSearch = $"{item.Code} {item.Name}";
         materialResults.Clear();
@@ -410,21 +408,58 @@
     private async Task RunSearch()
     {
         materialError = null;
+        showMaterialDropdown = false;
 
-        var normalizedMaterial = NormalizeMaterialForApi(filters.Material);
+        if (string.IsNullOrWhiteSpace(materialSearch))
+        {
+            filters.Material = null;
+            _lastSelectedMaterial = null;
+        }
+        else if (!string.IsNullOrWhiteSpace(filters.Material))
+        {
+            // ✅ เลือกจาก dropdown แล้ว → ใช้ได้เลย
+        }
+        else if (_lastSelectedMaterial != null)
+        {
+            // ✅ cache ยังอยู่ → restore
+            SelectMaterial(_lastSelectedMaterial);
+        }
+        else
+        {
+            // ✅ พิมพ์ค้าง → ลอง exact match จาก results ก่อน
+            var normalized = NormalizeMaterialForApi(materialSearch);
 
-        if (string.IsNullOrWhiteSpace(normalizedMaterial))
-            normalizedMaterial = NormalizeMaterialForApi(materialSearch);
+            var matched = materialResults.FirstOrDefault(x =>
+                x.Code.Equals(normalized, StringComparison.OrdinalIgnoreCase));
 
-        if (string.IsNullOrWhiteSpace(normalizedMaterial))
+            if (matched != null)
+            {
+                SelectMaterial(matched);
+            }
+            else
+            {
+                // ✅ ใช้ค่าที่พิมพ์ตรงๆ ไม่บังคับเลือก
+                filters.Material = normalized;
+                if (!string.IsNullOrWhiteSpace(normalized) && !materialSearch.StartsWith(normalized))
+                    materialSearch = normalized;
+            }
+        }
+
+        materialResults.Clear();
+
+        var finalMaterial = NormalizeMaterialForApi(filters.Material);
+
+        if (string.IsNullOrWhiteSpace(finalMaterial))
         {
             materialError = "Please enter Material";
+            await InvokeAsync(StateHasChanged);
             return;
         }
 
-        filters.Material = normalizedMaterial;
+        filters.Material = finalMaterial;
         filters.Page = 1;
 
+        await InvokeAsync(StateHasChanged); // ✅ ปิด dropdown ก่อน load
         await LoadDataAsync();
     }
     private Task PrevPage()
@@ -519,12 +554,10 @@
 
                 if (!HideCostColumns)
                 {
-                    ws.Cell(row, col++).Value = r.UnitKg;
-                    ws.Cell(row, col++).Value = r.CostPerKg;
-                    ws.Cell(row, col++).Value = r.TotalValue;
+                    ws.Cell(row, col++).Value = Math.Round(r.UnitKg, 2);      // ✅ Packet/Price
+                    ws.Cell(row, col++).Value = Math.Round(r.CostPerKg, 2);   // ✅ Cost / KG
+                    ws.Cell(row, col++).Value = Math.Round(r.TotalValue, 2);  // ✅ Total Value
                 }
-
-                row++;
             }
 
             ws.Columns().AdjustToContents();
@@ -725,7 +758,8 @@
             return;
 
         _isDisposed = true;
-
+        _materialCts?.Cancel();
+        _materialCts?.Dispose();
         var module = _jsModule;
         _jsModule = null;
 

@@ -56,6 +56,7 @@ public sealed class NofReportService : INofReportService
                     if (item.BillingDocumentDate.HasValue)
                     {
                         var key = item.BillingDocumentDate.Value.ToString("yyyy/MM");
+                        Console.WriteLine($"[DEBUG] key={key}, QuantityKG={item.QuantityKG}, Quantity={item.Quantity}");
                         monthlyQty.TryGetValue(key, out var existing);
 
                         // ✅ เปลี่ยนจาก Quantity → QuantityKG
@@ -78,32 +79,41 @@ public sealed class NofReportService : INofReportService
         return new PagedResult<NofReportRowDto>
         {
             Items = rows,
-            TotalItems = apiResult.TotalCount
+            TotalItems = apiResult.TotalCount,
+            AvailableMonths = apiResult.AvailableMonths ?? new()
         };
     }
 
     public async Task<List<MaterialLookup>> SearchMaterialAsync(
-        string keyword,
-        CancellationToken cancellationToken = default)
+    string keyword,
+    CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(keyword))
             return new List<MaterialLookup>();
 
-        var result = await GetNofReportAsync(new NofReportFilter
-        {
-            Material = keyword.Trim(),
-            Page = 1,
-            PageSize = 10
-        }, cancellationToken);
+        EnsureAuthenticated();
 
-        return result.Items
-            .Where(x => !string.IsNullOrWhiteSpace(x.Material))
+        var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"api/MGT_SalesOrder/MaterialLookup?keyword={Uri.EscapeDataString(keyword.Trim())}");
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", _auth.Token);
+        request.Headers.TryAddWithoutValidation("X-Menu", "Sales");
+        request.Headers.TryAddWithoutValidation("X-Page", "NOF Report");
+
+        using var response = await _http.SendAsync(request, cancellationToken);
+
+        var items = await ReadResponseAsync<List<MaterialLookupApiItem>>(response, cancellationToken)
+                    ?? new List<MaterialLookupApiItem>();
+
+        return items
+            .Where(x => !string.IsNullOrWhiteSpace(x.Code))
             .Select(x => new MaterialLookup
             {
-                Code = x.Material!,
-                Name = x.MaterialName ?? ""
+                Code = x.Code!,
+                Name = x.Name ?? ""
             })
-            .DistinctBy(x => x.Code)
             .ToList();
     }
 
@@ -149,7 +159,14 @@ public sealed class NofReportService : INofReportService
     }
 
     // ── Inner Request/Response Models ─────────────────────────────────────────
+    private sealed class MaterialLookupApiItem
+    {
+        [JsonPropertyName("code")]
+        public string? Code { get; set; }
 
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+    }
     private sealed class NofReportSearchRequest
     {
         [JsonPropertyName("material")]
@@ -172,6 +189,9 @@ public sealed class NofReportService : INofReportService
     {
         [JsonPropertyName("totalCount")]
         public int TotalCount { get; set; }
+
+        [JsonPropertyName("availableMonths")]  // ✅ เพิ่ม
+        public List<string>? AvailableMonths { get; set; }
 
         [JsonPropertyName("items")]
         public List<NofApiItem>? Items { get; set; }

@@ -163,19 +163,9 @@
         </div>
 
         @* --- Pagination --- *@
+        @* --- Pagination --- *@
         <div class="table-footer-pagination">
             <div class="text-muted small">Results: @totalItems</div>
-            <div class="pagination-controls d-flex align-items-center gap-3">
-                <button class="pill-nav-btn" disabled="@(currentPage <= 1 || isLoading)" @onclick="PrevPage">
-                    <i class="bi bi-chevron-left"></i>
-                </button>
-                <div class="page-indicator">
-                    <span class="fw-bold text-success">@currentPage</span> / @totalPages
-                </div>
-                <button class="pill-nav-btn" disabled="@(currentPage >= totalPages || isLoading)" @onclick="NextPage">
-                    <i class="bi bi-chevron-right"></i>
-                </button>
-            </div>
         </div>
     </div>
 
@@ -202,35 +192,22 @@
     private DateTime? DateFrom;
     private DateTime? DateTo;
     private int currentPage = 1;
-    private int pageSize = 50;
+    private int pageSize = 10000;
     private int totalItems;
     private int totalPages = 1;
     private bool isLoading;
     private bool _isDisposed;
-
+    private List<string> _monthColumns = new();
     private IJSObjectReference? _jsModule;
     private DotNetObjectReference<NofReport>? _dotNetRef;
     private CancellationTokenSource? _materialCts;
+    private MaterialLookup? _lastSelectedMaterial;
 
-    // ── Month columns (สร้างจากปีที่ filter หรือปีปัจจุบัน) ──────────────────
-    // ── Month columns — แสดงเฉพาะเดือนที่มีข้อมูล ─────────────────────────────
-    private List<string> MonthColumns
-    {
-        get
-        {
-            if (!pagedItems.Any())
-                return Enumerable.Range(1, 12)
-                    .Select(m => $"{(DateFrom?.Year ?? DateTime.Now.Year)}/{m:D2}")
-                    .ToList();
-
-            // รวม keys ทั้งหมดจากทุก row แล้ว sort
-            return pagedItems
-                .SelectMany(r => r.MonthlyQty.Keys)
-                .Distinct()
-                .OrderBy(k => k)
-                .ToList();
-        }
-    }
+    private List<string> MonthColumns => _monthColumns.Any()
+     ? _monthColumns
+     : Enumerable.Range(1, 12)
+         .Select(m => $"{(DateFrom?.Year ?? DateTime.Now.Year)}/{m:D2}")
+         .ToList();
 
     // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -265,7 +242,6 @@
     }
 
     // ── JSInvokable (เหมือน sales-orders) ────────────────────────────────────
-
     [JSInvokable]
     public void SetDateRange(string start, string end)
     {
@@ -273,11 +249,17 @@
         {
             DateFrom = null; DateTo = null;
             pagedItems.Clear(); totalItems = 0; totalPages = 1;
+            _monthColumns = new();
             _ = InvokeAsync(StateHasChanged);
             return;
         }
         if (DateTime.TryParse(start, out var s)) DateFrom = s;
         if (DateTime.TryParse(end, out var e)) DateTo = e;
+
+        // ✅ เมื่อเปลี่ยนวันที่ → clear data ทันที
+        pagedItems.Clear(); totalItems = 0; totalPages = 1;
+        _monthColumns = new();
+        _ = InvokeAsync(StateHasChanged);
     }
 
     [JSInvokable]
@@ -285,6 +267,7 @@
     {
         DateFrom = null; DateTo = null;
         pagedItems.Clear(); totalItems = 0; totalPages = 1;
+        _monthColumns = new(); // ✅ เพิ่มตรงนี้
         _ = InvokeAsync(StateHasChanged);
     }
 
@@ -294,10 +277,20 @@
     {
         materialSearch = e.Value?.ToString() ?? "";
         selectedMaterial = null;
+        _lastSelectedMaterial = null;
+
+        // ✅ clear data ทันทีที่แก้ material
+        pagedItems.Clear(); totalItems = 0; totalPages = 1;
+        _monthColumns = new();
+
         materialResults.Clear();
         showMaterialDropdown = false;
 
-        if (materialSearch.Length < 2) return;
+        if (materialSearch.Length < 2)
+        {
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
 
         _materialCts?.Cancel();
         _materialCts = new CancellationTokenSource();
@@ -307,16 +300,26 @@
         {
             await Task.Delay(300, token);
             if (token.IsCancellationRequested) return;
+
             materialResults = await NofReportService.SearchMaterialAsync(materialSearch);
-            showMaterialDropdown = materialResults.Any();
+
+            // ✅ exact match → auto-select ปิด dropdown ทันที
+            var exact = materialResults.FirstOrDefault(x =>
+                x.Code.Equals(materialSearch.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            if (exact != null)
+                SelectMaterial(exact);
+            else
+                showMaterialDropdown = materialResults.Any();
+
             await InvokeAsync(StateHasChanged);
         }
         catch (TaskCanceledException) { }
         catch (UnauthorizedAccessException) { Nav.NavigateTo("/", replace: true); }
     }
-
     private void SelectMaterial(MaterialLookup item)
     {
+        _lastSelectedMaterial = item;
         selectedMaterial = item.Code;
         materialSearch = $"{item.Code} {item.Name}";
         materialResults.Clear();
@@ -337,14 +340,43 @@
         dateRangeError = null;
         showMaterialDropdown = false;
 
+        // ── Material logic ────────────────────────────────────────
         if (string.IsNullOrWhiteSpace(materialSearch))
-            selectedMaterial = null;
-        else if (string.IsNullOrWhiteSpace(selectedMaterial))
         {
-            materialSearch = string.Empty;
-            materialResults.Clear();
+            selectedMaterial = null;
+            _lastSelectedMaterial = null;
+        }
+        else if (!string.IsNullOrWhiteSpace(selectedMaterial))
+        {
+            // ✅ เลือกจาก dropdown แล้ว → ใช้ได้เลย
+        }
+        else if (_lastSelectedMaterial != null)
+        {
+            // ✅ cache ยังอยู่ → restore
+            SelectMaterial(_lastSelectedMaterial);
+        }
+        else
+        {
+            // ✅ พิมพ์ค้าง → exact match จาก results ก่อน
+            var normalized = materialSearch.Trim();
+            var matched = materialResults.FirstOrDefault(x =>
+                x.Code.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+
+            if (matched != null)
+                SelectMaterial(matched);
+            else
+            {
+                // ✅ ใช้ค่าที่พิมพ์ตรงๆ (ตัดชื่อออกถ้ามี space)
+                selectedMaterial = normalized.Contains(' ')
+                    ? normalized[..normalized.IndexOf(' ')]
+                    : normalized;
+                materialSearch = selectedMaterial;
+            }
         }
 
+        materialResults.Clear();
+
+        // ── Validate date ─────────────────────────────────────────
         if (_jsModule is not null)
         {
             try
@@ -364,6 +396,7 @@
         }
 
         currentPage = 1;
+        await InvokeAsync(StateHasChanged); // ✅ ปิด dropdown ก่อน load
         await LoadDataAsync();
     }
 
@@ -388,6 +421,23 @@
             pagedItems = result.Items ?? new();
             totalItems = result.TotalItems;
             totalPages = Math.Max(1, (int)Math.Ceiling((double)totalItems / pageSize));
+
+            // ✅ ใช้ AvailableMonths จาก API — ครบทุกเดือนทุกหน้าตั้งแต่แรก
+            if (currentPage == 1 && result.AvailableMonths.Any())
+            {
+                _monthColumns = result.AvailableMonths.OrderBy(m => m).ToList();
+            }
+            else
+            {
+                // หน้าถัดไป merge เดือนใหม่ที่ยังไม่มี (กันกรณี API ไม่ส่ง)
+                var monthSet = new HashSet<string>(_monthColumns);
+                var newMonths = result.AvailableMonths
+                    .Where(m => !monthSet.Contains(m))
+                    .ToList();
+
+                if (newMonths.Any())
+                    _monthColumns = _monthColumns.Concat(newMonths).OrderBy(m => m).ToList();
+            }
         }
         catch (UnauthorizedAccessException) { Nav.NavigateTo("/", replace: true); }
         finally
@@ -531,7 +581,7 @@
             DateFrom = DateFrom,
             DateTo = DateTo,
             Page = 1,
-            PageSize = 1000
+            PageSize = 10000
         };
 
         var all = new List<NofReportRowDto>();

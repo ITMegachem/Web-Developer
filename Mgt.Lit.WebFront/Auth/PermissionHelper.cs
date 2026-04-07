@@ -20,6 +20,7 @@ namespace Mgt.Lit.WebFront.Auth
                 1 => "Page1Access",
                 2 => "Page2Access",
                 3 => "Page3Access",
+                4 => "Page4Access",
                 _ => string.Empty
             };
 
@@ -38,6 +39,7 @@ namespace Mgt.Lit.WebFront.Auth
                 "sales-orders" => HasPageAccess(user, 1),
                 "warehouse-stock-material" => HasPageAccess(user, 2),
                 "warehouse-stock-movement" => HasPageAccess(user, 3),
+                "nof-report" => HasPageAccess(user, 4),
                 "dashboard" => true,
                 "main" => true,
                 "profile" => true,

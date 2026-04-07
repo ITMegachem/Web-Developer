@@ -62,13 +62,34 @@ namespace Mgt.Lit.WebApi.Controllers
             var primary = companies.FirstOrDefault(x => x.IsPrimary)
                           ?? companies.FirstOrDefault();
 
+            // ✅ ดึง permission ก่อน GenerateToken
+            View_UserPermission? permission = null;
+            if (primary?.CompanyID != null)
+            {
+                permission = await _context.View_UserPermissions
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x =>
+                        x.UserID == user.UserID &&
+                        x.CompanyID == primary.CompanyID);
+            }
+
+            // ✅ ส่ง permission เข้า GenerateToken
             var accessToken = JwtHelper.GenerateToken(
-     user,
-     _config,
-     primaryCompanyId: primary?.CompanyID,
-     primaryCompanyCode: primary?.CompanyCode,  // ✅ เพิ่ม
-     allCompanies: companies                    // ✅ เพิ่ม
- );
+                user, _config,
+                primaryCompanyId: primary?.CompanyID,
+                primaryCompanyCode: primary?.CompanyCode,
+                allCompanies: companies,
+                permission: permission == null ? null : new UserPermissionDto
+                {
+                    Page1Access = permission.Page1Access,
+                    Page2Access = permission.Page2Access,
+                    Page3Access = permission.Page3Access,
+                    Page4Access = permission.Page4Access,
+                    DataScope = permission.DataScope,
+                    CanViewVendor = permission.CanViewVendor,
+                    CanViewCost = permission.CanViewCost,
+                    CanViewCustomer = permission.CanViewCustomer
+                });
 
             var refreshToken = Guid.NewGuid().ToString();
 
@@ -99,17 +120,6 @@ namespace Mgt.Lit.WebApi.Controllers
                 Expires = DateTime.UtcNow.AddDays(14)
             });
 
-            View_UserPermission? permission = null;
-
-            if (primary?.CompanyID != null)
-            {
-                permission = await _context.View_UserPermissions
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(x =>
-                        x.UserID == user.UserID &&
-                        x.CompanyID == primary.CompanyID);
-            }
-
             return Ok(new
             {
                 Token = accessToken,
@@ -129,9 +139,11 @@ namespace Mgt.Lit.WebApi.Controllers
                     permission.Page1Access,
                     permission.Page2Access,
                     permission.Page3Access,
+                    permission.Page4Access,
                     permission.DataScope,
                     permission.CanViewVendor,
-                    permission.CanViewCost
+                    permission.CanViewCost,
+                    permission.CanViewCustomer
                 }
             });
         }
@@ -367,7 +379,7 @@ namespace Mgt.Lit.WebApi.Controllers
             {
                 token = newToken,
                 currentCompanyId = dto.CompanyID,
-                permission = permission == null ? null : new
+                Permission = permission == null ? null : new
                 {
                     permission.CompanyID,
                     permission.UserRole,
@@ -376,9 +388,11 @@ namespace Mgt.Lit.WebApi.Controllers
                     permission.Page1Access,
                     permission.Page2Access,
                     permission.Page3Access,
+                    permission.Page4Access,  
                     permission.DataScope,
                     permission.CanViewVendor,
-                    permission.CanViewCost
+                    permission.CanViewCost,
+                    permission.CanViewCustomer  
                 }
             });
         }

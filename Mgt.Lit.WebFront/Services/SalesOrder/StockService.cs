@@ -179,4 +179,11 @@ public sealed class StockService
         using var response = await _http.SendAsync(request, cancellationToken);
         return await ReadResponseAsync<List<MaterialLookup>>(response, cancellationToken);
     }
+    public async Task<List<MaterialLookup>> SearchMaterialAsync(
+    string keyword,
+    CancellationToken cancellationToken = default)
+    {
+        return await SearchMaterialForStockMovement(keyword, cancellationToken)
+               ?? new List<MaterialLookup>();
+    }
 }

@@ -78,22 +78,20 @@ public sealed class SalesOrderService : ISalesOrderService
         if (string.IsNullOrWhiteSpace(keyword))
             return new List<SoldToLookupDto>();
 
-        var result = await GetSalesOrdersAsync(new SalesOrderFilter
-        {
-            SoldToParty = keyword.Trim(),
-            Page = 1,
-            PageSize = 10
-        }, cancellationToken);
+        EnsureAuthenticated();
 
-        return result.Items
-            .Where(x => !string.IsNullOrWhiteSpace(x.SoldTo))
-            .Select(x => new SoldToLookupDto
-            {
-                Code = x.SoldTo,
-                Name = x.SoldToDescription
-            })
-            .DistinctBy(x => x.Code)
-            .ToList();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"api/MGT_SalesOrder/SoldToLookup?keyword={Uri.EscapeDataString(keyword.Trim())}");
+
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _auth.Token);
+        request.Headers.TryAddWithoutValidation("X-Menu", "Sales");
+        request.Headers.TryAddWithoutValidation("X-Page", "Sales List");
+
+        using var response = await _http.SendAsync(request, cancellationToken);
+
+        return await ReadResponseAsync<List<SoldToLookupDto>>(response, cancellationToken)
+               ?? new List<SoldToLookupDto>();
     }
 
     public async Task<List<MaterialLookup>> SearchMaterialAsync(
@@ -103,22 +101,20 @@ public sealed class SalesOrderService : ISalesOrderService
         if (string.IsNullOrWhiteSpace(keyword))
             return new List<MaterialLookup>();
 
-        var result = await GetSalesOrdersAsync(new SalesOrderFilter
-        {
-            Material = keyword.Trim(),
-            Page = 1,
-            PageSize = 10
-        }, cancellationToken);
+        EnsureAuthenticated();
 
-        return result.Items
-            .Where(x => !string.IsNullOrWhiteSpace(x.MaterialCode))
-            .Select(x => new MaterialLookup
-            {
-                Code = x.MaterialCode,
-                Name = x.MaterialDescription
-            })
-            .DistinctBy(x => x.Code)
-            .ToList();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"api/MGT_SalesOrder/MaterialLookup?keyword={Uri.EscapeDataString(keyword.Trim())}");
+
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _auth.Token);
+        request.Headers.TryAddWithoutValidation("X-Menu", "Sales");
+        request.Headers.TryAddWithoutValidation("X-Page", "Sales List");
+
+        using var response = await _http.SendAsync(request, cancellationToken);
+
+        return await ReadResponseAsync<List<MaterialLookup>>(response, cancellationToken)
+               ?? new List<MaterialLookup>();
     }
 
     private HttpRequestMessage CreateAuthorizedPost<TRequest>(string url, TRequest body)

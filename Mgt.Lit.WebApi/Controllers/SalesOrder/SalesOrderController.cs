@@ -179,20 +179,22 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
         public async Task<IActionResult> GetStockofMaterial([FromBody] MaterialStockRequestDto request)
         {
             var permission = await GetCurrentPermissionAsync();
-            if (permission == null)
-                return Unauthorized();
+            if (permission == null) return Unauthorized();
+            if (!permission.Page2Access) return Forbid();
 
-            if (!permission.Page2Access)
-                return Forbid();
-
+            // ✅ DataScope กรอง Material
             var material = request.Material?.Trim();
+            var allowedMaterials = await GetAllowedMaterialsAsync(permission);
+            if (allowedMaterials != null &&
+                !string.IsNullOrWhiteSpace(material) &&
+                !allowedMaterials.Contains(material))
+                return Forbid();
 
             var sqlItems = await _context.View_MaterialStock_WeightKG
                 .AsNoTracking()
                 .Where(x =>
                     (string.IsNullOrEmpty(request.Plant) || x.Plant == request.Plant) &&
-                    (string.IsNullOrEmpty(material) || x.Material == material)
-                )
+                    (string.IsNullOrEmpty(material) || x.Material == material))
                 .ToListAsync();
 
             var sqlDict = sqlItems
@@ -219,8 +221,8 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     x.Material,
                     x.MaterialGroupName,
                     x.SalesGroup,
-                    x.IndustryName,      // [Industry Name]
-                    x.SalesEmployeeID    // Sales_Name
+                    x.IndustryName,
+                    x.SalesEmployeeID
                 })
                 .ToListAsync();
 
@@ -235,43 +237,43 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                             g.Where(x => !string.IsNullOrWhiteSpace(x.SalesGroup))
                              .Select(x => x.SalesGroup)
                              .Distinct())
-                    }
-                );
+                    });
 
             var items = sapData
-     .Select(s =>
-     {
-         sqlDict.TryGetValue(s.Material_Code ?? "", out var sql);
-         materialGroupDict.TryGetValue(s.Material_Code ?? "", out var matInfo); // ✅ เพิ่มบรรทัดนี้
+                .Select(s =>
+                {
+                    sqlDict.TryGetValue(s.Material_Code ?? "", out var sql);
+                    materialGroupDict.TryGetValue(s.Material_Code ?? "", out var matInfo);
 
-         decimal unitKg = 0;
-         if (sql?.NetWeight != null && sql.NetWeight > 0)
-         {
-             unitKg = s.Price_KG / sql.NetWeight.Value;
-         }
+                    decimal unitKg = 0;
+                    if (sql?.NetWeight != null && sql.NetWeight > 0)
+                        unitKg = s.Price_KG / sql.NetWeight.Value;
 
-         return new MaterialStockResponseDto
-         {
-             MaterialCode = s.Material_Code,
-             MaterialDescription = s.Material_Name,
-             BatchNo = s.Batch_Code?.Trim().TrimEnd('.'),
-             Plant = s.Plant,
-             StorageLocation = "-",
-             Unrestricted_Stock = s.Unrestricted_Stock,
-             QualityInspection = s.Stock_in_QI,
-             TotalValue = permission.CanViewCost
-                 ? s.Value_of_Unrestricted_Stock + s.Value_of_Blocked_Stock + s.Value_of_Stock_in_QI
-                 : 0,
-             CostPerKg = permission.CanViewCost ? s.Price_KG : 0,
-             ExpDate = s.EXP_Date,
-             Unit = sql?.Unit ?? s.Unit,
-             MaterialGroup = matInfo.MaterialGroupName,  // ✅ แก้จาก GetValueOrDefault
-             SalesGroup = matInfo.SalesGroup,            // ✅ ใช้ matInfo แทน
-             ConversionText = sql?.NetWeight?.ToString("G29") ?? "0",
-             UnitKg = unitKg
-         };
-     })
-                 .GroupBy(x => new { x.BatchNo, x.Unrestricted_Stock })
+                    return new MaterialStockResponseDto
+                    {
+                        MaterialCode = s.Material_Code,
+                        MaterialDescription = s.Material_Name,
+                        BatchNo = s.Batch_Code?.Trim().TrimEnd('.'),
+                        Plant = s.Plant,
+                        StorageLocation = "-",
+                        Unrestricted_Stock = s.Unrestricted_Stock,
+                        QualityInspection = s.Stock_in_QI,
+
+                        // ✅ CanViewCost
+                        TotalValue = permission.CanViewCost
+                            ? s.Value_of_Unrestricted_Stock + s.Value_of_Blocked_Stock + s.Value_of_Stock_in_QI
+                            : 0,
+                        CostPerKg = permission.CanViewCost ? s.Price_KG : 0,
+
+                        ExpDate = s.EXP_Date,
+                        Unit = sql?.Unit ?? s.Unit,
+                        MaterialGroup = matInfo?.MaterialGroupName,
+                        SalesGroup = matInfo?.SalesGroup,
+                        ConversionText = sql?.NetWeight?.ToString("G29") ?? "0",
+                        UnitKg = unitKg
+                    };
+                })
+                .GroupBy(x => new { x.BatchNo, x.Unrestricted_Stock })
                 .Select(g => g.First())
                 .OrderBy(x => x.BatchNo)
                 .ToList();
@@ -290,11 +292,8 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
         public async Task<IActionResult> GetStockRequirementSap([FromBody] StockMovementRequestDto request)
         {
             var permission = await GetCurrentPermissionAsync();
-            if (permission == null)
-                return Unauthorized();
-
-            if (!permission.Page3Access)
-                return Forbid();
+            if (permission == null) return Unauthorized();
+            if (!permission.Page3Access) return Forbid();
 
             var material = request.Material?.Trim();
             var requestedPlant = request.Plant?.Trim();
@@ -302,10 +301,13 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             if (string.IsNullOrWhiteSpace(material))
                 return BadRequest(new { message = "Material is required." });
 
-            var plantsToQuery = GetPlantsForStockMovement(permission, requestedPlant).ToList();
-
-            if (!plantsToQuery.Any())
+            // ✅ DataScope กรอง Material
+            var allowedMaterials = await GetAllowedMaterialsAsync(permission);
+            if (allowedMaterials != null && !allowedMaterials.Contains(material))
                 return Forbid();
+
+            var plantsToQuery = GetPlantsForStockMovement(permission, requestedPlant).ToList();
+            if (!plantsToQuery.Any()) return Forbid();
 
             try
             {
@@ -314,21 +316,14 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 foreach (var plant in plantsToQuery)
                 {
                     var jsonResult = await _sapService.GetStockRequirementAsync(material, plant);
-
                     var currentSapData = JsonSerializer.Deserialize<StockRequirementResponse>(
                         jsonResult,
-                        new JsonSerializerOptions
-                        {
-                            PropertyNameCaseInsensitive = true
-                        });
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-                    if (currentSapData == null)
-                        continue;
+                    if (currentSapData == null) continue;
 
                     if (mergedSapData == null)
-                    {
                         mergedSapData = currentSapData;
-                    }
                     else if (currentSapData._Detail != null && currentSapData._Detail.Any())
                     {
                         if (mergedSapData._Detail == null)
@@ -339,14 +334,12 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 }
 
                 if (mergedSapData == null || mergedSapData._Detail == null || !mergedSapData._Detail.Any())
-                {
                     return Ok(new
                     {
                         material_Code = material,
                         plant = requestedPlant ?? string.Join(",", plantsToQuery),
                         _Detail = new List<object>()
                     });
-                }
 
                 var materialCodes = mergedSapData._Detail
                     .Select(x => x.Material_Code)
@@ -357,16 +350,13 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 if (materialCodes.Any())
                 {
                     var salesOrg = GetCompanySalesOrg(permission.CompanyID);
-
                     var materialQuery = _context.View_MGT_GLC_ALL_Sales
                         .AsNoTracking()
                         .Where(x => materialCodes.Contains(x.Material));
 
                     if (ResolveScope(permission) != DataScopes.CrossCompany &&
                         !string.IsNullOrWhiteSpace(salesOrg))
-                    {
                         materialQuery = materialQuery.Where(x => x.SalesOrganization == salesOrg);
-                    }
 
                     var materialInfo = await materialQuery
                         .Select(x => new
@@ -380,30 +370,18 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         .ToListAsync();
 
                     var materialDict = materialInfo
-    .GroupBy(x => x.Material)
-    .ToDictionary(
-        g => g.Key,
-        g => new
-        {
-            g.First().MaterialGroup1,
-            g.First().MaterialGroupName,
-            SalesGroup = string.Join(", ",
-                g.Where(x => !string.IsNullOrWhiteSpace(x.SalesGroup))
-                 .Select(x => x.SalesGroup)
-                 .Distinct())
-        }
-    );
-
-                    foreach (var item in mergedSapData._Detail)
-                    {
-                        if (!string.IsNullOrWhiteSpace(item.Material_Code) &&
-                            materialDict.TryGetValue(item.Material_Code, out var info))
-                        {
-                            item.MaterialGroup = info.MaterialGroup1;
-                            item.MaterialGroupDescription = info.MaterialGroupName;
-                            item.SalesGroup = info.SalesGroup;   // ✅
-                        }
-                    }
+                        .GroupBy(x => x.Material)
+                        .ToDictionary(
+                            g => g.Key,
+                            g => new
+                            {
+                                g.First().MaterialGroup1,
+                                g.First().MaterialGroupName,
+                                SalesGroup = string.Join(", ",
+                                    g.Where(x => !string.IsNullOrWhiteSpace(x.SalesGroup))
+                                     .Select(x => x.SalesGroup)
+                                     .Distinct())
+                            });
 
                     foreach (var item in mergedSapData._Detail)
                     {
@@ -416,9 +394,53 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         }
                     }
                 }
+               
+                // ✅ CanViewVendor
+                if (!permission.CanViewVendor)
+                    foreach (var item in mergedSapData._Detail)
+                    {
+                        item.Vendor_Code = null;
+                        item.Vendor_Name = null;
+                    }
+
+                // ✅ CanViewCustomer
+                if (!permission.CanViewCustomer)
+                    foreach (var item in mergedSapData._Detail)
+                    {
+                        item.Customer_Code = null;
+                        item.Customer_Name = null;
+                    }
+
+                // ✅ Mask Additional_Info_Out เฉพาะ Customer ของตัวเอง
+                var currentScope = ResolveScope(permission);
+                if (currentScope != DataScopes.CrossCompany && currentScope != DataScopes.Company && currentScope != DataScopes.Division)
+                {
+                    var ownCustomerCodesQuery = _context.View_MGT_GLC_ALL_Sales
+                        .AsNoTracking()
+                        .Where(x => x.SoldToParty != null);
+
+                    ownCustomerCodesQuery = ApplySalesPermission(ownCustomerCodesQuery, permission);
+
+                    var ownCustomerCodes = (await ownCustomerCodesQuery
+                        .Where(x => x.SoldToParty != null)
+                        .Select(x => x.SoldToParty!)
+                        .Distinct()
+                        .ToListAsync())
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var item in mergedSapData._Detail)
+                    {
+                        var custCode = item.Customer_Code?.Trim() ?? "";
+                        if (!ownCustomerCodes.Contains(custCode))
+                        {
+                            item.Additional_Info_Out = null;
+                            item.Customer_Code = null; 
+                            item.Customer_Name = null; 
+                        }
+                    }
+                }
 
                 mergedSapData.Plant = requestedPlant ?? string.Join(",", plantsToQuery);
-
                 return Ok(mergedSapData);
             }
             catch (Exception ex)
@@ -495,13 +517,56 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     October = g.Sum(x => x.x_Month == 10 ? x.Quantity : 0),
                     November = g.Sum(x => x.x_Month == 11 ? x.Quantity : 0),
                     December = g.Sum(x => x.x_Month == 12 ? x.Quantity : 0),
-
                     Total = g.Sum(x => x.Quantity)
                 })
                 .OrderBy(x => x.Year)
                 .ToListAsync();
 
-            return Ok(data);
+            // ✅ ดึง NetWeight ของ Material นี้
+            var netWeight = await _context.View_MaterialStock_WeightKG
+                .AsNoTracking()
+                .Where(x => x.Material == request.Material)
+                .Select(x => x.NetWeight)
+                .FirstOrDefaultAsync();
+
+            // ✅ Map เพิ่ม KG
+            var result = data.Select(x => new
+            {
+                x.Material,
+                x.MaterialName,
+                x.Year,
+
+                x.January,
+                JanuaryKG = netWeight.HasValue ? x.January * netWeight : null,
+                x.February,
+                FebruaryKG = netWeight.HasValue ? x.February * netWeight : null,
+                x.March,
+                MarchKG = netWeight.HasValue ? x.March * netWeight : null,
+                x.April,
+                AprilKG = netWeight.HasValue ? x.April * netWeight : null,
+                x.May,
+                MayKG = netWeight.HasValue ? x.May * netWeight : null,
+                x.June,
+                JuneKG = netWeight.HasValue ? x.June * netWeight : null,
+                x.July,
+                JulyKG = netWeight.HasValue ? x.July * netWeight : null,
+                x.August,
+                AugustKG = netWeight.HasValue ? x.August * netWeight : null,
+                x.September,
+                SeptemberKG = netWeight.HasValue ? x.September * netWeight : null,
+                x.October,
+                OctoberKG = netWeight.HasValue ? x.October * netWeight : null,
+                x.November,
+                NovemberKG = netWeight.HasValue ? x.November * netWeight : null,
+                x.December,
+                DecemberKG = netWeight.HasValue ? x.December * netWeight : null,
+                x.Total,
+                TotalKG = netWeight.HasValue ? x.Total * netWeight : null,
+
+                NetWeight = netWeight  // ✅ ส่ง NetWeight กลับไปด้วยให้ frontend รู้
+            });
+
+            return Ok(result);
         }
         [Authorize]
         [HttpGet("MaterialLookup")]
@@ -523,22 +588,32 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 .Where(x => x.Material != null);
 
             query = ApplySalesPermission(query, permission);
-            if (keyword.Length < 3) // อย่า query ถ้าสั้นเกินไป
+            // เป็น
+            if (keyword.Length < 2)   // ← ลดจาก 3 เป็น 2
                 return Ok(new List<object>());
 
-            var like = $"%{keyword}%";
-            _context.Database.SetCommandTimeout(60); //
+            var likeStart = $"{keyword}%";   // starts-with
+            var likeAny = $"%{keyword}%";  // contains
+            _context.Database.SetCommandTimeout(60);
+
             var items = await query
                 .Where(x =>
-                    EF.Functions.Like(x.Material, like) ||
-                    EF.Functions.Like(x.MaterialName, like))
+                    EF.Functions.Like(x.Material, likeAny) ||
+                    EF.Functions.Like(x.MaterialName, likeAny))
                 .Select(x => new
                 {
                     Code = x.Material,
-                    Name = x.MaterialName
+                    Name = x.MaterialName,
+                    // ✅ priority: 0 = code starts-with, 1 = name starts-with, 2 = contains only
+                    Priority = EF.Functions.Like(x.Material, likeStart) ? 0
+                             : EF.Functions.Like(x.MaterialName, likeStart) ? 1
+                             : 2
                 })
                 .Distinct()
+                .OrderBy(x => x.Priority)
+                .ThenBy(x => x.Code)
                 .Take(20)
+                .Select(x => new { x.Code, x.Name })   // strip priority ออกก่อน return
                 .ToListAsync();
 
             return Ok(items);
@@ -554,6 +629,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             if (!permission.Page1Access)
                 return Forbid();
 
+            // ── Base query ────────────────────────────────────────────────────────────
             var query = _context.View_MGT_GLC_ALL_Sales
                 .AsNoTracking()
                 .Where(x => x.ProductGroup == "NOF");
@@ -580,11 +656,22 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
             query = ApplySalesPermission(query, permission);
 
-            // ── ❌ ลบ GroupJoin ออกทั้งหมด แล้วใช้ 2 query แทน ────────────────────
-
-            // Step 1: count และดึง sales data
+            // ── Step 1: count + availableMonths (ก่อน pagination) ────────────────────
             var totalCount = await query.CountAsync();
 
+            var rawDates = await query
+                .Where(x => x.BillingDocumentDate != null)
+                .Select(x => x.BillingDocumentDate!.Value)
+                .Distinct()
+                .ToListAsync();
+
+            var availableMonths = rawDates
+                .Select(d => d.ToString("yyyy/MM"))
+                .Distinct()
+                .OrderBy(m => m)
+                .ToList();
+
+            // ── Step 2: salesItems (หลัง pagination) ──────────────────────────────────
             var salesItems = await query
                 .OrderByDescending(x => x.BillingDocumentDate)
                 .ThenBy(x => x.BillingDocument)
@@ -609,14 +696,13 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 })
                 .ToListAsync();
 
-            // Step 2: หา material codes จาก sales ที่ดึงมา
+            // ── Step 3: NetWeight ──────────────────────────────────────────────────────
             var materialCodes = salesItems
                 .Where(x => x.Material != null)
                 .Select(x => x.Material!)
                 .Distinct()
                 .ToList();
 
-            // Step 3: ดึง NetWeight แยกต่างหาก → ไม่ join ใน DB
             var weightDict = new Dictionary<string, decimal?>();
 
             if (materialCodes.Any())
@@ -632,7 +718,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     .ToDictionary(g => g.Key, g => g.First().NetWeight);
             }
 
-            // Step 4: map รวมกันใน memory
+            // ── Step 4: map ───────────────────────────────────────────────────────────
             var items = salesItems.Select(x =>
             {
                 weightDict.TryGetValue(x.Material ?? "", out var netWeight);
@@ -654,10 +740,81 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     SalesEmployee = x.SalesEmployeeID,
                     NetWeight = netWeight,
                     QuantityKG = (x.Quantity.HasValue && netWeight.HasValue)
-                                              ? x.Quantity.Value * netWeight.Value
-                                              : (decimal?)null
+                        ? x.Quantity.Value * netWeight.Value
+                        : (decimal?)null
                 };
             }).ToList();
+
+            // ── Response ──────────────────────────────────────────────────────────────
+            return Ok(new
+            {
+                totalCount,
+                page = request.Page,
+                pageSize = request.PageSize,
+                availableMonths,
+                items
+            });
+        }
+        [Authorize]
+        [HttpPost("OpSalesOrder")]
+        public async Task<IActionResult> GetOpSalesOrder([FromBody] OpSalesOrderRequestDto request)
+        {
+            var permission = await GetCurrentPermissionAsync();
+            if (permission == null)
+                return Unauthorized();
+
+            if (!permission.Page1Access)
+                return Forbid();
+
+            var query = _context.View_Sales_with_Op_SalesOrder
+                .AsNoTracking()
+                .Where(x => x.Customer != null &&
+                           (EF.Functions.Like(x.Customer, "MGT%") ||
+                            EF.Functions.Like(x.Customer, "GLC%")));
+
+            // ✅ Filter PartnerFunction = Z2 เฉพาะ MGT/GLC
+            query = query.Where(x => x.PartnerFunction == "Z2");
+
+            if (!string.IsNullOrWhiteSpace(request.SalesOrder))
+                query = query.Where(x => x.SalesOrder == request.SalesOrder.Trim());
+
+            if (!string.IsNullOrWhiteSpace(request.SoldToParty))
+                query = query.Where(x => x.SoldToParty == request.SoldToParty.Trim());
+
+            if (request.DateFrom.HasValue)
+                query = query.Where(x => x.SalesOrderDate >= request.DateFrom.Value.Date);
+
+            if (request.DateTo.HasValue)
+                query = query.Where(x => x.SalesOrderDate < request.DateTo.Value.Date.AddDays(1));
+
+            var totalCount = await query.CountAsync();
+
+            var items = await query
+                .OrderByDescending(x => x.SalesOrderDate)
+                .ThenBy(x => x.SalesOrder)
+                .Skip((request.Page - 1) * request.PageSize)
+                .Take(request.PageSize)
+                .Select(x => new
+                {
+                    x.SalesOrder,
+                    x.System_Name,
+                    x.SalesOrderDate,
+                    x.SalesOrderType,
+                    x.SalesOrganization,
+                    x.DistributionChannel,
+                    x.SalesGroup,
+                    x.SoldToParty,
+                    x.PurchaseOrderByCustomer,
+                    x.TotolNetAmont,
+                    x.OverallDeliveryStatus,
+                    x.RequestedDeliveryDate,
+                    x.CustomerPaymentTerms,
+                    x.BillingDoucumentDate,
+                    x.PartnerFunction,
+                    x.Customer,
+                    x.AddressID
+                })
+                .ToListAsync();
 
             return Ok(new
             {
@@ -666,6 +823,54 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 pageSize = request.PageSize,
                 items
             });
+        }
+        [Authorize]
+        [HttpGet("SoldToLookup")]
+        public async Task<IActionResult> GetSoldToLookup([FromQuery] string keyword)
+        {
+            var permission = await GetCurrentPermissionAsync();
+            if (permission == null)
+                return Unauthorized();
+
+            if (!permission.Page1Access)
+                return Forbid();
+
+            keyword = keyword?.Trim() ?? "";
+
+            if (keyword.Length < 2)
+                return Ok(new List<object>());
+
+            var likeStart = $"{keyword}%";
+            var likeAny = $"%{keyword}%";
+
+            var query = _context.View_MGT_GLC_ALL_Sales
+                .AsNoTracking()
+                .Where(x => x.SoldToParty != null);
+
+            query = ApplySalesPermission(query, permission);
+
+            _context.Database.SetCommandTimeout(60);
+
+            var items = await query
+                .Where(x =>
+                    EF.Functions.Like(x.SoldToParty, likeAny) ||
+                    EF.Functions.Like(x.SoldToName, likeAny))
+                .Select(x => new
+                {
+                    Code = x.SoldToParty,
+                    Name = x.SoldToName,
+                    Priority = EF.Functions.Like(x.SoldToParty, likeStart) ? 0  // code ขึ้นต้นตรง
+                             : EF.Functions.Like(x.SoldToName, likeStart) ? 1  // name ขึ้นต้นตรง
+                             : 2                                                  // contains เฉยๆ
+                })
+                .Distinct()
+                .OrderBy(x => x.Priority)
+                .ThenBy(x => x.Code)
+                .Take(20)
+                .Select(x => new { x.Code, x.Name })
+                .ToListAsync();
+
+            return Ok(items);
         }
         private IQueryable<View_MGT_GLC_ALL_Sales> ApplySalesPermission(
      IQueryable<View_MGT_GLC_ALL_Sales> query,
@@ -915,6 +1120,24 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     // ถ้าซ้ำกันจริง ๆ ส่วนมากค่านี้จะเหมือนกันอยู่แล้ว
                     SalesEmployee = g.Max(x => x.SalesEmployeeID) ?? "-"
                 });
+        }
+        private async Task<HashSet<string>?> GetAllowedMaterialsAsync(View_UserPermission permission)
+        {
+            var scope = ResolveScope(permission);
+
+            if (scope == DataScopes.Company || scope == DataScopes.CrossCompany || scope == DataScopes.Division)
+                return null; // ไม่จำกัด
+
+            var query = _context.View_MGT_GLC_ALL_Sales.AsNoTracking();
+            query = ApplySalesPermission(query, permission);
+
+            var materials = await query
+                .Where(x => x.Material != null)
+                .Select(x => x.Material!)
+                .Distinct()
+                .ToListAsync();
+
+            return new HashSet<string>(materials, StringComparer.OrdinalIgnoreCase);
         }
     }
 

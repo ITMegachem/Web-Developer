@@ -20,10 +20,11 @@ namespace Mgt.Lit.Core.Entities
         public bool Page1Access { get; set; }
         public bool Page2Access { get; set; }
         public bool Page3Access { get; set; }
-
+        public bool Page4Access { get; set; }
         public string? DataScope { get; set; }
         public bool CanViewVendor { get; set; }
         public bool CanViewCost { get; set; }
+        public bool CanViewCustomer { get; set; }
         public string? SalesOrganizationCode { get; set; }
     }
     public static class DataScopes
