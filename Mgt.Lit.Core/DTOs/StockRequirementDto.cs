@@ -15,8 +15,13 @@ namespace Mgt.Lit.Core.DTOs
     // ปรับแต่งฟิลด์ตาม JSON Response ที่ได้จาก SAP
     public class StockRequirementResponse
     {
+        [JsonPropertyName("material_Code")]
         public string Material_Code { get; set; }
+
+        [JsonPropertyName("plant")]
         public string Plant { get; set; }
+
+        [JsonPropertyName("_Detail")]
         public List<StockDetailDto> _Detail { get; set; }
     }
 
@@ -32,11 +37,11 @@ namespace Mgt.Lit.Core.DTOs
         public string Unit { get; set; }
         public decimal available_qty { get; set; }
         public string Additional_Info_In { get; set; }
-        public string Additional_Info_Out { get; set; }
+        public string Additional_Info_Out { get; set; }  // ✅ ใช้ชื่อนี้
         public string Vendor_Code { get; set; }
         public string Vendor_Name { get; set; }
-        public string Customer_Code { get; set; }
-        public string Customer_Name { get; set; }
+        public string Customer_Code { get; set; }        // ✅ ใช้ชื่อนี้
+        public string Customer_Name { get; set; }        // ✅ ใช้ชื่อนี้
         public int Priority { get; set; }
 
         public string? MaterialGroup { get; set; }

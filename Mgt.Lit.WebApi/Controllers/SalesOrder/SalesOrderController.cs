@@ -301,7 +301,6 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             if (string.IsNullOrWhiteSpace(material))
                 return BadRequest(new { message = "Material is required." });
 
-            // ✅ DataScope กรอง Material
             var allowedMaterials = await GetAllowedMaterialsAsync(permission);
             if (allowedMaterials != null && !allowedMaterials.Contains(material))
                 return Forbid();
@@ -341,6 +340,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         _Detail = new List<object>()
                     });
 
+                // ── Material Group ────────────────────────────────────────────────────
                 var materialCodes = mergedSapData._Detail
                     .Select(x => x.Material_Code)
                     .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -359,29 +359,20 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         materialQuery = materialQuery.Where(x => x.SalesOrganization == salesOrg);
 
                     var materialInfo = await materialQuery
-                        .Select(x => new
-                        {
-                            x.Material,
-                            x.MaterialGroup1,
-                            x.MaterialGroupName,
-                            x.SalesGroup
-                        })
+                        .Select(x => new { x.Material, x.MaterialGroup1, x.MaterialGroupName, x.SalesGroup })
                         .Distinct()
                         .ToListAsync();
 
                     var materialDict = materialInfo
                         .GroupBy(x => x.Material)
-                        .ToDictionary(
-                            g => g.Key,
-                            g => new
-                            {
-                                g.First().MaterialGroup1,
-                                g.First().MaterialGroupName,
-                                SalesGroup = string.Join(", ",
-                                    g.Where(x => !string.IsNullOrWhiteSpace(x.SalesGroup))
-                                     .Select(x => x.SalesGroup)
-                                     .Distinct())
-                            });
+                        .ToDictionary(g => g.Key, g => new
+                        {
+                            g.First().MaterialGroup1,
+                            g.First().MaterialGroupName,
+                            SalesGroup = string.Join(", ",
+                                g.Where(x => !string.IsNullOrWhiteSpace(x.SalesGroup))
+                                 .Select(x => x.SalesGroup).Distinct())
+                        });
 
                     foreach (var item in mergedSapData._Detail)
                     {
@@ -394,8 +385,127 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         }
                     }
                 }
-               
-                // ✅ CanViewVendor
+
+                // ── ✅ Clear ค่าจาก SAP ก่อนทุกครั้ง ─────────────────────────────────
+                foreach (var item in mergedSapData._Detail)
+                {
+                    item.Customer_Code = null;
+                    item.Customer_Name = null;
+                    item.Additional_Info_Out = null;
+                }
+
+                // ── เทียบ RefDoc กับ OpSalesOrder + SalesEmployee ─────────────────────
+                var refDocs = mergedSapData._Detail
+                    .Where(x => !string.IsNullOrWhiteSpace(x.Ref_Doc))
+                    .Select(x => x.Ref_Doc!.Trim())
+                    .Distinct()
+                    .ToList();
+
+                var currentScope = ResolveScope(permission);
+
+                // ✅ ดึง SalesDocument ที่ user นี้มีสิทธิ์จริงๆ
+                HashSet<string> ownRefDocs = new(StringComparer.OrdinalIgnoreCase);
+
+                if (refDocs.Any() &&
+                    currentScope != DataScopes.CrossCompany &&
+                    currentScope != DataScopes.Company &&
+                    currentScope != DataScopes.Division)
+                {
+                    // ✅ วิธีที่ 1: เทียบจาก View_MGT_GLC_ALL_Sales (SalesEmployeeID)
+                    var ownDocQuery = _context.View_MGT_GLC_ALL_Sales
+                        .AsNoTracking()
+                        .Where(x => x.SalesDocument != null && refDocs.Contains(x.SalesDocument));
+
+                    ownDocQuery = ApplySalesPermission(ownDocQuery, permission);
+
+                    ownRefDocs = (await ownDocQuery
+                        .Select(x => x.SalesDocument!)
+                        .Distinct()
+                        .ToListAsync())
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    // ✅ วิธีที่ 2: fallback เทียบ MGT Code ของ user จาก View_Sales_with_Op_SalesOrder
+                    var userMgtCode = permission.Username?.Trim();
+
+                    if (!string.IsNullOrWhiteSpace(userMgtCode))
+                    {
+                        var ownOpDocs = await _context.View_Sales_with_Op_SalesOrder
+                            .AsNoTracking()
+                            .Where(x => x.PartnerFunction == "Z2" &&
+                                        x.Customer != null &&
+                                        x.Customer.Trim().ToUpper() == userMgtCode.ToUpper() &&
+                                        x.SalesOrder != null &&
+                                        refDocs.Contains(x.SalesOrder))
+                            .Select(x => x.SalesOrder!)
+                            .Distinct()
+                            .ToListAsync();
+
+                        // ✅ รวม 2 วิธีเข้าด้วยกัน
+                        foreach (var doc in ownOpDocs)
+                            ownRefDocs.Add(doc);
+                    }
+                }
+
+                if (refDocs.Any())
+                {
+                    var opSalesData = await _context.View_Sales_with_Op_SalesOrder
+                        .AsNoTracking()
+                        .Where(x => x.PartnerFunction == "Z2" &&
+                                    x.Customer != null &&
+                                   (EF.Functions.Like(x.Customer, "MGT%") ||
+                                    EF.Functions.Like(x.Customer, "GLC%")) &&
+                                    x.SalesOrder != null &&
+                                    refDocs.Contains(x.SalesOrder))
+                        .Select(x => new { x.SalesOrder, x.Customer, x.SoldToParty })
+                        .ToListAsync();
+
+                    var opSalesLookup = opSalesData
+                        .GroupBy(x => x.SalesOrder!)
+                        .ToDictionary(g => g.Key, g => g.First());
+
+                    var salesData = await _context.View_MGT_GLC_ALL_Sales
+                        .AsNoTracking()
+                        .Where(x => x.SalesDocument != null && refDocs.Contains(x.SalesDocument))
+                        .Select(x => new { x.SalesDocument, x.SalesEmployeeID, x.SoldToName })
+                        .Distinct()
+                        .ToListAsync();
+
+                    var salesLookup = salesData
+                        .GroupBy(x => x.SalesDocument!)
+                        .ToDictionary(g => g.Key, g => g.First());
+
+                    foreach (var item in mergedSapData._Detail)
+                    {
+                        var refDoc = item.Ref_Doc?.Trim() ?? "";
+                        if (string.IsNullOrWhiteSpace(refDoc)) continue;
+
+                        bool canView = currentScope == DataScopes.CrossCompany ||
+                                       currentScope == DataScopes.Company ||
+                                       currentScope == DataScopes.Division ||
+                                       ownRefDocs.Contains(refDoc);
+
+                        if (opSalesLookup.TryGetValue(refDoc, out var opSales) && canView)
+                        {
+                            item.Customer_Code = opSales.Customer;
+                            item.Customer_Name = opSales.SoldToParty;
+                        }
+
+                        if (salesLookup.TryGetValue(refDoc, out var sales) && canView)
+                        {
+                            item.Additional_Info_Out = string.Join(" | ",
+                                new[] { sales.SalesEmployeeID, sales.SoldToName }
+                                .Where(x => !string.IsNullOrWhiteSpace(x)));
+                        }
+                        // ✅ fallback Additional_Info_Out จาก opSales ถ้า salesLookup ไม่มี
+                        else if (opSalesLookup.TryGetValue(refDoc, out var opSalesFallback) && canView
+                                 && string.IsNullOrWhiteSpace(item.Additional_Info_Out))
+                        {
+                            item.Additional_Info_Out = opSalesFallback.SoldToParty;
+                        }
+                    }
+                }
+
+                // ── CanViewVendor ─────────────────────────────────────────────────────
                 if (!permission.CanViewVendor)
                     foreach (var item in mergedSapData._Detail)
                     {
@@ -403,42 +513,13 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         item.Vendor_Name = null;
                     }
 
-                // ✅ CanViewCustomer
+                // ── CanViewCustomer ───────────────────────────────────────────────────
                 if (!permission.CanViewCustomer)
                     foreach (var item in mergedSapData._Detail)
                     {
                         item.Customer_Code = null;
                         item.Customer_Name = null;
                     }
-
-                // ✅ Mask Additional_Info_Out เฉพาะ Customer ของตัวเอง
-                var currentScope = ResolveScope(permission);
-                if (currentScope != DataScopes.CrossCompany && currentScope != DataScopes.Company && currentScope != DataScopes.Division)
-                {
-                    var ownCustomerCodesQuery = _context.View_MGT_GLC_ALL_Sales
-                        .AsNoTracking()
-                        .Where(x => x.SoldToParty != null);
-
-                    ownCustomerCodesQuery = ApplySalesPermission(ownCustomerCodesQuery, permission);
-
-                    var ownCustomerCodes = (await ownCustomerCodesQuery
-                        .Where(x => x.SoldToParty != null)
-                        .Select(x => x.SoldToParty!)
-                        .Distinct()
-                        .ToListAsync())
-                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                    foreach (var item in mergedSapData._Detail)
-                    {
-                        var custCode = item.Customer_Code?.Trim() ?? "";
-                        if (!ownCustomerCodes.Contains(custCode))
-                        {
-                            item.Additional_Info_Out = null;
-                            item.Customer_Code = null; 
-                            item.Customer_Name = null; 
-                        }
-                    }
-                }
 
                 mergedSapData.Plant = requestedPlant ?? string.Join(",", plantsToQuery);
                 return Ok(mergedSapData);
