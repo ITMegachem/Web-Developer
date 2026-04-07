@@ -386,15 +386,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     }
                 }
 
-                // ── ✅ Clear ค่าจาก SAP ก่อนทุกครั้ง ─────────────────────────────────
-                foreach (var item in mergedSapData._Detail)
-                {
-                    item.Customer_Code = null;
-                    item.Customer_Name = null;
-                    item.Additional_Info_Out = null;
-                }
-
-                // ── เทียบ RefDoc กับ OpSalesOrder + SalesEmployee ─────────────────────
+                // ── เทียบ RefDoc กับ OpSalesOrder ─────────────────────────────────────
                 var refDocs = mergedSapData._Detail
                     .Where(x => !string.IsNullOrWhiteSpace(x.Ref_Doc))
                     .Select(x => x.Ref_Doc!.Trim())
@@ -411,7 +403,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     currentScope != DataScopes.Company &&
                     currentScope != DataScopes.Division)
                 {
-                    // ✅ วิธีที่ 1: เทียบจาก View_MGT_GLC_ALL_Sales (SalesEmployeeID)
+                    // วิธีที่ 1: เทียบจาก View_MGT_GLC_ALL_Sales
                     var ownDocQuery = _context.View_MGT_GLC_ALL_Sales
                         .AsNoTracking()
                         .Where(x => x.SalesDocument != null && refDocs.Contains(x.SalesDocument));
@@ -424,7 +416,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         .ToListAsync())
                         .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-                    // ✅ วิธีที่ 2: fallback เทียบ MGT Code ของ user
+                    // วิธีที่ 2: fallback เทียบ MGT Code ของ user
                     var userMgtCode = permission.Username?.Trim();
                     if (!string.IsNullOrWhiteSpace(userMgtCode))
                     {
@@ -446,6 +438,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
                 if (refDocs.Any())
                 {
+                    // ดึงข้อมูลจาก OpSalesOrder (MGT/GLC)
                     var opSalesData = await _context.View_Sales_with_Op_SalesOrder
                         .AsNoTracking()
                         .Where(x => x.PartnerFunction == "Z2" &&
@@ -466,12 +459,12 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         .GroupBy(x => x.SalesOrder!)
                         .ToDictionary(g => g.Key, g => g.First());
 
-                    // ✅ ดึง CustomerFullName จาก SoldToParty โดยตรง
+                    // ดึง CustomerFullName จาก SoldToParty
                     var soldToParties = opSalesData
-                            .Select(x => x.SoldToParty?.Trim())
-                            .Where(x => !string.IsNullOrWhiteSpace(x))
-                            .Distinct()
-                            .ToList();
+                        .Select(x => x.SoldToParty?.Trim())
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .Distinct()
+                        .ToList();
 
                     var customerNameDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -479,23 +472,19 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     {
                         var customerNames = await _context.View_MGT_GLC_ALL_Sales
                             .AsNoTracking()
-                            // ✅ ไม่ apply permission - ดึงชื่อจาก Master ทั้งหมด
                             .Where(x => x.SoldToParty != null && soldToParties.Contains(x.SoldToParty))
                             .Select(x => new { x.SoldToParty, x.CustomerFullName })
                             .Distinct()
                             .ToListAsync();
 
                         customerNameDict = customerNames
-                        .Where(x => !string.IsNullOrWhiteSpace(x.SoldToParty) &&
-                                    !string.IsNullOrWhiteSpace(x.CustomerFullName))
-                        .GroupBy(x => x.SoldToParty!.Trim())
-                        .ToDictionary(g => g.Key, g => g.First().CustomerFullName ?? "");
-
-                        // ✅ Debug
-                        Console.WriteLine($"[DEBUG] customerNameDict count={customerNameDict.Count}");
-                        foreach (var kv in customerNameDict)
-                            Console.WriteLine($"[DEBUG] SoldTo={kv.Key}, Name={kv.Value}");
+                            .Where(x => !string.IsNullOrWhiteSpace(x.SoldToParty) &&
+                                        !string.IsNullOrWhiteSpace(x.CustomerFullName))
+                            .GroupBy(x => x.SoldToParty!.Trim())
+                            .ToDictionary(g => g.Key, g => g.First().CustomerFullName ?? "");
                     }
+
+                    // ── Map ข้อมูลเข้า Detail ────────────────────────────────────────
                     foreach (var item in mergedSapData._Detail)
                     {
                         var refDoc = item.Ref_Doc?.Trim() ?? "";
@@ -506,22 +495,25 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                                        currentScope == DataScopes.Division ||
                                        ownRefDocs.Contains(refDoc);
 
-                        if (opSalesLookup.TryGetValue(refDoc, out var opSales) && canView)
+                        if (!canView)
                         {
+                            // ✅ ไม่มีสิทธิ์ → clear ทั้งหมด
+                            item.Customer_Code = null;
+                            item.Customer_Name = null;
+                            item.Additional_Info_Out = null;
+                            continue;
+                        }
+
+                        if (opSalesLookup.TryGetValue(refDoc, out var opSales))
+                        {
+                            // ✅ มีข้อมูลใน DB → ใช้จาก DB
                             var soldTo = opSales.SoldToParty?.Trim() ?? "";
-
-                            // ✅ Debug
-                            Console.WriteLine($"[DEBUG] soldTo='{soldTo}', dictContains={customerNameDict.ContainsKey(soldTo)}");
-                            Console.WriteLine($"[DEBUG] dictKeys: {string.Join("|", customerNameDict.Keys.Select(k => $"'{k}'"))}");
-
                             item.Customer_Code = soldTo;
-
                             item.Customer_Name = customerNameDict.TryGetValue(soldTo, out var name)
-                                ? name
-                                : soldTo;
-
+                                ? name : soldTo;
                             item.Additional_Info_Out = opSales.PurchaseOrderByCustomer;
                         }
+                        // ✅ ไม่มีใน DB → ใช้ค่าจาก SAP ต้นทางเดิม (ไม่ต้องทำอะไร)
                     }
                 }
 
