@@ -82,10 +82,10 @@ namespace Mgt.Lit.WebFront.Models.SalesOrder
         [JsonPropertyName("vendor_Name")]
         public string VendorName { get; set; } = string.Empty;
 
-        [JsonPropertyName("Customer_Code")]
+        [JsonPropertyName("customer_Code")]
         public string CustomerCode { get; set; } = string.Empty;
 
-        [JsonPropertyName("Customer_Name")]
+        [JsonPropertyName("customer_Name")]
         public string CustomerName { get; set; } = string.Empty;
 
         [JsonPropertyName("priority")]

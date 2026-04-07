@@ -35,7 +35,8 @@
 
             <div class="col-6 col-md-4 col-lg-2">
                 <label class="modern-label">@T("Plant")</label>
-                <select class="form-select modern-input" @bind="filters.Plant" @bind:after="OnPlantChanged">
+                <select class="form-select modern-input @(plantError != null ? "is-invalid" : "")"
+                        @bind="filters.Plant" @bind:after="OnPlantChanged">
                     <option value="">@T("ChoosePlant")</option>
                     @foreach (var p in plants)
                     {
@@ -44,6 +45,10 @@
                         </option>
                     }
                 </select>
+                @if (!string.IsNullOrEmpty(plantError))
+                {
+                    <span class="text-danger small">@plantError</span>
+                }
             </div>
             <div class="col-6 col-md-4 col-lg-2">
                 <label class="modern-label">@T("Material Group")</label>
@@ -221,7 +226,7 @@
     private WarehouseStockFilter filters = new() { Page = 1, PageSize = 10 };
     private List<WarehouseStockDto> pagedItems = new();
     private string? materialError;
-
+    private string? plantError;
     private readonly List<PlantDto> plants = new()
     {
         new() { PlantCode = "1100", PlantName = "Megachem (Thailand) PCL" },
@@ -408,7 +413,15 @@
     private async Task RunSearch()
     {
         materialError = null;
+        plantError = null;
         showMaterialDropdown = false;
+
+        if (string.IsNullOrWhiteSpace(filters.Plant))
+        {
+            plantError = "Please select Plant";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
 
         if (string.IsNullOrWhiteSpace(materialSearch))
         {
@@ -417,28 +430,22 @@
         }
         else if (!string.IsNullOrWhiteSpace(filters.Material))
         {
-            // ✅ เลือกจาก dropdown แล้ว → ใช้ได้เลย
+            // เลือกจาก dropdown แล้ว → ใช้ได้เลย
         }
         else if (_lastSelectedMaterial != null)
         {
-            // ✅ cache ยังอยู่ → restore
             SelectMaterial(_lastSelectedMaterial);
         }
         else
         {
-            // ✅ พิมพ์ค้าง → ลอง exact match จาก results ก่อน
             var normalized = NormalizeMaterialForApi(materialSearch);
-
             var matched = materialResults.FirstOrDefault(x =>
                 x.Code.Equals(normalized, StringComparison.OrdinalIgnoreCase));
 
             if (matched != null)
-            {
                 SelectMaterial(matched);
-            }
             else
             {
-                // ✅ ใช้ค่าที่พิมพ์ตรงๆ ไม่บังคับเลือก
                 filters.Material = normalized;
                 if (!string.IsNullOrWhiteSpace(normalized) && !materialSearch.StartsWith(normalized))
                     materialSearch = normalized;
@@ -449,9 +456,12 @@
 
         var finalMaterial = NormalizeMaterialForApi(filters.Material);
 
-        if (string.IsNullOrWhiteSpace(finalMaterial))
+        // ✅ บังคับใส่ Material เฉพาะเมื่อไม่ได้เลือก Material Group
+        bool hasMaterialGroup = !string.IsNullOrWhiteSpace(filters.MaterialGroup);
+
+        if (!hasMaterialGroup && string.IsNullOrWhiteSpace(finalMaterial))
         {
-            materialError = "Please enter Material";
+            materialError = "Please enter Material or select Material Group";
             await InvokeAsync(StateHasChanged);
             return;
         }
@@ -459,7 +469,7 @@
         filters.Material = finalMaterial;
         filters.Page = 1;
 
-        await InvokeAsync(StateHasChanged); // ✅ ปิด dropdown ก่อน load
+        await InvokeAsync(StateHasChanged);
         await LoadDataAsync();
     }
     private Task PrevPage()
@@ -630,6 +640,7 @@
 
     private void OnPlantChanged()
     {
+        plantError = null;
         var selectedPlant = filters.Plant;
         var currentPageSize = filters.PageSize;
 

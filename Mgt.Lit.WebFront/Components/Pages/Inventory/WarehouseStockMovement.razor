@@ -153,18 +153,9 @@
                                     </td>
                                 }
                                 <td class="text-center align-middle">
-                                    @{
-                                        var infoOut = string.IsNullOrWhiteSpace(item.AdditionalInfoIn)
-                                            ? item.AdditionalInfoOut : "";
-                                        var filteredLines = (infoOut ?? "")
-                                            .Split('\n')
-                                            .Where(line => !line.Trim().StartsWith("WCD", StringComparison.OrdinalIgnoreCase))
-                                            .ToList();
-                                        var displayText = string.Join("\n", filteredLines).Trim();
-                                    }
-                                    @if (!string.IsNullOrWhiteSpace(displayText))
+                                    @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoOut))
                                     {
-                                        @displayText
+                                        @item.AdditionalInfoOut
                                     }
                                 </td>
                                 @if (CanViewCustomer)
@@ -484,11 +475,15 @@
     ? item.AdditionalInfoOut ?? ""
     : "";
 
-            var filteredInfoOut = string.Join("\n", infoOut
+            // ใน ExportData
+            var filteredInfoOut = string.Join("\n", (item.AdditionalInfoOut ?? "")
                 .Split('\n')
-                .Where(line => !line.Trim().StartsWith("WCD", StringComparison.OrdinalIgnoreCase)));
-
-            ws.Cell(row, 9).Value = filteredInfoOut.Trim();
+                .Select(line => System.Text.RegularExpressions.Regex
+                    .Replace(line.Trim(), @"\s*WCD\s*$", "",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim())
+                .Where(line => !string.IsNullOrWhiteSpace(line) &&
+                               !line.StartsWith("WCD", StringComparison.OrdinalIgnoreCase)));
+            ws.Cell(row, 9).Value = item.AdditionalInfoOut ?? "";
             ws.Cell(row, 10).Value = item.CustomerCode;
             ws.Cell(row, 11).Value = item.CustomerName;
             ws.Cell(row, 12).Value = item.MaterialGroup;
