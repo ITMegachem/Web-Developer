@@ -35,6 +35,9 @@ namespace Mgt.Lit.Core.DTOs
         public string? Customer { get; set; }
         public string? AddressID { get; set; }
 }
-
-// ใน AppDbContext
+    public class SalesOrderDetailRequestDto
+    {
+        public string SalesOrder { get; set; } = "";
     }
+    // ใน AppDbContext
+}

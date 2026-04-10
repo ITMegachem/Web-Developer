@@ -240,43 +240,39 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     });
 
             var items = sapData
-                .Select(s =>
-                {
-                    sqlDict.TryGetValue(s.Material_Code ?? "", out var sql);
-                    materialGroupDict.TryGetValue(s.Material_Code ?? "", out var matInfo);
+    .Select(s =>
+    {
+        sqlDict.TryGetValue(s.Material_Code ?? "", out var sql);
+        materialGroupDict.TryGetValue(s.Material_Code ?? "", out var matInfo);
 
-                    decimal unitKg = 0;
-                    if (sql?.NetWeight != null && sql.NetWeight > 0)
-                        unitKg = s.Price_KG / sql.NetWeight.Value;
+        decimal unitKg = 0;
+        if (sql?.NetWeight != null && sql.NetWeight > 0)
+            unitKg = s.Price_KG / sql.NetWeight.Value;
 
-                    return new MaterialStockResponseDto
-                    {
-                        MaterialCode = s.Material_Code,
-                        MaterialDescription = s.Material_Name,
-                        BatchNo = s.Batch_Code?.Trim().TrimEnd('.'),
-                        Plant = s.Plant,
-                        StorageLocation = "-",
-                        Unrestricted_Stock = s.Unrestricted_Stock,
-                        QualityInspection = s.Stock_in_QI,
-
-                        // ✅ CanViewCost
-                        TotalValue = permission.CanViewCost
-                            ? s.Value_of_Unrestricted_Stock + s.Value_of_Blocked_Stock + s.Value_of_Stock_in_QI
-                            : 0,
-                        CostPerKg = permission.CanViewCost ? s.Price_KG : 0,
-
-                        ExpDate = s.EXP_Date,
-                        Unit = sql?.Unit ?? s.Unit,
-                        MaterialGroup = matInfo?.MaterialGroupName,
-                        SalesGroup = matInfo?.SalesGroup,
-                        ConversionText = sql?.NetWeight?.ToString("G29") ?? "0",
-                        UnitKg = unitKg
-                    };
-                })
-                .GroupBy(x => new { x.BatchNo, x.Unrestricted_Stock })
-                .Select(g => g.First())
-                .OrderBy(x => x.BatchNo)
-                .ToList();
+        return new MaterialStockResponseDto
+        {
+            MaterialCode = s.Material_Code,
+            MaterialDescription = s.Material_Name,
+            BatchNo = s.Batch_Code?.Trim().TrimEnd('.'),
+            Plant = s.Plant,
+            StorageLocation = s.Storage_Loc ?? "-",  // ✅ ส่งค่าจริง
+            Unrestricted_Stock = s.Unrestricted_Stock,
+            QualityInspection = s.Stock_in_QI,
+            TotalValue = permission.CanViewCost
+                ? s.Value_of_Unrestricted_Stock + s.Value_of_Blocked_Stock + s.Value_of_Stock_in_QI
+                : 0,
+            CostPerKg = permission.CanViewCost ? s.Price_KG : 0,
+            ExpDate = s.EXP_Date,
+            Unit = sql?.Unit ?? s.Unit,
+            MaterialGroup = matInfo?.MaterialGroupName,
+            SalesGroup = matInfo?.SalesGroup,
+            ConversionText = sql?.NetWeight?.ToString("G29") ?? "0",
+            UnitKg = unitKg
+        };
+    })
+    .OrderBy(x => x.BatchNo)
+    .ThenBy(x => x.StorageLocation)
+    .ToList();
 
             return Ok(new
             {
@@ -485,35 +481,49 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     }
 
                     // ── Map ข้อมูลเข้า Detail ────────────────────────────────────────
+                    // ── Map ข้อมูลเข้า Detail ────────────────────────────────────────
                     foreach (var item in mergedSapData._Detail)
                     {
                         var refDoc = item.Ref_Doc?.Trim() ?? "";
                         if (string.IsNullOrWhiteSpace(refDoc)) continue;
 
-                        bool canView = currentScope == DataScopes.CrossCompany ||
-                                       currentScope == DataScopes.Company ||
-                                       currentScope == DataScopes.Division ||
-                                       ownRefDocs.Contains(refDoc);
-
-                        if (!canView)
-                        {
-                            // ✅ ไม่มีสิทธิ์ → clear ทั้งหมด
-                            item.Customer_Code = null;
-                            item.Customer_Name = null;
-                            item.Additional_Info_Out = null;
-                            continue;
-                        }
+                        bool canViewCustomer = currentScope == DataScopes.CrossCompany ||
+                                               currentScope == DataScopes.Company ||
+                                               currentScope == DataScopes.Division ||
+                                               ownRefDocs.Contains(refDoc);
 
                         if (opSalesLookup.TryGetValue(refDoc, out var opSales))
                         {
                             // ✅ มีข้อมูลใน DB → ใช้จาก DB
                             var soldTo = opSales.SoldToParty?.Trim() ?? "";
-                            item.Customer_Code = soldTo;
-                            item.Customer_Name = customerNameDict.TryGetValue(soldTo, out var name)
-                                ? name : soldTo;
+
+                            // ✅ AdditionalInfoOut แสดงเสมอ
                             item.Additional_Info_Out = opSales.PurchaseOrderByCustomer;
+
+                            if (canViewCustomer)
+                            {
+                                // ✅ มีสิทธิ์ → แสดง Customer
+                                item.Customer_Code = soldTo;
+                                item.Customer_Name = customerNameDict.TryGetValue(soldTo, out var name)
+                                    ? name : soldTo;
+                            }
+                            else
+                            {
+                                // ✅ ไม่มีสิทธิ์ → ซ่อน Customer เท่านั้น
+                                item.Customer_Code = null;
+                                item.Customer_Name = null;
+                            }
                         }
-                        // ✅ ไม่มีใน DB → ใช้ค่าจาก SAP ต้นทางเดิม (ไม่ต้องทำอะไร)
+                        else
+                        {
+                            // ✅ ไม่มีใน DB → ใช้ SAP ต้นทาง, AdditionalInfoOut คงเดิม
+                            if (!canViewCustomer)
+                            {
+                                item.Customer_Code = null;
+                                item.Customer_Name = null;
+                            }
+                            // Additional_Info_Out → ไม่แตะ ใช้จาก SAP เดิม
+                        }
                     }
                 }
 
@@ -918,6 +928,27 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             });
         }
         [Authorize]
+        [HttpPost("SalesOrderDetail")]
+        public async Task<IActionResult> GetSalesOrderDetail([FromBody] SalesOrderDetailRequestDto request)
+        {
+            var permission = await GetCurrentPermissionAsync();
+            if (permission == null)
+                return Unauthorized();
+
+            if (!permission.Page1Access)
+                return Forbid();
+
+            try
+            {
+                var result = await _sapService.GetSalesOrderByIdAsync(request.SalesOrder);
+                return Content(result, "application/json");
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+        [Authorize]
         [HttpGet("SoldToLookup")]
         public async Task<IActionResult> GetSoldToLookup([FromQuery] string keyword)
         {
@@ -1140,8 +1171,8 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
         };
 
         private IEnumerable<string> GetPlantsForStockMovement(
-    View_UserPermission permission,
-    string? requestedPlant)
+     View_UserPermission permission,
+     string? requestedPlant)
         {
             var scope = ResolveScope(permission);
 
@@ -1153,12 +1184,13 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
             if (scope == DataScopes.CrossCompany)
             {
-                if (!string.IsNullOrWhiteSpace(requestedPlant))
-                    return allPlants.Contains(requestedPlant)
-                        ? new[] { requestedPlant }
-                        : Enumerable.Empty<string>();
+                // ✅ ถ้าไม่ระบุ plant → ดึงทุก plant ที่มีสิทธิ์
+                if (string.IsNullOrWhiteSpace(requestedPlant))
+                    return allPlants;
 
-                return allPlants;
+                return allPlants.Contains(requestedPlant)
+                    ? new[] { requestedPlant }
+                    : Enumerable.Empty<string>();
             }
 
             if (!permission.CompanyID.HasValue)
@@ -1167,14 +1199,13 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             if (!CompanyPlants.TryGetValue(permission.CompanyID.Value, out var companyPlants))
                 return Enumerable.Empty<string>();
 
-            if (!string.IsNullOrWhiteSpace(requestedPlant))
-            {
-                return companyPlants.Contains(requestedPlant)
-                    ? new[] { requestedPlant }
-                    : Enumerable.Empty<string>();
-            }
+            // ✅ ถ้าไม่ระบุ plant → ดึงทุก plant ของ company นั้น
+            if (string.IsNullOrWhiteSpace(requestedPlant))
+                return companyPlants;
 
-            return companyPlants;
+            return companyPlants.Contains(requestedPlant)
+                ? new[] { requestedPlant }
+                : Enumerable.Empty<string>();
         }
         private IQueryable<SalesOrderResponseDto> BuildDistinctSalesOrderQuery(
     IQueryable<View_MGT_GLC_ALL_Sales> query)
@@ -1225,7 +1256,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             query = ApplySalesPermission(query, permission);
 
             var materials = await query
-                .Where(x => x.Material != null)
+                .Where(x => x.Material != null) 
                 .Select(x => x.Material!)
                 .Distinct()
                 .ToListAsync();

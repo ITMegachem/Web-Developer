@@ -133,6 +133,7 @@
                         <th style="font-size: 110% !important; font-weight: 800 !important;">@T("MaterialCode")</th>
                         <th style="font-size: 110% !important; font-weight: 800 !important;">@T("MaterialDescription")</th>
                         <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("BatchNo")</th>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Storage Loc</th>
                         <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("Unresticted Stock")</th>
                         <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Block Stock</th>
                         <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Quality Inspection</th>
@@ -156,6 +157,7 @@
                                 <td class="numeric-green">@r.MaterialCode</td>
                                 <td>@r.MaterialDescription</td>
                                 <td class="text-center">@r.BatchNo</td>
+                                <td class="text-center">@r.StorageLocation</td>
                                 <td class="text-center">@r.Unrestricted_Stock.ToString("N0")</td>
                                 <td class="text-center">@r.Blocked_Stock</td>
                                 <td class="text-center">@r.Stock_in_QI</td>
@@ -175,7 +177,7 @@
                     else if (!isLoading)
                     {
                         <tr>
-                            <td colspan="11" class="text-center py-5">
+                            <td colspan="@VisibleColumnCount" class="text-center py-5">
                                 @T("NoData")
                             </td>
                         </tr>
@@ -233,7 +235,7 @@
         new() { PlantCode = "1900", PlantName = "MGT Riteoff Plant" },
         new() { PlantCode = "2100", PlantName = "Green Leaf Chemical" }
     };
-
+    private int VisibleColumnCount => HideCostColumns ? 9 : 12;
     private List<WarehouseStockDto> allItems = new();
     private List<MaterialGroupDto> filteredMaterialGroups = new();
     private int totalItems;
@@ -376,7 +378,9 @@
                     TotalValue = x.TotalValue ?? 0,
                     CostPerKg = x.costPerKg ?? 0,
                     UnitKg = x.UnitKg ?? 0,
+                    StorageLocation = x.StorageLocation,
                     Stock_in_QI = x.Stock_in_QI ?? 0
+
                 })
                 .ToList() ?? new();
 
@@ -527,6 +531,7 @@
             "Material Code",
             "Description",
             "Batch No",
+            "Storage Loc",
             "Unrestricted Stock",
             "Block Stock",
             "Quality Inspection",
@@ -556,6 +561,7 @@
                 ws.Cell(row, col++).Value = r.MaterialCode;
                 ws.Cell(row, col++).Value = r.MaterialDescription;
                 ws.Cell(row, col++).Value = r.BatchNo;
+                ws.Cell(row, col++).Value = r.StorageLocation;
                 ws.Cell(row, col++).Value = r.Unrestricted_Stock;
                 ws.Cell(row, col++).Value = r.Blocked_Stock;
                 ws.Cell(row, col++).Value = r.Stock_in_QI;
@@ -866,5 +872,5 @@
         }
     }
 
-    private int VisibleColumnCount => HideCostColumns ? 8 : 11;
+    
 }

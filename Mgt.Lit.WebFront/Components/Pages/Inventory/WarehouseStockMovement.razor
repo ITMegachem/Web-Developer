@@ -27,18 +27,6 @@
     <div class="filter-card-modern shadow-sm mb-4">
         <div class="row g-3 align-items-end">
             <div class="col-12 col-md-4">
-                <label class="modern-label">Plant</label>
-                <select class="form-select modern-input" @bind="selectedPlant">
-
-                    @foreach (var p in plants)
-                    {
-                        <option value="@p.PlantCode">
-                            @p.PlantCode - @p.PlantName
-                        </option>
-                    }
-                </select>
-            </div>
-            <div class="col-12 col-md-4">
                 <label class="modern-label">Material</label>
 
                 <div class="autocomplete-wrapper">
@@ -68,6 +56,20 @@
 
                 </div>
             </div>
+            <div class="col-12 col-md-4">
+                <label class="modern-label">Material Description</label>
+                <div class="form-control modern-input"
+                     style="background:#fff0f0; border: 2px solid #dc3545; color:#dc3545; min-height:38px;">
+                    @if (!string.IsNullOrWhiteSpace(selectedMaterialName))
+                    {
+                        @selectedMaterialName
+                    }
+                    else
+                    {
+                        <span class="text-muted">description material : -</span>
+                    }
+                </div>
+            </div>
             <div class="col-12 col-md-4 col-lg-2 ms-auto">
                 <button class="btn btn-search-pill w-100"
                         disabled="@string.IsNullOrWhiteSpace(materialSearch)"
@@ -83,6 +85,7 @@
                     }
                 </button>
             </div>
+            
         </div>
     </div>
 
@@ -250,10 +253,12 @@
     private bool CanViewVendor => AuthState.Permission?.CanViewVendor ?? false;
     private bool CanViewCustomer => AuthState.Permission?.CanViewCustomer ?? false;
     private MaterialLookup? _lastSelectedMaterial;
+    private string selectedMaterialName = "";
     private async Task OnMaterialSearch(ChangeEventArgs e)
     {
         materialSearch = e.Value?.ToString() ?? "";
         selectedMaterial = null;
+        selectedMaterialName = "";
         _lastSelectedMaterial = null;  // ✅ reset cache
         materialResults.Clear();
         showMaterialDropdown = false;
@@ -331,6 +336,7 @@
         _lastSelectedMaterial = item;  // ✅ cache
         selectedMaterial = item.Code;
         materialSearch = item.Code;
+        selectedMaterialName = item.Name ?? "";
         materialResults.Clear();
         showMaterialDropdown = false;
     }
@@ -338,7 +344,7 @@
     {
         PageContext.Menu = "Sales";
         PageContext.Page = "Stock Movement";
-        selectedPlant = plants.First().PlantCode;
+        selectedPlant = "";
         selectedMaterial = "";
 
         return Task.CompletedTask;

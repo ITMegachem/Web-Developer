@@ -103,4 +103,29 @@ public class SapService
 
         return await postResponse.Content.ReadAsStringAsync();
     }
+    public async Task<string> GetSalesOrderByIdAsync(string salesOrder)
+    {
+        var baseUrl = _configuration["SapConfig:SalesOrder:BaseUrl"];
+        var authHeader = _configuration["SapConfig:SalesOrder:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        // ทดสอบดึง list ก่อน ไม่ระบุ SO number
+        var url = $"{baseUrl.TrimEnd('/')}/A_SalesOrder?$top=1&$format=json";
+
+        Console.WriteLine($"[DEBUG] SAP URL: {url}");
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
+
+        Console.WriteLine($"[DEBUG] Status: {response.StatusCode}");
+        Console.WriteLine($"[DEBUG] Body: {result}");
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception(result);
+
+        return result;
+    }
 }
