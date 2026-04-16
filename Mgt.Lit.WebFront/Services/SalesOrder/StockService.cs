@@ -65,7 +65,20 @@ public sealed class StockService
         using var response = await _http.SendAsync(request, cancellationToken);
         return await ReadResponseAsync<MaterialStockApiResponse>(response, cancellationToken);
     }
+    private static async Task<T?> ReadResponseAsync<T>(
+    HttpResponseMessage response,
+    CancellationToken cancellationToken = default)
+    {
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            throw new UnauthorizedAccessException("Session expired. Please login again.");
 
+        response.EnsureSuccessStatusCode();
+
+        if (response.Content is null)
+            return default;
+
+        return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken);
+    }
     public async Task<List<MaterialConsumptionDto>?> GetMaterialConsumption(
         string? material,
         CancellationToken cancellationToken = default)
@@ -107,20 +120,7 @@ public sealed class StockService
             throw new UnauthorizedAccessException("Token is missing");
     }
 
-    private static async Task<T?> ReadResponseAsync<T>(
-        HttpResponseMessage response,
-        CancellationToken cancellationToken = default)
-    {
-        if (response.StatusCode == HttpStatusCode.Unauthorized)
-            throw new UnauthorizedAccessException();
-
-        response.EnsureSuccessStatusCode();
-
-        if (response.Content is null)
-            return default;
-
-        return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken);
-    }
+    
 
     private sealed class StockRequirementRequest
     {

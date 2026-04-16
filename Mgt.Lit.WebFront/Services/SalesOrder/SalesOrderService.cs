@@ -140,12 +140,13 @@ public sealed class SalesOrderService : ISalesOrderService
             throw new UnauthorizedAccessException("Token is missing");
     }
 
+
     private static async Task<T?> ReadResponseAsync<T>(
-        HttpResponseMessage response,
-        CancellationToken cancellationToken = default)
+    HttpResponseMessage response,
+    CancellationToken cancellationToken = default)
     {
-        if (response.StatusCode == HttpStatusCode.Unauthorized)
-            throw new UnauthorizedAccessException();
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            throw new UnauthorizedAccessException("Session expired. Please login again.");
 
         response.EnsureSuccessStatusCode();
 
@@ -154,7 +155,6 @@ public sealed class SalesOrderService : ISalesOrderService
 
         return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken);
     }
-
     private sealed class SalesOrderSearchRequest
     {
         [JsonPropertyName("SalesOrganization")]

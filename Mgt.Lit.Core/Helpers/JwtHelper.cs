@@ -59,7 +59,8 @@ namespace Mgt.Lit.Core.Helpers
                 issuer: config["Jwt:Issuer"],
                 audience: config["Jwt:Audience"],
                 claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(30),
+                expires: DateTime.UtcNow.AddMinutes(
+    double.Parse(config["Jwt:ExpireMinutes"] ?? "60")),
                 signingCredentials: creds);
 
             return new JwtSecurityTokenHandler().WriteToken(token);

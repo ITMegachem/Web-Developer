@@ -2,6 +2,7 @@
 @implements IDisposable
 @using Mgt.Lit.WebFront.Auth
 @inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject Mgt.Lit.WebFront.Services.AuthService AuthService
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 <div class="app-shell @(IsCollapsed ? "collapsed" : "")">
@@ -153,22 +154,34 @@
         StateHasChanged();
     }
 
+    // AppLayout.razor
     private void StartSessionTimer()
     {
-        // ตรวจสอบทุก 30 วินาที
         _sessionTimer = new System.Threading.Timer(async _ =>
         {
-            if (IsTokenExpired())
+            if (!IsTokenExpired()) return;
+
+            // ✅ เรียก Refresh ผ่าน JS (Browser ส่ง Cookie ไปเองอัตโนมัติ)
+            try
             {
-                await InvokeAsync(() =>
+                var result = await AuthService.RefreshAsync();
+                if (result != null)
                 {
-                    showSessionExpired = true;
-                    StateHasChanged();
-                });
+                    Console.WriteLine("[Layout] Token refreshed silently");
+                    return; // ✅ ใช้งานต่อได้ ไม่แสดง popup
+                }
             }
+            catch { }
+
+            // ❌ Refresh ไม่ได้ → แสดง popup
+            await InvokeAsync(() =>
+            {
+                showSessionExpired = true;
+                StateHasChanged();
+            });
+
         }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
     }
-
     private bool IsTokenExpired()
     {
         try
