@@ -7,6 +7,7 @@
 @using Mgt.Lit.WebFront.Services
 @using Mgt.Lit.WebFront.Services.Member
 @using Mgt.Lit.WebFront.Services.SalesOrder
+@using OfficeOpenXml
 @inject StockService StockService
 @layout AppLayout
 @rendermode InteractiveServer
@@ -222,19 +223,23 @@
     @* --- ปุ่ม Export --- *@
     <div class="d-flex justify-content-end mt-4 gap-3">
 
-        <button class="btn btn-export-pill shadow-sm"
-                disabled="@string.IsNullOrWhiteSpace(selectedMaterial)"
-                @onclick="ExportConsumption">
+        @if (CanExportConsumption)
+        {
+            <button class="btn btn-export-pill shadow-sm"
+                    disabled="@string.IsNullOrWhiteSpace(selectedMaterial)"
+                    @onclick="ExportConsumption">
+                <i class="bi bi-graph-down me-2"></i> Export Consumption
+            </button>
+        }
 
-            <i class="bi bi-graph-down me-2"></i> Export Consumption
-        </button>
-
-        <button class="btn btn-export-pill shadow-sm"
-                disabled="@(stockData?.Detail == null || !stockData.Detail.Any())"
-                @onclick="ExportData">
-
-            <i class="bi bi-file-earmark-excel-fill me-2"></i> Export as Excel
-        </button>
+        @if (CanExportExcel)
+        {
+            <button class="btn btn-export-pill shadow-sm"
+                    disabled="@(stockData?.Detail == null || !stockData.Detail.Any())"
+                    @onclick="ExportData">
+                <i class="bi bi-file-earmark-excel-fill me-2"></i> Export as Excel
+            </button>
+        }
 
     </div>
 </div>
@@ -254,6 +259,31 @@
     private bool CanViewCustomer => AuthState.Permission?.CanViewCustomer ?? false;
     private MaterialLookup? _lastSelectedMaterial;
     private string selectedMaterialName = "";
+    // ✅ Consumption — Purchase ทุกระดับได้, Sales block เฉพาะ user
+    private bool CanExportConsumption
+    {
+        get
+        {
+            if (AuthState.Permission == null) return false;
+            var role = AuthState.Permission.UserRole?.ToLower() ?? "";
+            var dept = AuthState.Permission.Department?.ToLower() ?? "";
+            if (dept == "sales" && role == "user") return false;
+            return true;
+        }
+    }
+
+    // ✅ Excel — block Sales user และ Purchase user
+    private bool CanExportExcel
+    {
+        get
+        {
+            if (AuthState.Permission == null) return false;
+            var role = AuthState.Permission.UserRole?.ToLower() ?? "";
+            var dept = AuthState.Permission.Department?.ToLower() ?? "";
+            if (role == "user") return false; // block ทุก user
+            return true;
+        }
+    }
     private async Task OnMaterialSearch(ChangeEventArgs e)
     {
         materialSearch = e.Value?.ToString() ?? "";
@@ -356,6 +386,9 @@
         if (firstRender)
         {
             _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+            Console.WriteLine($"Permission null? {AuthState.Permission == null}");
+            Console.WriteLine($"UserRole: '{AuthState.Permission?.UserRole}'");
+            Console.WriteLine($"Department: '{AuthState.Permission?.Department}'");
         }
     }
     private async Task LoadData()
@@ -431,90 +464,82 @@
     }
     private async Task ExportData()
     {
-        if (stockData?.Detail == null || !stockData.Detail.Any())
-            return;
+        if (!CanExportExcel) return;
+        if (stockData?.Detail == null || !stockData.Detail.Any()) return;
+        var exportPassword = AuthState.ExportPassword;
+        if (string.IsNullOrWhiteSpace(exportPassword))
+        {
+            exportPassword = await JS.InvokeAsync<string>(
+                "sessionStorage.getItem", "ep");
+        }
         var username = AuthState.Permission?.Username;
         var fileName = $"StockMovement_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
         await DownloadLogSvc.LogDownloadAsync(username, fileName);
-        using var wb = new XLWorkbook();
-        var ws = wb.Worksheets.Add("StockMovement");
-        var headerRow = ws.Row(1);
-        headerRow.Style.Font.Bold = true;
-        headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
 
-        string[] headers =
-            {
-                "Date",
-                "MRP Element Type",
-                "MRP Element Data",
-                "Receipt/Reqmt",
-                "Available Qty",
-                "Additional Info In",
-                "Vendor Code",
-                "Vendor Name",
-                "Additional Info Out",
-                "Customer Code",
-                "Customer Name",
-                "Material Group",
-                "Material Group Description"
-            };
+        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+        using var package = new ExcelPackage();
+        var ws = package.Workbook.Worksheets.Add("StockMovement");
+
+        string[] headers = {
+        "Date", "MRP Element Type", "MRP Element Data",
+        "Receipt/Reqmt", "Available Qty", "Additional Info In",
+        "Vendor Code", "Vendor Name", "Additional Info Out",
+        "Customer Code", "Customer Name", "Material Group",
+        "Material Group Description"
+    };
 
         for (int i = 0; i < headers.Length; i++)
-            ws.Cell(1, i + 1).Value = headers[i];
+        {
+            ws.Cells[1, i + 1].Value = headers[i];
+            ws.Cells[1, i + 1].Style.Font.Bold = true;
+            ws.Cells[1, i + 1].Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+            ws.Cells[1, i + 1].Style.Fill.BackgroundColor
+                .SetColor(System.Drawing.Color.LightGray);
+        }
 
         int row = 2;
-
         foreach (var item in stockData.Detail)
         {
-            ws.Cell(row, 1).Value = item.DocumentDate.ToString("dd/MM/yyyy");
-            ws.Cell(row, 2).Value = item.ElementType;
-            ws.Cell(row, 3).Value = item.RefDoc;
-            ws.Cell(row, 4).Value = item.ReceiptReqmtQty;
-            ws.Cell(row, 5).Value = item.AvailableQty;
-
-            // เหมือน UI
-            ws.Cell(row, 6).Value = item.AdditionalInfoIn;
-            ws.Cell(row, 7).Value = item.VendorCode;
-            ws.Cell(row, 8).Value = item.VendorName;
-            
-            var infoOut = string.IsNullOrWhiteSpace(item.AdditionalInfoIn)
-    ? item.AdditionalInfoOut ?? ""
-    : "";
-
-            // ใน ExportData
-            var filteredInfoOut = string.Join("\n", (item.AdditionalInfoOut ?? "")
-                .Split('\n')
-                .Select(line => System.Text.RegularExpressions.Regex
-                    .Replace(line.Trim(), @"\s*WCD\s*$", "",
-                    System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim())
-                .Where(line => !string.IsNullOrWhiteSpace(line) &&
-                               !line.StartsWith("WCD", StringComparison.OrdinalIgnoreCase)));
-            ws.Cell(row, 9).Value = item.AdditionalInfoOut ?? "";
-            ws.Cell(row, 10).Value = item.CustomerCode;
-            ws.Cell(row, 11).Value = item.CustomerName;
-            ws.Cell(row, 12).Value = item.MaterialGroup;
-            ws.Cell(row, 13).Value = item.MaterialGroupDescription;
-
+            ws.Cells[row, 1].Value = item.DocumentDate.ToString("dd/MM/yyyy");
+            ws.Cells[row, 2].Value = item.ElementType;
+            ws.Cells[row, 3].Value = item.RefDoc;
+            ws.Cells[row, 4].Value = item.ReceiptReqmtQty;
+            ws.Cells[row, 5].Value = item.AvailableQty;
+            ws.Cells[row, 6].Value = item.AdditionalInfoIn;
+            ws.Cells[row, 7].Value = item.VendorCode;
+            ws.Cells[row, 8].Value = item.VendorName;
+            ws.Cells[row, 9].Value = item.AdditionalInfoOut ?? "";
+            ws.Cells[row, 10].Value = item.CustomerCode;
+            ws.Cells[row, 11].Value = item.CustomerName;
+            ws.Cells[row, 12].Value = item.MaterialGroup;
+            ws.Cells[row, 13].Value = item.MaterialGroupDescription;
             row++;
         }
 
-        ws.Columns().AdjustToContents();
+        ws.Cells[ws.Dimension.Address].AutoFitColumns();
 
+       
+        // ✅ file-level password ที่แท้จริง
         using var ms = new MemoryStream();
-        wb.SaveAs(ms);
+        if (!string.IsNullOrWhiteSpace(exportPassword))
+            package.SaveAs(ms, exportPassword); // 🔐
+        else
+            package.SaveAs(ms);
+
         var base64 = Convert.ToBase64String(ms.ToArray());
 
         if (_jsModule != null)
         {
             await _jsModule.InvokeVoidAsync(
-                "downloadFileFromBytes",
-                $"StockMovement_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
+                "downloadFileFromBytes", fileName,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 base64);
         }
     }
     private async Task ExportConsumption()
     {
+        if (!CanExportConsumption) return;
+
         if (string.IsNullOrWhiteSpace(selectedMaterial))
             return;
 

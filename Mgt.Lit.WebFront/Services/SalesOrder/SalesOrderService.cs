@@ -30,18 +30,18 @@ public sealed class SalesOrderService : ISalesOrderService
         CancellationToken cancellationToken = default)
     {
         using var request = CreateAuthorizedPost(
-            ApiRoutes.SalesOrder.Search,
-            new SalesOrderSearchRequest
-            {
-                SalesOrganization = filter.SalesOrganization,
-                BillingDocument = filter.Document,
-                DocDateFrom = filter.DocDateFrom,
-                DocDateTo = filter.DocDateTo,
-                SoldToParty = filter.SoldToParty,
-                Material = filter.Material,
-                Page = filter.Page,
-                PageSize = filter.PageSize
-            });
+    ApiRoutes.SalesOrder.Search,
+    new SalesOrderSearchRequest
+    {
+        SalesOrganization = filter.SalesOrganization,
+        Document          = filter.Document,  // ← Document ไม่ใช่ BillingDocument
+        DeliveryDateFrom  = filter.DocDateFrom,
+        DeliveryDateTo    = filter.DocDateTo,
+        SoldToParty       = filter.SoldToParty,
+        Material          = filter.Material,
+        Page              = filter.Page,
+        PageSize          = filter.PageSize
+    });
 
         using var response = await _http.SendAsync(request, cancellationToken);
 
@@ -51,22 +51,23 @@ public sealed class SalesOrderService : ISalesOrderService
         return new PagedResult<SalesOrderDto>
         {
             Items = apiResult.Items?
-                .Select(x => new SalesOrderDto
-                {
-                    BillingDocument = x.BillingDocument ?? string.Empty,
-                    DocDate = x.BillingDocumentDate,
-                    SalesOrderDocument = x.SalesOrderDocument ?? string.Empty,
-                    SoldTo = x.SoldToParty ?? string.Empty,
-                    SoldToDescription = x.SoldToName ?? string.Empty,
-                    SoldToMappingAddress = x.SoldToMappingAddress ?? string.Empty,  // ✅ เพิ่ม
-                    ShipTo = x.ShiptoCode ?? string.Empty,
-                    ShipToDescription = x.ShipToName ?? string.Empty,
-                    ShipToMappingAddress = x.ShipToMappingAddress ?? string.Empty,  // ✅ เพิ่ม
-                    MaterialCode = x.Material ?? string.Empty,
-                    MaterialDescription = x.MaterialName ?? string.Empty,
-                    SalesEmployee = x.SalesEmployee ?? string.Empty
-                })
-                .ToList() ?? new List<SalesOrderDto>(),
+    .Select(x => new SalesOrderDto
+    {
+        BillingDocument = x.BillingDocument ?? "",
+        DocDate = x.DocDate ?? x.BillingDocumentDate ?? DateTime.MinValue,  // ← BillingDocumentDate
+        DeliveryDate = x.DeliveryDate,
+        SalesOrderDocument = x.SalesOrderDocument ?? "",
+        SoldTo = x.SoldToParty ?? "",
+        SoldToDescription = x.SoldToName ?? "",
+        SoldToMappingAddress = x.SoldToAddress ?? "",   // ← SoldToAddress
+        ShipTo = x.ShiptoCode ?? "",
+        ShipToDescription = x.ShipToName ?? "",
+        ShipToMappingAddress = x.ShipToAddress ?? "",   // ← ShipToAddress
+        MaterialCode = x.Material ?? "",
+        MaterialDescription = x.MaterialName ?? "",
+        SalesEmployee = x.SalesEmployee ?? ""
+    })
+    .ToList() ?? new List<SalesOrderDto>(),
             TotalItems = apiResult.TotalCount
         };
     }
@@ -159,14 +160,16 @@ public sealed class SalesOrderService : ISalesOrderService
         [JsonPropertyName("SalesOrganization")]
         public string? SalesOrganization { get; set; }
 
-        [JsonPropertyName("BillingDocument")]
-        public string? BillingDocument { get; set; }
+        [JsonPropertyName("Document")]
+        public string? Document { get; set; }
 
-        [JsonPropertyName("DocDateFrom")]
-        public DateTime? DocDateFrom { get; set; }
+        // ลบ BillingDocument ออก ← 
 
-        [JsonPropertyName("DocDateTo")]
-        public DateTime? DocDateTo { get; set; }
+        [JsonPropertyName("DeliveryDateFrom")]
+        public DateTime? DeliveryDateFrom { get; set; }
+
+        [JsonPropertyName("DeliveryDateTo")]
+        public DateTime? DeliveryDateTo { get; set; }
 
         [JsonPropertyName("SoldToParty")]
         public string? SoldToParty { get; set; }

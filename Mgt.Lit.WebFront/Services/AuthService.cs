@@ -93,7 +93,24 @@ public class AuthService
         _authState.Token = result.Token;
         await _storage.SetAsync("authToken", result.Token);
         await _storage.SetAsync("currentCompanyID", result.CurrentCompanyId);
-        await _storage.SetAsync("permission", result.Permission);
+        if (result.Permission != null)
+        {
+            await _storage.SetAsync("permission", new Mgt.Lit.Core.Entities.View_UserPermission
+            {
+                UserRole = result.Permission.UserRole,
+                Department = result.Permission.Department,  // ✅ ต้องมีใน LoginResponseDto ด้วย
+                RoleKey = result.Permission.RoleKey,
+                Tier = result.Permission.Tier,
+                Page1Access = result.Permission.Page1Access,
+                Page2Access = result.Permission.Page2Access,
+                Page3Access = result.Permission.Page3Access,
+                Page4Access = result.Permission.Page4Access,
+                DataScope = result.Permission.DataScope,
+                CanViewVendor = result.Permission.CanViewVendor,
+                CanViewCost = result.Permission.CanViewCost,
+                CanViewCustomer = result.Permission.CanViewCustomer
+            });
+        }
 
         await _authState.InitializeAsync(force: true);
 

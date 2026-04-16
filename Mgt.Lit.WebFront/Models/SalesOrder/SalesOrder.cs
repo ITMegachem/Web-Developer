@@ -6,6 +6,7 @@ namespace Mgt.Lit.WebFront.Models.SalesOrder
     {
         public string BillingDocument { get; set; } = string.Empty;
         public DateTime DocDate { get; set; }
+        public DateTime? DeliveryDate { get; set; }
         public string SalesOrderDocument { get; set; } = string.Empty;
         public string SoldTo { get; set; } = string.Empty;
         public string SoldToDescription { get; set; } = string.Empty;

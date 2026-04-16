@@ -26,6 +26,7 @@ namespace Mgt.Lit.Core.DTOs
     public class UserPermissionDto
     {
         public int CompanyID { get; set; }
+        public string? Department { get; set; }
         public string UserRole { get; set; } = string.Empty;
         public string RoleKey { get; set; } = string.Empty;
         public string Tier { get; set; } = string.Empty;

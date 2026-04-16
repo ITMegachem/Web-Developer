@@ -9,7 +9,7 @@
 
         public static class SalesOrder
         {
-            public const string Search = "api/MGT_SalesOrder/Saleslist";
+            public const string Search = "api/MGT_SalesOrder/SalesOrderFull";
         }
     }
 }

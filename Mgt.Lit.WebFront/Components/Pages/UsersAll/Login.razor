@@ -200,6 +200,8 @@ else
 
             AuthState.Token = result.Token;
             AuthState.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "jwt"));
+            AuthState.ExportPassword = password;
+            await JS.InvokeVoidAsync("sessionStorage.setItem", "ep", password);
             Nav.NavigateTo("/Main", forceLoad: true);
         }
         catch (Exception ex)

@@ -210,13 +210,19 @@
     </div>
 
     <!-- EXPORT -->
+    @* --- ปุ่ม Export --- *@
+    @{
+        var canExport = AuthState.Permission?.UserRole?.ToLower() != "user";
+    }
     <div class="d-flex justify-content-end mt-4">
-        <button class="btn btn-export-pill shadow-sm"
-                disabled="@(isLoading || !pagedItems.Any())"
-                @onclick="ExportData">
-            <i class="bi bi-file-earmark-excel-fill me-2"></i>
-            @T("ExportAs") Excel
-        </button>
+        @if (canExport)
+        {
+            <button class="btn btn-export-pill shadow-sm"
+                    disabled="@(isLoading || !pagedItems.Any())"
+                    @onclick="ExportData">
+                <i class="bi bi-file-earmark-excel-fill me-2"></i> @T("ExportAs") Excel
+            </button>
+        }
     </div>
 
 </div>
@@ -353,7 +359,7 @@
 
             allItems = result?.Items?
                 .Where(x =>
-                    PlantMatches(x.Plant, filters.Plant) &&
+                    
                     (string.IsNullOrEmpty(filters.MaterialGroup) ||
                         (!string.IsNullOrEmpty(x.MaterialGroup) &&
                          x.MaterialGroup.Contains(filters.MaterialGroup, StringComparison.OrdinalIgnoreCase))) &&
@@ -508,6 +514,14 @@
 
     private async Task ExportData()
     {
+        var role = AuthState.Permission?.UserRole?.ToLower();
+        if (role == "user")
+        {
+            // แสดง error หรือ return เลย
+            return;
+        }
+        Console.WriteLine($"allItems.Count = {allItems.Count}");
+        Console.WriteLine($"pagedItems.Count = {pagedItems.Count}");
         if (!allItems.Any())
             return;
 
@@ -574,6 +588,7 @@
                     ws.Cell(row, col++).Value = Math.Round(r.CostPerKg, 2);   // ✅ Cost / KG
                     ws.Cell(row, col++).Value = Math.Round(r.TotalValue, 2);  // ✅ Total Value
                 }
+                row++;
             }
 
             ws.Columns().AdjustToContents();

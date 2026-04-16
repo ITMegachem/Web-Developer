@@ -49,10 +49,13 @@
             </div>
             <div class="col-6 col-md-4 col-lg-2">
                 <label class="modern-label">@T("Document")</label>
-                <input class="form-control modern-input" @bind="filters.Document" placeholder="Choose Sales Order or Billing No." />
+                <input class="form-control modern-input"
+                       @bind="filters.Document"
+                       @bind:event="oninput"
+                       placeholder="Choose Sales Order or Billing No." />
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <label class="modern-label">Billing Date</label>
+                <label class="modern-label">Delivery Date</label>
                 <input id="dateRange"
                        class="form-control modern-input @(!string.IsNullOrEmpty(dateRangeError) ? "is-invalid" : "")"
                        placeholder="Select date range"
@@ -137,8 +140,7 @@
                 <thead>
                     <tr>
                         <th style="font-size: 100% !important; font-weight: 800 !important;">@T("DocDate")</th>
-                        <th style="font-size: 100% !important; font-weight: 800 !important;">@T("BillingDocument")</th>
-                        
+                        <th style="font-size: 100% !important; font-weight: 800 !important;">Delivery Date</th> 
                         <th style="font-size: 100% !important; font-weight: 800 !important;">@T("SalesOrderDocument")</th>
                         <th style="font-size: 100% !important; font-weight: 800 !important;">@T("SoldTo") / Description</th>
                         <th style="font-size: 100% !important; font-weight: 800 !important;">@T("ShipTo") / Description</th>
@@ -152,19 +154,20 @@
                         @foreach (var r in pagedItems)
                         {
                             <tr>
-                                <td class="text-nowrap fw-bold date-display-large">@r.DocDate.ToString("dd/MM/yyyy")</td>
-                                <td class="numeric-green">@r.BillingDocument</td>
-                                
+                                <td class="text-nowrap fw-bold date-display-large">
+                                    @(r.DocDate.Year < 2000 ? "-" : r.DocDate.ToString("dd/MM/yyyy"))
+                                </td>
+                                <td class="numeric-green">@(r.DeliveryDate?.ToString("dd/MM/yyyy") ?? "-")</td>  
                                 <td class="numeric-green">@r.SalesOrderDocument</td>
                                 <td>
                                     <div class="full-data-display"><strong>@r.SoldTo</strong></div>
                                     <div class="full-data-display text-muted small">@r.SoldToDescription</div>
-                                    <div class="full-data-display text-muted x-small">@r.SoldToMappingAddress</div>  @* ✅ เพิ่ม *@
+                                    <div class="full-data-display text-muted x-small">@r.SoldToMappingAddress</div>
                                 </td>
                                 <td>
                                     <div class="full-data-display"><strong>@r.ShipTo</strong></div>
                                     <div class="full-data-display text-muted small">@r.ShipToDescription</div>
-                                    <div class="full-data-display text-muted x-small">@r.ShipToMappingAddress</div>  @* ✅ เพิ่ม *@
+                                    <div class="full-data-display text-muted x-small">@r.ShipToMappingAddress</div>
                                 </td>
                                 <td>
                                     <span class="badge-pill-material">@r.MaterialCode</span>
@@ -550,79 +553,51 @@
         salesOrgError = null;
         dateRangeError = null;
 
-        // ✅ ปิด dropdown
         showSoldToDropdown = false;
         showMaterialDropdown = false;
 
-        // ✅ ถ้าพิมพ์ค้างแต่ไม่เลือก → clear filter นั้น
         if (string.IsNullOrWhiteSpace(soldToSearch))
         {
             filters.SoldToParty = null;
             _lastSelectedSoldTo = null;
         }
-        else if (!string.IsNullOrWhiteSpace(filters.SoldToParty))
-        {
-            // ✅ เลือกจาก dropdown แล้ว → ใช้ได้เลย
-        }
+        else if (!string.IsNullOrWhiteSpace(filters.SoldToParty)) { }
         else if (_lastSelectedSoldTo != null)
-        {
-            // ✅ cache ยังอยู่ → restore
             SelectSoldTo(_lastSelectedSoldTo);
-        }
         else
         {
-            // ✅ ใช้ค่าที่พิมพ์ตรงๆ เป็น filter
             var normalized = soldToSearch.Trim();
-
             var matched = soldToResults.FirstOrDefault(x =>
                 x.Code.Equals(normalized, StringComparison.OrdinalIgnoreCase));
-
             if (matched != null)
-            {
                 SelectSoldTo(matched);
-            }
             else
             {
                 filters.SoldToParty = normalized.Contains(' ')
-                    ? normalized[..normalized.IndexOf(' ')]
-                    : normalized;
+                    ? normalized[..normalized.IndexOf(' ')] : normalized;
                 soldToSearch = filters.SoldToParty;
             }
         }
-        
+
         if (string.IsNullOrWhiteSpace(materialSearch))
         {
             filters.Material = null;
             _lastSelectedMaterial = null;
         }
-        else if (!string.IsNullOrWhiteSpace(filters.Material))
-        {
-            // ✅ เลือกจาก dropdown แล้ว → ใช้ได้เลย
-        }
+        else if (!string.IsNullOrWhiteSpace(filters.Material)) { }
         else if (_lastSelectedMaterial != null)
-        {
-            // ✅ blur ไปแต่ cache ยังอยู่ → restore
             SelectMaterial(_lastSelectedMaterial);
-        }
         else
         {
-            // ✅ พิมพ์ค้างโดยไม่เลือก → ลอง match exact จาก results ก่อน
             var normalized = materialSearch.Trim();
-
             var matched = materialResults.FirstOrDefault(x =>
                 x.Code.Equals(normalized, StringComparison.OrdinalIgnoreCase));
-
             if (matched != null)
-            {
-                // ตรงกับ item ใน list → เลือกเลย
                 SelectMaterial(matched);
-            }
             else
             {
-                // ✅ ไม่มีใน list → ใช้ค่าที่พิมพ์ตรงๆ เป็น filter โดยไม่บังคับเลือก
                 filters.Material = normalized.Contains(' ')
-                    ? normalized[..normalized.IndexOf(' ')]
-                    : normalized;
+                    ? normalized[..normalized.IndexOf(' ')] : normalized;
                 materialSearch = filters.Material;
             }
         }
@@ -631,6 +606,7 @@
         showMaterialDropdown = false;
         soldToResults.Clear();
         materialResults.Clear();
+
         // validate date จาก JS input
         if (_jsModule is not null)
         {
@@ -656,18 +632,16 @@
             return;
         }
 
-        if (DocDateFrom is null || DocDateTo is null)
+        // ✅ แก้ตรงนี้ - ต้องมี Document หรือ Date อย่างน้อย 1
+        if (string.IsNullOrWhiteSpace(filters.Document) &&
+            (DocDateFrom is null || DocDateTo is null))
         {
-            
-            if (string.IsNullOrWhiteSpace(filters.Document))
-            {
-                dateRangeError = "Please select Billing Date range";
-                pagedItems.Clear();
-                totalItems = 0;
-                totalPages = 1;
-                await InvokeAsync(StateHasChanged);
-                return;
-            }
+            dateRangeError = "Please enter Sales Order number or select Delivery Date range";
+            pagedItems.Clear();
+            totalItems = 0;
+            totalPages = 1;
+            await InvokeAsync(StateHasChanged);
+            return;
         }
 
         filters.Page = 1;
@@ -710,7 +684,7 @@
             string[] headers =
             {
                 "Doc. Date",
-                "Billing Document",
+                "DeliveryDate",
                 "Sales Order Document",
                 "Sold to",
                 "Sold to Description",
@@ -736,7 +710,7 @@
             foreach (var r in all)
             {
                 ws.Cell(row, 1).Value = r.DocDate.ToString("dd/MM/yyyy");
-                ws.Cell(row, 2).Value = r.BillingDocument;
+                ws.Cell(row, 2).Value = r.DeliveryDate;
                 ws.Cell(row, 3).Value = r.SalesOrderDocument;
                 ws.Cell(row, 4).Value = r.SoldTo;
                 ws.Cell(row, 5).Value = r.SoldToDescription;

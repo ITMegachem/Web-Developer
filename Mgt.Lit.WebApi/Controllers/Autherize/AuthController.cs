@@ -88,6 +88,7 @@ namespace Mgt.Lit.WebApi.Controllers
                     DataScope = permission.DataScope,
                     CanViewVendor = permission.CanViewVendor,
                     CanViewCost = permission.CanViewCost,
+                    Department = permission.Department,
                     CanViewCustomer = permission.CanViewCustomer
                 });
 
@@ -143,6 +144,7 @@ namespace Mgt.Lit.WebApi.Controllers
                     permission.DataScope,
                     permission.CanViewVendor,
                     permission.CanViewCost,
+                    permission.Department,
                     permission.CanViewCustomer
                 }
             });
@@ -262,7 +264,6 @@ namespace Mgt.Lit.WebApi.Controllers
             stored.LastUsedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
-            // ✅ ดึง companies ทั้งหมดของ user
             var userCompanies = await (
                 from uc in _context.MsUserCompanies
                 join c in _context.MsCompanies on uc.CompanyID equals c.CompanyID
@@ -279,19 +280,37 @@ namespace Mgt.Lit.WebApi.Controllers
             var primaryCode = userCompanies
                 .FirstOrDefault(x => x.CompanyID == currentCompanyId)?.CompanyCode;
 
+            // ✅ ดึง permission
+            View_UserPermission? permission = null;
+            if (currentCompanyId != null)
+            {
+                permission = await _context.View_UserPermissions
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x =>
+                        x.UserID == user.UserID &&
+                        x.CompanyID == currentCompanyId);
+            }
+
+            // ✅ declare แค่ครั้งเดียว
             var newAccessToken = JwtHelper.GenerateToken(
                 user, _config, currentCompanyId,
-                primaryCompanyCode: primaryCode,   // ✅ เพิ่ม
-                allCompanies: userCompanies        // ✅ เพิ่ม
+                primaryCompanyCode: primaryCode,
+                allCompanies: userCompanies,
+                permission: permission == null ? null : new UserPermissionDto
+                {
+                    Page1Access = permission.Page1Access,
+                    Page2Access = permission.Page2Access,
+                    Page3Access = permission.Page3Access,
+                    Page4Access = permission.Page4Access,
+                    DataScope = permission.DataScope,
+                    CanViewVendor = permission.CanViewVendor,
+                    CanViewCost = permission.CanViewCost,
+                    CanViewCustomer = permission.CanViewCustomer
+                }
             );
 
-            return Ok(new
-            {
-                token = newAccessToken,
-                currentCompanyId
-            });
+            return Ok(new { token = newAccessToken, currentCompanyId });
         }
-
         [Authorize]
         [HttpPost("logout")]
         public async Task<IActionResult> Logout()
@@ -317,7 +336,7 @@ namespace Mgt.Lit.WebApi.Controllers
         [HttpPost("switch-company")]
         public async Task<IActionResult> SwitchCompany([FromBody] SwitchCompanyRequest dto)
         {
-            var userIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userIdText = User.FindFirst("UserID")?.Value;
             if (!int.TryParse(userIdText, out var userId))
                 return Unauthorized();
 

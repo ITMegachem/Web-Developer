@@ -7,18 +7,14 @@ namespace Mgt.Lit.Core.DTOs
     public class SalesOrderRequestDto
     {
         public string? SalesOrganization { get; set; }
-        public string? BillingDocument { get; set; }
-        public DateTime? DocDateFrom { get; set; }
-        public DateTime? DocDateTo { get; set; }
+        public string? Document { get; set; }           // ← ต้องมีชื่อนี้
+        public string? BillingDocument { get; set; }    // ← ถ้ามีอันนี้ด้วย อาจสับสน
+        public DateTime? DeliveryDateFrom { get; set; }
+        public DateTime? DeliveryDateTo { get; set; }
         public string? SoldToParty { get; set; }
         public string? Material { get; set; }
-
-
-        // paging
         public int Page { get; set; } = 1;
         public int PageSize { get; set; } = 10;
-        
-
     }
     public class SalesOrderResponseDto
     {
@@ -29,7 +25,7 @@ namespace Mgt.Lit.Core.DTOs
         public string SoldToParty { get; set; }
         public string SoldToName { get; set; }
         public string SoldToMappingAddress { get; set; }
-
+        public DateTime? DeliveryDate { get; set; }
         public string ShiptoCode { get; set; }
         public string ShipToName { get; set; }
         public string ShipToMappingAddress { get; set; }

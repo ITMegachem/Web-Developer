@@ -14,6 +14,7 @@ public class AuthState
     public string? Token { get; set; }
     public ClaimsPrincipal? User { get; set; }
     public View_UserPermission? Permission { get; set; }
+    public string? ExportPassword { get; set; }
     public int? CurrentCompanyID { get; set; }
     public void Clear() { Token = null; User = null; }
     public AuthState(ProtectedSessionStorage storage)

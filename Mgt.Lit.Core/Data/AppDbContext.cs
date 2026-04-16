@@ -74,7 +74,14 @@ namespace Mgt.Lit.Core.Data
             modelBuilder.Entity<ErrorLog>().ToTable("ErrorLog");
             modelBuilder.Entity<Entities.RefreshToken>().ToTable("RefreshTokens", "dbo");
             modelBuilder.Entity<Ms_MaterialGroup1>().HasNoKey();
-
+            // OnModelCreating
+            modelBuilder.Entity<Mapping_Soldto>().HasNoKey().ToTable("Mapping_Soldto");
+            modelBuilder.Entity<Mapping_Shipto>().HasNoKey().ToTable("Mapping_Shipto");
+            modelBuilder.Entity<Op_SalesOrder>(entity =>
+            {
+                entity.HasKey(x => x.SalesOrder);
+                entity.ToTable("Op_SalesOrder");
+            });
         }
 
         public DbSet<Entities.RefreshToken> RefreshTokens { get; set; }
@@ -84,7 +91,9 @@ namespace Mgt.Lit.Core.Data
         public DbSet<Ms_Product> Ms_Product { get; set; }
         public DbSet<Ms_MaterialGroup1> Ms_MaterialGroup1 { get; set; }
         public DbSet<View_Sales_with_Op_SalesOrder> View_Sales_with_Op_SalesOrder { get; set; }
-
+        public DbSet<Mapping_Soldto> Mapping_Soldtos { get; set; }
+        public DbSet<Mapping_Shipto> Mapping_Shiptos { get; set; }
+        public DbSet<Op_SalesOrder> Op_SalesOrders { get; set; }  
 
     }
 }

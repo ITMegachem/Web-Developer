@@ -112,19 +112,104 @@ public class SapService
         client.DefaultRequestHeaders.Add("Authorization", authHeader);
         client.DefaultRequestHeaders.Add("Accept", "application/json");
 
-        // ทดสอบดึง list ก่อน ไม่ระบุ SO number
-        var url = $"{baseUrl.TrimEnd('/')}/A_SalesOrder?$top=1&$format=json";
+        // ✅ ใช้ salesOrder parameter จริงๆ ไม่ใช่ $top=1
+        var url = $"{baseUrl.TrimEnd('/')}/A_SalesOrder('{salesOrder}')?$format=json";
 
-        Console.WriteLine($"[DEBUG] SAP URL: {url}");
+        Console.WriteLine($"[DEBUG] URL: {url}");
 
         var response = await client.GetAsync(url);
         var result = await response.Content.ReadAsStringAsync();
 
-        Console.WriteLine($"[DEBUG] Status: {response.StatusCode}");
-        Console.WriteLine($"[DEBUG] Body: {result}");
+        if (!response.IsSuccessStatusCode)
+            throw new Exception(result);
+
+        return result;
+    }
+    public async Task<string> GetSalesOrderItemAsync(string salesOrder)
+    {
+        var baseUrl = _configuration["SapConfig:SalesOrder:BaseUrl"];
+        var authHeader = _configuration["SapConfig:SalesOrder:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        // filter เฉพาะ Item ของ SalesOrder นี้
+        var url = $"{baseUrl.TrimEnd('/')}/A_SalesOrderItem" +
+                  $"?$filter=SalesOrder eq '{salesOrder}'" +
+                  $"&$format=json";
+
+        Console.WriteLine($"[DEBUG] SAP Item URL: {url}");
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
             throw new Exception(result);
+
+        return result;
+    }
+    public async Task<string> GetSalesOrderFullAsync(string salesOrder)
+    {
+        var baseUrl = _configuration["SapConfig:SalesOrder:BaseUrl"];
+        var authHeader = _configuration["SapConfig:SalesOrder:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        var url = $"{baseUrl.TrimEnd('/')}/A_SalesOrder('{salesOrder}')" +
+                  $"?$expand=to_Item,to_Partner" +
+                  $"&$format=json";
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception(result);
+
+        return result;
+    }
+
+    public async Task<List<(string SalesOrder, string Material)>> GetSalesOrderItemsAsync(List<string> salesOrders)
+    {
+        var baseUrl = _configuration["SapConfig:SalesOrder:BaseUrl"];
+        var authHeader = _configuration["SapConfig:SalesOrder:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        var result = new List<(string, string)>();
+
+        try
+        {
+            var soFilter = string.Join(" or ", salesOrders.Select(s => $"SalesOrder eq '{s}'"));
+            var url = $"{baseUrl.TrimEnd('/')}/A_SalesOrderItem" +
+                      $"?$filter={soFilter}" +
+                      $"&$select=SalesOrder,Material" +
+                      $"&$format=json";
+
+            var response = await client.GetAsync(url);
+            var body = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode) return result;
+
+            var json = JsonDocument.Parse(body);
+            var items = json.RootElement
+                .GetProperty("d")
+                .GetProperty("results")
+                .EnumerateArray();
+
+            foreach (var item in items)
+            {
+                var so = item.GetProperty("SalesOrder").GetString() ?? "";
+                var material = item.GetProperty("Material").GetString() ?? "";
+                if (!string.IsNullOrEmpty(so) && !string.IsNullOrEmpty(material))
+                    result.Add((so, material));
+            }
+        }
+        catch { }
 
         return result;
     }
