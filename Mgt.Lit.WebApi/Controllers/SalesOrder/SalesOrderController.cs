@@ -1841,18 +1841,21 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
         {
             var scope = ResolveScope(permission);
 
-            if (scope == DataScopes.Company || scope == DataScopes.CrossCompany || scope == DataScopes.Division)
-                return null; // ไม่จำกัด
+            // ✅ CrossCompany และ Company ไม่จำกัด
+            if (scope == DataScopes.Company || scope == DataScopes.CrossCompany)
+                return null;
 
+            // ✅ Division และ Own → จำกัดตาม scope
             var query = _context.View_MGT_GLC_ALL_Sales.AsNoTracking();
             query = ApplySalesPermission(query, permission);
 
             var materials = await query
-                .Where(x => x.Material != null) 
+                .Where(x => x.Material != null)
                 .Select(x => x.Material!)
                 .Distinct()
                 .ToListAsync();
 
+            // ✅ ถ้าไม่มี material เลย → ส่ง empty set (ไม่ใช่ null)
             return new HashSet<string>(materials, StringComparer.OrdinalIgnoreCase);
         }
         [Authorize]
