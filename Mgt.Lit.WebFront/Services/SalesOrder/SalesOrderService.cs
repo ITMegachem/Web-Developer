@@ -65,7 +65,10 @@ public sealed class SalesOrderService : ISalesOrderService
         ShipToMappingAddress = x.ShipToAddress ?? "",   // ← ShipToAddress
         MaterialCode = x.Material ?? "",
         MaterialDescription = x.MaterialName ?? "",
-        SalesEmployee = x.SalesEmployee ?? ""
+        SalesEmployee = x.SalesEmployee ?? "",
+        PurchaseOrderByCustomer = x.PurchaseOrderByCustomer ?? "",
+        OrderQuantity = x.OrderQuantity,
+        RequestedQuantityUnit = x.RequestedQuantityUnit ?? ""
     })
     .ToList() ?? new List<SalesOrderDto>(),
             TotalItems = apiResult.TotalCount

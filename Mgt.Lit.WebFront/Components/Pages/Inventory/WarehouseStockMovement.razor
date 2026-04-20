@@ -67,10 +67,32 @@
                     }
                     else
                     {
-                        <span class="text-muted">description material : -</span>
+                        <span class="text-muted">description material</span>
                     }
                 </div>
             </div>
+            @* --- ปุ่ม Toggle Vendor / Customer --- *@
+            @if (IsManagerOrAbove)
+            {
+                <div class="col-12 col-md-auto d-flex align-items-end gap-2 mt-2 mt-md-0">
+                    @if (CanViewVendor)
+                    {
+                        <button class="btn btn-sm @(showVendor ? "btn-success" : "btn-outline-secondary") rounded-pill px-3"
+                                @onclick="() => showVendor = !showVendor">
+                            <i class="bi @(showVendor ? "bi-eye-fill" : "bi-eye-slash-fill") me-1"></i>
+                            @("Vendor")
+                        </button>
+                    }
+                    @if (CanViewCustomer)
+                    {
+                        <button class="btn btn-sm @(showCustomer ? "btn-success" : "btn-outline-secondary") rounded-pill px-3"
+                                @onclick="() => showCustomer = !showCustomer">
+                            <i class="bi @(showCustomer ? "bi-eye-fill" : "bi-eye-slash-fill") me-1"></i>
+                            @("Customer")
+                        </button>
+                    }
+                </div>
+            }
             <div class="col-12 col-md-4 col-lg-2 ms-auto">
                 <button class="btn btn-search-pill w-100"
                         disabled="@string.IsNullOrWhiteSpace(materialSearch)"
@@ -96,7 +118,7 @@
             <table class="table modern-table mb-0 fixed-table">
                 <thead class="table-light">
                     @{
-                        var colCount = 8 + (CanViewVendor ? 1 : 0) + (CanViewCustomer ? 1 : 0);
+                        var colCount = 8 + (ShowVendorCol ? 1 : 0) + (ShowCustomerCol ? 1 : 0);
                     }
 
                     <tr class="table-header-modern">
@@ -106,12 +128,12 @@
                         <th class="text-center">Receipt /<br />Reqmt</th>
                         <th class="text-center">Available<br />Qty</th>
                         <th class="text-center">Additional<br />Info IN</th>
-                        @if (CanViewVendor)
+                        @if (ShowVendorCol)
                         {
                             <th class="text-center">Vendor Code /<br />Vendor Name</th>
                         }
                         <th class="text-center">Additional<br />Info Out</th>
-                        @if (CanViewCustomer)
+                        @if (ShowCustomerCol)
                         {
                             <th class="text-center">Customer Code /<br />Customer Name</th>
                         }
@@ -122,8 +144,8 @@
                     @if (!hasSearched)
                     {
                         <tr>
-                            <td colspan="9" class="text-center text-muted py-4" ">
-                                <p style="font-size : 100% !important;">กรุณากรอกข้อมูลและค้นหา</p>
+                            <td colspan="@colCount" class="text-center text-muted py-4">
+                                <p style="font-size: 100% !important;">กรุณากรอกข้อมูลและค้นหา</p>
                             </td>
                         </tr>
                     }
@@ -149,7 +171,7 @@
                                         }
                                     }
                                 </td>
-                                @if (CanViewVendor)
+                                @if (ShowVendorCol)
                                 {
                                     <td class="align-middle">
                                         <div class="fw-bold">@item.VendorCode</div>
@@ -157,12 +179,16 @@
                                     </td>
                                 }
                                 <td class="text-center align-middle">
+                                    @if (!string.IsNullOrWhiteSpace(item.IndustryName))
+                                    {
+                                        <div><b>@item.IndustryName</b></div>
+                                    }
                                     @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoOut))
                                     {
-                                        @item.AdditionalInfoOut
+                                        <div>@item.AdditionalInfoOut</div>
                                     }
                                 </td>
-                                @if (CanViewCustomer)
+                                @if (ShowCustomerCol)
                                 {
                                     <td class="align-middle">
                                         <div class="fw-bold">@item.CustomerCode</div>
@@ -170,11 +196,7 @@
                                     </td>
                                 }
                                 <td class="align-middle text-center">
-                                    @if (!string.IsNullOrEmpty(item.MaterialGroup))
-                                    {
-                                        <div class="fw-bold">@item.MaterialGroup</div>
-                                        <div class="text-muted small">@item.MaterialGroupDescription</div>
-                                    }
+                                    <div class="text-muted small">@item.MaterialGroupDescription</div>
                                 </td>
                             </tr>
                         }
@@ -183,17 +205,14 @@
                     {
                         <tr>
                             <td colspan="@colCount" class="text-center text-muted py-4">
-                                กรุณากรอกข้อมูลและค้นหา
-                            </td>
-
-                            <td colspan="@colCount" class="text-center text-muted py-4">
-                                No data found
+                                ไม่พบข้อมูล
                             </td>
                         </tr>
                     }
                 </tbody>
             </table>
         </div>
+    </div>
 
         @* --- Pagination (ลูกศรหนาแบบในรูป) --- *@
         @if (hasSearched && stockData?.Detail != null && stockData.Detail.Any())
@@ -218,30 +237,10 @@
                 </div>
             </div>
         }
-    </div>
+
 
     @* --- ปุ่ม Export --- *@
-    <div class="d-flex justify-content-end mt-4 gap-3">
-
-        @if (CanExportConsumption)
-        {
-            <button class="btn btn-export-pill shadow-sm"
-                    disabled="@string.IsNullOrWhiteSpace(selectedMaterial)"
-                    @onclick="ExportConsumption">
-                <i class="bi bi-graph-down me-2"></i> Export Consumption
-            </button>
-        }
-
-        @if (CanExportExcel)
-        {
-            <button class="btn btn-export-pill shadow-sm"
-                    disabled="@(stockData?.Detail == null || !stockData.Detail.Any())"
-                    @onclick="ExportData">
-                <i class="bi bi-file-earmark-excel-fill me-2"></i> Export as Excel
-            </button>
-        }
-
-    </div>
+    
 </div>
 @code {
     private IJSObjectReference? _jsModule;
@@ -259,6 +258,11 @@
     private bool CanViewCustomer => AuthState.Permission?.CanViewCustomer ?? false;
     private MaterialLookup? _lastSelectedMaterial;
     private string selectedMaterialName = "";
+    private bool showVendor = true;
+    private bool showCustomer = true;
+
+    private bool ShowVendorCol => CanViewVendor && showVendor;
+    private bool ShowCustomerCol => CanViewCustomer && showCustomer;
     // ✅ Consumption — Purchase ทุกระดับได้, Sales block เฉพาะ user
     private bool CanExportConsumption
     {
@@ -419,7 +423,7 @@
     private List<PlantDto> plants = new()
 {
     new() { PlantCode = "1100", PlantName = "Megachem (Thailand) PCL" },
-    new() { PlantCode = "1900", PlantName = "MGT Riteoff Plant" },
+    //new() { PlantCode = "1900", PlantName = "MGT Riteoff Plant" },
     new() { PlantCode = "2100", PlantName = "Green Leaf Chemical" }
 };
     private async Task OnSearch()
@@ -656,5 +660,14 @@
             $"MaterialConsumption_{selectedMaterial}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             base64);
+    }
+    private bool IsManagerOrAbove
+    {
+        get
+        {
+            if (AuthState.Permission == null) return false;
+            var role = AuthState.Permission.UserRole?.ToLower() ?? "";
+            return role == "manager" || role == "admin";
+        }
     }
 }

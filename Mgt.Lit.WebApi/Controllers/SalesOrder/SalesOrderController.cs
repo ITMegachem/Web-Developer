@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using System.Net.ServerSentEvents;
 using System.Runtime;
 using System.Security.Claims;
 using System.Text.Json;
@@ -220,7 +221,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 .Select(x => new
                 {
                     x.Material,
-                    x.MaterialGroupName,
+                    x.ProductGroup,
                     x.SalesGroup,
                     x.IndustryName,
                     x.SalesEmployeeID
@@ -233,7 +234,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     g => g.Key,
                     g => new
                     {
-                        MaterialGroupName = g.First().MaterialGroupName ?? "",
+                        MaterialGroupName = g.First().ProductGroup ?? "",
                         SalesGroup = string.Join(", ",
                             g.Where(x => !string.IsNullOrWhiteSpace(x.SalesGroup))
                              .Select(x => x.SalesGroup)
@@ -339,7 +340,21 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         plant = requestedPlant ?? string.Join(",", plantsToQuery),
                         _Detail = new List<object>()
                     });
+                if (mergedSapData._Detail != null)
+                {
+                    mergedSapData._Detail = mergedSapData._Detail
+                        .Where(x => !string.Equals(x.Plant, "1900", StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                }
 
+                // ✅ เช็คอีกครั้งหลัง filter
+                if (!mergedSapData._Detail.Any())
+                    return Ok(new
+                    {
+                        material_Code = material,
+                        plant = requestedPlant ?? string.Join(",", plantsToQuery),
+                        _Detail = new List<object>()
+                    });
                 // ── Material Group ────────────────────────────────────────────────────
                 var materialCodes = mergedSapData._Detail
                     .Select(x => x.Material_Code)
@@ -359,7 +374,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         materialQuery = materialQuery.Where(x => x.SalesOrganization == salesOrg);
 
                     var materialInfo = await materialQuery
-                        .Select(x => new { x.Material, x.MaterialGroup1, x.MaterialGroupName, x.SalesGroup })
+                        .Select(x => new { x.Material,  x.ProductGroup, x.SalesGroup })
                         .Distinct()
                         .ToListAsync();
 
@@ -367,8 +382,8 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         .GroupBy(x => x.Material)
                         .ToDictionary(g => g.Key, g => new
                         {
-                            g.First().MaterialGroup1,
-                            g.First().MaterialGroupName,
+                            
+                            g.First().ProductGroup,
                             SalesGroup = string.Join(", ",
                                 g.Where(x => !string.IsNullOrWhiteSpace(x.SalesGroup))
                                  .Select(x => x.SalesGroup).Distinct())
@@ -379,8 +394,8 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         if (!string.IsNullOrWhiteSpace(item.Material_Code) &&
                             materialDict.TryGetValue(item.Material_Code, out var info))
                         {
-                            item.MaterialGroup = info.MaterialGroup1;
-                            item.MaterialGroupDescription = info.MaterialGroupName;
+                            
+                            item.MaterialGroupDescription = info.ProductGroup;
                             item.SalesGroup = info.SalesGroup;
                         }
                     }
@@ -438,7 +453,6 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
                 if (refDocs.Any())
                 {
-                    // ดึงข้อมูลจาก OpSalesOrder (MGT/GLC)
                     var opSalesData = await _context.View_Sales_with_Op_SalesOrder
                         .AsNoTracking()
                         .Where(x => x.PartnerFunction == "Z2" &&
@@ -459,33 +473,54 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         .GroupBy(x => x.SalesOrder!)
                         .ToDictionary(g => g.Key, g => g.First());
 
-                    // ดึง CustomerFullName จาก SoldToParty
+                    // ✅ trimmed → ใช้ใน dict key
                     var soldToParties = opSalesData
                         .Select(x => x.SoldToParty?.Trim())
                         .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .Select(x => x!)
                         .Distinct()
                         .ToList();
 
-                    var customerNameDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    // ✅ raw (ไม่ trim) → ใช้ใน SQL Contains
+                    var soldToPartiesRaw = opSalesData
+                        .Select(x => x.SoldToParty)
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .Select(x => x!)
+                        .Distinct()
+                        .ToList();
+
+                    var customerInfoDict = new Dictionary<string, (string FullName, string IndustryCode, string IndustryName)>
+                        (StringComparer.OrdinalIgnoreCase);
 
                     if (soldToParties.Any())
                     {
-                        var customerNames = await _context.View_MGT_GLC_ALL_Sales
+                        var customerData = await _context.View_MGT_GLC_ALL_Sales
                             .AsNoTracking()
-                            .Where(x => x.SoldToParty != null && soldToParties.Contains(x.SoldToParty))
-                            .Select(x => new { x.SoldToParty, x.CustomerFullName })
+                            .Where(x => x.SoldToParty != null &&
+                                        soldToPartiesRaw.Contains(x.SoldToParty)) // ✅ ใช้ raw ใน SQL
+                            .Select(x => new
+                            {
+                                SoldToParty = x.SoldToParty!.Trim(), // ✅ Trim ใน Select (in-memory)
+                                x.CustomerFullName,
+                                x.IndustryCode,
+                                x.IndustryName
+                            })
                             .Distinct()
                             .ToListAsync();
 
-                        customerNameDict = customerNames
-                            .Where(x => !string.IsNullOrWhiteSpace(x.SoldToParty) &&
-                                        !string.IsNullOrWhiteSpace(x.CustomerFullName))
-                            .GroupBy(x => x.SoldToParty!.Trim())
-                            .ToDictionary(g => g.Key, g => g.First().CustomerFullName ?? "");
+                        customerInfoDict = customerData
+                            .Where(x => !string.IsNullOrWhiteSpace(x.SoldToParty))
+                            .GroupBy(x => x.SoldToParty.Trim())
+                            .ToDictionary(
+                                g => g.Key,
+                                g => (
+                                    FullName: g.First().CustomerFullName ?? "",
+                                    IndustryCode: g.First().IndustryCode ?? "",
+                                    IndustryName: g.First().IndustryName ?? ""
+                                )
+                            );
                     }
 
-                    // ── Map ข้อมูลเข้า Detail ────────────────────────────────────────
-                    // ── Map ข้อมูลเข้า Detail ────────────────────────────────────────
                     foreach (var item in mergedSapData._Detail)
                     {
                         var refDoc = item.Ref_Doc?.Trim() ?? "";
@@ -498,40 +533,47 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
                         if (opSalesLookup.TryGetValue(refDoc, out var opSales))
                         {
-                            // ✅ มีข้อมูลใน DB → ใช้จาก DB
                             var soldTo = opSales.SoldToParty?.Trim() ?? "";
-
-                            // ✅ AdditionalInfoOut แสดงเสมอ
-                            item.Additional_Info_Out = opSales.PurchaseOrderByCustomer;
 
                             if (canViewCustomer)
                             {
-                                // ✅ มีสิทธิ์ → แสดง Customer
-                                item.Customer_Code = soldTo;
-                                item.Customer_Name = customerNameDict.TryGetValue(soldTo, out var name)
-                                    ? name : soldTo;
+                                if (customerInfoDict.TryGetValue(soldTo, out var info))
+                                {
+                                    item.Customer_Code = soldTo;
+                                    item.Customer_Name = info.FullName;
+                                    item.IndustryCode = info.IndustryCode; // ✅ เพิ่มกลับมา Entity มีอยู่แล้ว
+                                    item.IndustryName = info.IndustryName;
+                                }
+                                else
+                                {
+                                    item.Customer_Code = soldTo;
+                                    item.Customer_Name = soldTo;
+                                }
                             }
                             else
                             {
-                                // ✅ ไม่มีสิทธิ์ → ซ่อน Customer เท่านั้น
-                                item.Customer_Code = null;
+                                item.Customer_Code = string.IsNullOrWhiteSpace(soldTo)
+        ? item.Customer_Code  // ← คง SAP ไว้
+        : soldTo;
                                 item.Customer_Name = null;
+                                item.IndustryCode = null;
+                                item.IndustryName = null;
                             }
                         }
                         else
                         {
-                            // ✅ ไม่มีใน DB → ใช้ SAP ต้นทาง, AdditionalInfoOut คงเดิม
                             if (!canViewCustomer)
                             {
-                                item.Customer_Code = null;
+                                //item.Customer_Code = null;
                                 item.Customer_Name = null;
+                                item.IndustryCode = null;
+                                item.IndustryName = null;
                             }
-                            // Additional_Info_Out → ไม่แตะ ใช้จาก SAP เดิม
                         }
                     }
                 }
 
-                // ── CanViewVendor ─────────────────────────────────────────────────────
+                // ── CanViewVendor ──────────────────────────────────────────────────────
                 if (!permission.CanViewVendor)
                     foreach (var item in mergedSapData._Detail)
                     {
@@ -539,15 +581,22 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         item.Vendor_Name = null;
                     }
 
-                // ── CanViewCustomer ───────────────────────────────────────────────────
+                // ── CanViewCustomer ────────────────────────────────────────────────────
                 if (!permission.CanViewCustomer)
                     foreach (var item in mergedSapData._Detail)
                     {
-                        item.Customer_Code = null;
+                        // ✅ คง Customer_Code ไว้ ซ่อนแค่ Name
                         item.Customer_Name = null;
+                        item.IndustryCode = null;
+                        item.IndustryName = null;
                     }
 
                 mergedSapData.Plant = requestedPlant ?? string.Join(",", plantsToQuery);
+                // ก่อน return Ok(mergedSapData)
+                foreach (var d in mergedSapData._Detail)
+                {
+                    Console.WriteLine($"[STOCK] Ref={d.Ref_Doc} Industry={d.IndustryCode}/{d.IndustryName}");
+                }
                 return Ok(mergedSapData);
             }
             catch (Exception ex)
@@ -739,14 +788,11 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             // ── Base query ────────────────────────────────────────────────────────────
             var query = _context.View_MGT_GLC_ALL_Sales
                 .AsNoTracking()
-                .Where(x => x.ProductGroup == "NOF");
+                .Where(x => x.ProductGroup != null && x.ProductGroup != "");
 
-            if (!string.IsNullOrWhiteSpace(request.Material))
+            if (!string.IsNullOrWhiteSpace(request.ProductGroup))
             {
-                var keyword = $"%{request.Material.Trim()}%";
-                query = query.Where(x =>
-                    EF.Functions.Like(x.Material, keyword) ||
-                    EF.Functions.Like(x.MaterialName, keyword));
+                query = query.Where(x => x.ProductGroup == request.ProductGroup.Trim());
             }
 
             if (request.DateFrom.HasValue)
@@ -974,6 +1020,47 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             }
         }
         [Authorize]
+        [HttpGet("ProductGroupLookup")]
+        public async Task<IActionResult> GetProductGroupLookup([FromQuery] string keyword)
+        {
+            var permission = await GetCurrentPermissionAsync();
+            if (permission == null) return Unauthorized();
+
+            if (!permission.Page1Access) return Forbid();
+
+            keyword = keyword?.Trim() ?? "";
+
+            if (keyword.Length < 2)
+                return Ok(new List<object>());
+
+            var likeAny = $"%{keyword}%";
+            var likeStart = $"{keyword}%";
+
+            _context.Database.SetCommandTimeout(60);
+
+            var query = _context.View_MGT_GLC_ALL_Sales
+                .AsNoTracking()
+                .Where(x => x.ProductGroup != null && x.ProductGroup != "");
+
+            query = ApplySalesPermission(query, permission);
+
+            var items = await query
+                .Where(x => EF.Functions.Like(x.ProductGroup, likeAny))
+                .Select(x => new
+                {
+                    Code = x.ProductGroup!,
+                    Priority = EF.Functions.Like(x.ProductGroup, likeStart) ? 0 : 1
+                })
+                .Distinct()
+                .OrderBy(x => x.Priority)
+                .ThenBy(x => x.Code)
+                .Take(20)
+                .Select(x => new { x.Code, Name = x.Code }) // ✅ ถ้าไม่มี ProductGroupName ใช้ Code แทน
+                .ToListAsync();
+
+            return Ok(items);
+        }
+        [Authorize]
         [HttpGet("SoldToLookup")]
         public async Task<IActionResult> GetSoldToLookup([FromQuery] string keyword)
         {
@@ -1019,7 +1106,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 .Select(x => new { x.Code, x.Name })
                 .ToListAsync();
 
-            return Ok(items);
+            return Ok(items);          
         }
         [Authorize]
         [HttpPost("SalesOrderFull")]
@@ -1040,6 +1127,8 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
             try
             {
+                var scope = ResolveScope(permission);
+
                 // Step 1: ดึงจาก Op_SalesOrder
                 var soQuery = _context.Op_SalesOrders.AsNoTracking();
 
@@ -1058,12 +1147,36 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 if (!string.IsNullOrWhiteSpace(request.SoldToParty))
                     soQuery = soQuery.Where(x => x.SoldToParty == request.SoldToParty.Trim());
 
-                var totalCount = await soQuery.CountAsync();
+                // ✅ Filter SalesOrganization ตาม Company (ยกเว้น CrossCompany)
+                if (scope != DataScopes.CrossCompany)
+                {
+                    var salesOrg = NormalizeKey(permission.SalesOrganizationCode);
+                    if (string.IsNullOrWhiteSpace(salesOrg))
+                        return Ok(new { totalCount = 0, page = request.Page, pageSize = request.PageSize, items = new List<object>() });
+
+                    soQuery = soQuery.Where(x => x.SalesOrganization == salesOrg);
+                }
+
+                // ✅ Filter ตาม Division/Own scope
+                if (scope == DataScopes.Own || scope == DataScopes.Division)
+                {
+                    var allowedUsernames = await GetAllowedUsernamesAsync(permission, scope);
+
+                    var allowedSalesOrders = await _context.View_Sales_with_Op_SalesOrder
+                        .AsNoTracking()
+                        .Where(x => x.PartnerFunction == "Z2" &&
+                                    x.Customer != null &&
+                                    allowedUsernames.Contains(x.Customer.Trim().ToUpper()) &&
+                                    x.SalesOrder != null)
+                        .Select(x => x.SalesOrder!)
+                        .Distinct()
+                        .ToListAsync();
+
+                    soQuery = soQuery.Where(x => allowedSalesOrders.Contains(x.SalesOrder));
+                }
 
                 var soList = await soQuery
                     .OrderByDescending(x => x.RequestedDeliveryDate)
-                    .Skip((request.Page - 1) * request.PageSize)
-                    .Take(request.PageSize)
                     .Select(x => new
                     {
                         x.SalesOrder,
@@ -1074,16 +1187,16 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     })
                     .ToListAsync();
 
-                // ✅ ถ้า Document ไม่มีใน DB → ดึงจาก SAP โดยตรง
+                // ✅ ถ้า Document ไม่มีใน DB → ดึงจาก SAP โดยตรง (เฉพาะ scope ที่เหมาะสม)
                 if (hasDocument && !soList.Any())
                 {
+                    // ✅ SAP fallback — ตรวจสอบว่า sales employee ใน SAP อยู่ใน scope ไหม
                     try
                     {
-                        // ดึง Header + Partner + Item ในครั้งเดียว
                         var sapJson = await _sapService.GetSalesOrderFullAsync(request.Document!.Trim());
                         var sapDoc = JsonDocument.Parse(sapJson);
                         var d = sapDoc.RootElement.GetProperty("d");
-                       // var sapJson = await _sapService.GetSalesOrderFullAsync(request.Document!.Trim());
+
                         Console.WriteLine($"[DEBUG SAP] {sapJson}");
 
                         var soNumber = d.GetProperty("SalesOrder").GetString() ?? "";
@@ -1107,8 +1220,6 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                                 parsedSoDate = DateTimeOffset.FromUnixTimeMilliseconds(ticks).UtcDateTime;
                         }
 
-                        // ✅ ดึง Partner จาก to_Partner
-                        // ✅ ดึง Partner จาก to_Partner
                         string shipToCode = "";
                         string salesEmployeeCode = "";
 
@@ -1117,18 +1228,27 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         {
                             foreach (var p in partners.EnumerateArray())
                             {
-                                // ✅ ใช้ PartnerFunctionInternalCode แทน PartnerFunction
                                 var pfc = p.TryGetProperty("PartnerFunctionInternalCode", out var pfcVal)
                                                ? pfcVal.GetString() : "";
                                 var customer = p.TryGetProperty("Customer", out var cVal)
                                                ? cVal.GetString() ?? "" : "";
 
-                                if (pfc == "WE") shipToCode = customer;  // Ship-to
-                                if (pfc == "Z2") salesEmployeeCode = customer;  // Sales Employee
+                                if (pfc == "WE") shipToCode = customer;
+                                if (pfc == "Z2") salesEmployeeCode = customer;
                             }
                         }
 
-                        // ✅ ดึงชื่อ Sold-to จาก View_MGT_GLC_ALL_Sales โดยใช้ SoldToParty code
+                        // ✅ ตรวจสอบ scope สำหรับ SAP fallback
+                        if (scope == DataScopes.Own || scope == DataScopes.Division)
+                        {
+                            var allowedUsernames = await GetAllowedUsernamesAsync(permission, scope);
+                            if (!string.IsNullOrWhiteSpace(salesEmployeeCode) &&
+                                !allowedUsernames.Contains(salesEmployeeCode.Trim().ToUpper()))
+                            {
+                                return Ok(new { totalCount = 0, page = request.Page, pageSize = request.PageSize, items = new List<object>() });
+                            }
+                        }
+
                         string soldToName = "", soldToAddress = "";
                         if (!string.IsNullOrEmpty(soldToParty))
                         {
@@ -1141,7 +1261,6 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                             soldToAddress = dbSoldTo?.SoldToAddress ?? "";
                         }
 
-                        // ✅ ดึงชื่อ Ship-to จาก View_MGT_GLC_ALL_Sales โดยใช้ ShiptoCode
                         string shipToName = "", shipToAddress = "";
                         if (!string.IsNullOrEmpty(shipToCode))
                         {
@@ -1154,7 +1273,6 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                             shipToAddress = dbShipTo?.ShipToAddress ?? "";
                         }
 
-                        // ✅ ดึงชื่อ Sales Employee จาก MsUsers
                         string salesEmployeeName = "";
                         if (!string.IsNullOrEmpty(salesEmployeeCode))
                         {
@@ -1166,15 +1284,23 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                             salesEmployeeName = dbUser ?? salesEmployeeCode;
                         }
 
-                        // ✅ ดึง Material จาก to_Item
                         string sapMaterial = "", sapMaterialName = "";
+                        string sapPurchaseOrderByCustomer = "", sapRequestedQuantityUnit = "";
+                        decimal? sapOrderQuantity = null;
+
                         if (d.TryGetProperty("to_Item", out var toItem) &&
                             toItem.TryGetProperty("results", out var sapItems2) &&
                             sapItems2.GetArrayLength() > 0)
                         {
-                            sapMaterial = sapItems2[0]
-                                .TryGetProperty("Material", out var matProp)
-                                ? matProp.GetString() ?? "" : "";
+                            var firstItem = sapItems2[0];
+                            sapMaterial = firstItem.TryGetProperty("Material", out var matProp) ? matProp.GetString() ?? "" : "";
+                            sapPurchaseOrderByCustomer = firstItem.TryGetProperty("PurchaseOrderByCustomer", out var pocProp) ? pocProp.GetString() ?? "" : "";
+                            sapRequestedQuantityUnit = firstItem.TryGetProperty("RequestedQuantityUnit", out var rquProp) ? rquProp.GetString() ?? "" : "";
+
+                            if (firstItem.TryGetProperty("RequestedQuantity", out var rqProp) &&
+                                decimal.TryParse(rqProp.GetString(), System.Globalization.NumberStyles.Any,
+                                    System.Globalization.CultureInfo.InvariantCulture, out var rqVal))
+                                sapOrderQuantity = rqVal;
 
                             if (!string.IsNullOrEmpty(sapMaterial))
                             {
@@ -1196,24 +1322,27 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                                 pageSize = request.PageSize,
                                 items = new[]
                                 {
-            new
-            {
-                SalesOrderDocument  = soNumber,
-                DocDate             = parsedSoDate,
-                DeliveryDate        = parsedDelivery,
-                BillingDocument     = "",
-                BillingDocumentDate = (DateTime?)null,
-                SoldToParty         = soldToParty,
-                SoldToName          = soldToName,
-                SoldToAddress       = soldToAddress,
-                ShiptoCode          = shipToCode,
-                ShipToName          = shipToName,
-                ShipToAddress       = shipToAddress,
-                Material            = sapMaterial,
-                MaterialName        = sapMaterialName,
-                SalesEmployee       = salesEmployeeName
-            }
-        }
+                            new
+                            {
+                                SalesOrderDocument       = soNumber,
+                                DocDate                  = parsedSoDate,
+                                DeliveryDate             = parsedDelivery,
+                                BillingDocument          = "",
+                                BillingDocumentDate      = (DateTime?)null,
+                                SoldToParty              = soldToParty,
+                                SoldToName               = soldToName,
+                                SoldToAddress            = soldToAddress,
+                                ShiptoCode               = shipToCode,
+                                ShipToName               = shipToName,
+                                ShipToAddress            = shipToAddress,
+                                Material                 = sapMaterial,
+                                MaterialName             = sapMaterialName,
+                                SalesEmployee            = salesEmployeeName,
+                                PurchaseOrderByCustomer  = sapPurchaseOrderByCustomer,
+                                OrderQuantity            = sapOrderQuantity,
+                                RequestedQuantityUnit    = sapRequestedQuantityUnit
+                            }
+                        }
                             });
                         }
                     }
@@ -1259,12 +1388,21 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     .Select(x => new { x.SalesOrder, x.Customer, x.FullName, x.Address })
                     .ToListAsync();
 
-                // Step 4: ดึง SalesEmployee
+                // Step 4: ดึง SalesEmployee + PurchaseOrderByCustomer
                 var z2Partners = await _context.View_Sales_with_Op_SalesOrder
                     .AsNoTracking()
                     .Where(x => x.PartnerFunction == "Z2" && soNumbers.Contains(x.SalesOrder!))
-                    .Select(x => new { x.SalesOrder, x.Customer })
+                    .Select(x => new { x.SalesOrder, x.Customer, x.PurchaseOrderByCustomer })
                     .ToListAsync();
+
+                // ✅ filter z2Partners ตาม scope
+                if (scope == DataScopes.Own || scope == DataScopes.Division)
+                {
+                    var allowedUsernames = await GetAllowedUsernamesAsync(permission, scope);
+                    z2Partners = z2Partners
+                        .Where(x => allowedUsernames.Contains(x.Customer?.Trim().ToUpper() ?? ""))
+                        .ToList();
+                }
 
                 var z2Usernames = z2Partners.Select(x => x.Customer).Distinct().ToList();
                 var users = await _context.MsUsers
@@ -1273,13 +1411,8 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     .Select(x => new { x.Username, x.FullName })
                     .ToListAsync();
 
-                // Step 5: ดึง MaterialName จาก View_MaterialStock_WeightKG
-                var materialCodes = viewData
-                    .Select(x => x.Material)
-                    .Where(x => !string.IsNullOrEmpty(x))
-                    .Distinct()
-                    .ToList();
-
+                // Step 5: ดึง MaterialName
+                var materialCodes = viewData.Select(x => x.Material).Where(x => !string.IsNullOrEmpty(x)).Distinct().ToList();
                 var materialDict = new Dictionary<string, string>();
                 if (materialCodes.Any())
                 {
@@ -1296,14 +1429,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 }
 
                 // Step 5b: ดึง Material จาก SAP
-                var soWithoutMaterial = soNumbers
-                    .Where(so => viewData.All(v => v.SalesDocument != so))
-                    .ToList();
-
-                var sapItemList = new List<(string SalesOrder, string Material)>();
-                if (soWithoutMaterial.Any())
-                    sapItemList = await _sapService.GetSalesOrderItemsAsync(soWithoutMaterial);
-
+                var sapItemList = await _sapService.GetSalesOrderItemsAsync(soNumbers);
                 var sapMaterialCodes = sapItemList.Select(x => x.Material).Distinct().ToList();
                 var sapMaterialDict = new Dictionary<string, string>();
 
@@ -1321,62 +1447,134 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         .ToDictionary(x => x.Material!, x => x.MaterialDescription ?? "");
                 }
 
+                // Step 6: รวมข้อมูล — ✅ filter เฉพาะ SO ที่มี z2 ที่ allowed
+                var allowedSalesOrderNumbers = scope == DataScopes.Own || scope == DataScopes.Division
+                    ? z2Partners.Select(x => x.SalesOrder).ToHashSet()
+                    : null;
+
                 // Step 6: รวมข้อมูล
-                var items = soList.Select(so =>
-                {
-                    var view = viewData.FirstOrDefault(v => v.SalesDocument == so.SalesOrder);
-                    var soldTo = mappingSoldTo.FirstOrDefault(m => m.SalesOrder == so.SalesOrder);
-                    var shipTo = mappingShipTo.FirstOrDefault(m => m.SalesOrder == so.SalesOrder);
-                    var z2 = z2Partners.FirstOrDefault(p => p.SalesOrder == so.SalesOrder);
-                    var user = users.FirstOrDefault(u => u.Username == z2?.Customer);
-
-                    var material = view?.Material ?? "";
-                    var materialName = "";
-
-                    if (!string.IsNullOrEmpty(material))
+                var items = soList
+                    .Where(so => allowedSalesOrderNumbers == null ||
+                                 allowedSalesOrderNumbers.Contains(so.SalesOrder))
+                    .Select(so =>
                     {
-                        materialDict.TryGetValue(material, out materialName);
-                        materialName ??= view?.MaterialName ?? "";
-                    }
-                    else
-                    {
+                        var view = viewData.FirstOrDefault(v => v.SalesDocument == so.SalesOrder);
+                        var soldTo = mappingSoldTo.FirstOrDefault(m => m.SalesOrder == so.SalesOrder);
+                        var shipTo = mappingShipTo.FirstOrDefault(m => m.SalesOrder == so.SalesOrder);
+                        var z2 = z2Partners.FirstOrDefault(p => p.SalesOrder == so.SalesOrder);
+                        var user = users.FirstOrDefault(u => u.Username == z2?.Customer);
                         var sapItem = sapItemList.FirstOrDefault(s => s.SalesOrder == so.SalesOrder);
-                        material = sapItem.Material ?? "";
-                        if (!string.IsNullOrEmpty(material))
-                            sapMaterialDict.TryGetValue(material, out materialName);
-                    }
 
-                    return new
-                    {
-                        SalesOrderDocument = so.SalesOrder,
-                        DocDate = so.SalesOrderDate,
-                        DeliveryDate = so.RequestedDeliveryDate,
-                        BillingDocument = view?.BillingDocument ?? "",
-                        BillingDocumentDate = view?.BillingDocumentDate,
-                        SoldToParty = view?.SoldToParty ?? so.SoldToParty ?? "",
-                        SoldToName = view?.SoldToName ?? soldTo?.FullName ?? "",
-                        SoldToAddress = view?.SoldToAddress ?? soldTo?.Address ?? "",
-                        ShiptoCode = view?.ShiptoCode ?? shipTo?.Customer ?? "",
-                        ShipToName = view?.ShipToName ?? shipTo?.FullName ?? "",
-                        ShipToAddress = view?.ShipToAddress ?? shipTo?.Address ?? "",
-                        Material = material,
-                        MaterialName = materialName ?? "",
-                        SalesEmployee = user?.FullName ?? z2?.Customer ?? ""
-                    };
-                }).ToList();
+                        var material = view?.Material ?? sapItem.Material ?? "";
+                        var materialName = "";
+                        decimal? orderQuantity = sapItem.OrderQuantity;
+                        string requestedQuantityUnit = sapItem.RequestedQuantityUnit ?? "";
+
+                        if (!string.IsNullOrEmpty(material))
+                        {
+                            materialDict.TryGetValue(material, out materialName);
+                            materialName ??= view?.MaterialName ?? "";
+                        }
+                        else
+                        {
+                            material = sapItem.Material ?? "";
+                            if (!string.IsNullOrEmpty(material))
+                                sapMaterialDict.TryGetValue(material, out materialName);
+                        }
+
+                        return new
+                        {
+                            SalesOrderDocument = so.SalesOrder,
+                            DocDate = so.SalesOrderDate,
+                            DeliveryDate = so.RequestedDeliveryDate,
+                            BillingDocument = view?.BillingDocument ?? "",
+                            BillingDocumentDate = view?.BillingDocumentDate,
+                            SoldToParty = view?.SoldToParty ?? so.SoldToParty ?? "",
+                            SoldToName = view?.SoldToName ?? soldTo?.FullName ?? "",
+                            SoldToAddress = view?.SoldToAddress ?? soldTo?.Address ?? "",
+                            ShiptoCode = view?.ShiptoCode ?? shipTo?.Customer ?? "",
+                            ShipToName = view?.ShipToName ?? shipTo?.FullName ?? "",
+                            ShipToAddress = view?.ShipToAddress ?? shipTo?.Address ?? "",
+                            Material = material,
+                            MaterialName = materialName ?? "",
+                            SalesEmployee = user?.FullName ?? z2?.Customer ?? "",
+                            PurchaseOrderByCustomer = z2?.PurchaseOrderByCustomer ?? "",
+                            OrderQuantity = orderQuantity,
+                            RequestedQuantityUnit = requestedQuantityUnit
+                        };
+                    }).ToList();
+
+                // ✅ filter ออกถ้าไม่มี Material (SAP ไม่มีข้อมูล)
+                items = items
+                    .Where(x => !string.IsNullOrWhiteSpace(x.Material))
+                    .ToList();
+
+                // ✅ เพิ่ม — filter ออกถ้า SAP ไม่มี item เลย (results: [])
+                var soWithSapItems = sapItemList
+                    .Where(x => !string.IsNullOrWhiteSpace(x.Material))
+                    .Select(x => x.SalesOrder)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                // ✅ เก็บเฉพาะ SO ที่มีข้อมูลใน View (Billing) หรือมี SAP item
+                items = items
+                    .Where(x =>
+                        viewData.Any(v => v.SalesDocument == x.SalesOrderDocument &&
+                                          !string.IsNullOrWhiteSpace(v.Material)) ||
+                        soWithSapItems.Contains(x.SalesOrderDocument))
+                    .ToList();
+
+                var filteredTotal = items.Count;
+                var pagedItems = items
+                    .Skip((request.Page - 1) * request.PageSize)
+                    .Take(request.PageSize)
+                    .ToList();
 
                 return Ok(new
                 {
-                    totalCount,
+                    totalCount = filteredTotal,
                     page = request.Page,
                     pageSize = request.PageSize,
-                    items
+                    items = pagedItems
                 });
             }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
             }
+        }
+
+        // ✅ Helper Method
+        private async Task<HashSet<string>> GetAllowedUsernamesAsync(
+            View_UserPermission permission, string scope)
+        {
+            if (scope == DataScopes.Own)
+            {
+                return new HashSet<string>(
+                    new[] { permission.Username?.Trim().ToUpper() ?? "" },
+                    StringComparer.OrdinalIgnoreCase);
+            }
+
+            if (scope == DataScopes.Division)
+            {
+                var division = permission.Division?.Trim().ToUpper() ?? "";
+                var salesOrg = permission.SalesOrganizationCode?.Trim().ToUpper() ?? "";
+
+                var usernames = await _context.View_UserPermissions
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.CompanyID == permission.CompanyID &&
+                        x.Division != null &&
+                        x.Division.Trim().ToUpper() == division &&
+                        x.SalesOrganizationCode != null &&
+                        x.SalesOrganizationCode.Trim().ToUpper() == salesOrg)
+                    .Select(x => x.Username!.Trim().ToUpper())
+                    .Distinct()
+                    .ToListAsync();
+
+                return new HashSet<string>(usernames, StringComparer.OrdinalIgnoreCase);
+            }
+
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
         private IQueryable<View_MGT_GLC_ALL_Sales> ApplySalesPermission(
      IQueryable<View_MGT_GLC_ALL_Sales> query,
@@ -1647,6 +1845,47 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
             return new HashSet<string>(materials, StringComparer.OrdinalIgnoreCase);
         }
+        [Authorize]
+        [HttpPost("debug-stockmovement")]
+        public async Task<IActionResult> DebugStockMovement([FromBody] List<string> refDocs)
+        {
+            // Step 1: ดู opSalesData match ไหม
+            var opSalesData = await _context.View_Sales_with_Op_SalesOrder
+                .AsNoTracking()
+                .Where(x => x.PartnerFunction == "Z2" &&
+                            x.Customer != null &&
+                           (EF.Functions.Like(x.Customer, "MGT%") ||
+                            EF.Functions.Like(x.Customer, "GLC%")) &&
+                            x.SalesOrder != null &&
+                            refDocs.Contains(x.SalesOrder))
+                .Select(x => new { x.SalesOrder, x.Customer, x.SoldToParty })
+                .ToListAsync();
+
+            // Step 2: ดู SoldToParty → Industry
+            var soldToParties = opSalesData
+                .Select(x => x.SoldToParty?.Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x!)
+                .Distinct()
+                .ToList();
+
+            var industryData = await _context.View_MGT_GLC_ALL_Sales
+                .AsNoTracking()
+                .Where(x => x.SoldToParty != null && soldToParties.Contains(x.SoldToParty))
+                .Select(x => new { x.SoldToParty, x.CustomerFullName, x.IndustryCode, x.IndustryName })
+                .Distinct()
+                .ToListAsync();
+
+            return Ok(new
+            {
+                refDocs_input = refDocs,
+                opSalesData = opSalesData,
+                soldToParties = soldToParties,
+                industryData = industryData
+            });
+        }
+
     }
+
 
 }

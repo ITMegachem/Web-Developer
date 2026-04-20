@@ -1,4 +1,5 @@
 ﻿using Mgt.Lit.WebFront.Models.SalesOrder;
+using static Mgt.Lit.WebFront.Pages.NofReport;
 
 namespace Mgt.Lit.WebFront.Services
 {
@@ -8,8 +9,8 @@ namespace Mgt.Lit.WebFront.Services
             NofReportFilter filter,
             CancellationToken cancellationToken = default);
 
-        Task<List<MaterialLookup>> SearchMaterialAsync(
-            string keyword,
-            CancellationToken cancellationToken = default);
+       
+
+        Task<List<ProductGroupLookup>> SearchProductGroupAsync(string keyword);
     }
 }

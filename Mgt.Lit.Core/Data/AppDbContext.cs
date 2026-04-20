@@ -82,6 +82,11 @@ namespace Mgt.Lit.Core.Data
                 entity.HasKey(x => x.SalesOrder);
                 entity.ToTable("Op_SalesOrder");
             });
+            modelBuilder.Entity<Ms_CustomerGroup>(entity =>
+            {
+                entity.HasKey(x => new { x.SOrg, x.CustomerGroup });
+                entity.ToTable("Ms_CustomerGroup");
+            });
         }
 
         public DbSet<Entities.RefreshToken> RefreshTokens { get; set; }
@@ -93,7 +98,8 @@ namespace Mgt.Lit.Core.Data
         public DbSet<View_Sales_with_Op_SalesOrder> View_Sales_with_Op_SalesOrder { get; set; }
         public DbSet<Mapping_Soldto> Mapping_Soldtos { get; set; }
         public DbSet<Mapping_Shipto> Mapping_Shiptos { get; set; }
-        public DbSet<Op_SalesOrder> Op_SalesOrders { get; set; }  
+        public DbSet<Op_SalesOrder> Op_SalesOrders { get; set; }
+        public DbSet<Ms_CustomerGroup> Ms_CustomerGroups { get; set; }
 
     }
 }

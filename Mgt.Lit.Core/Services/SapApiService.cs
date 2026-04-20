@@ -171,7 +171,8 @@ public class SapService
         return result;
     }
 
-    public async Task<List<(string SalesOrder, string Material)>> GetSalesOrderItemsAsync(List<string> salesOrders)
+    public async Task<List<(string SalesOrder, string Material, decimal? OrderQuantity, string RequestedQuantityUnit)>>
+    GetSalesOrderItemsAsync(List<string> salesOrders)
     {
         var baseUrl = _configuration["SapConfig:SalesOrder:BaseUrl"];
         var authHeader = _configuration["SapConfig:SalesOrder:AuthHeader"];
@@ -180,14 +181,14 @@ public class SapService
         client.DefaultRequestHeaders.Add("Authorization", authHeader);
         client.DefaultRequestHeaders.Add("Accept", "application/json");
 
-        var result = new List<(string, string)>();
+        var result = new List<(string, string, decimal?, string)>();
 
         try
         {
             var soFilter = string.Join(" or ", salesOrders.Select(s => $"SalesOrder eq '{s}'"));
             var url = $"{baseUrl.TrimEnd('/')}/A_SalesOrderItem" +
                       $"?$filter={soFilter}" +
-                      $"&$select=SalesOrder,Material" +
+                      $"&$select=SalesOrder,Material,RequestedQuantity,RequestedQuantityUnit" + // ✅ เพิ่ม
                       $"&$format=json";
 
             var response = await client.GetAsync(url);
@@ -205,8 +206,19 @@ public class SapService
             {
                 var so = item.GetProperty("SalesOrder").GetString() ?? "";
                 var material = item.GetProperty("Material").GetString() ?? "";
+
+                decimal? qty = null;
+                if (item.TryGetProperty("RequestedQuantity", out var qProp) &&
+                    decimal.TryParse(qProp.GetString(),
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var qVal))
+                    qty = qVal;
+
+                var unit = item.TryGetProperty("RequestedQuantityUnit", out var uProp)
+                    ? uProp.GetString() ?? "" : "";
+
                 if (!string.IsNullOrEmpty(so) && !string.IsNullOrEmpty(material))
-                    result.Add((so, material));
+                    result.Add((so, material, qty, unit));
             }
         }
         catch { }

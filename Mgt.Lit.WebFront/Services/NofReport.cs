@@ -7,6 +7,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using static Mgt.Lit.WebFront.Pages.NofReport;
 
 public sealed class NofReportService : INofReportService
 {
@@ -32,7 +33,7 @@ public sealed class NofReportService : INofReportService
             "api/MGT_SalesOrder/nofreport",
             new NofReportSearchRequest
             {
-                Material = filter.Material,
+                productGroup = filter.ProductGroup,
                 DateFrom = filter.DateFrom,
                 DateTo = filter.DateTo,
                 Page = filter.Page,
@@ -84,37 +85,26 @@ public sealed class NofReportService : INofReportService
         };
     }
 
-    public async Task<List<MaterialLookup>> SearchMaterialAsync(
-    string keyword,
-    CancellationToken cancellationToken = default)
+    public async Task<List<ProductGroupLookup>> SearchProductGroupAsync(string keyword)
     {
-        if (string.IsNullOrWhiteSpace(keyword))
-            return new List<MaterialLookup>();
+        await _auth.InitializeAsync();
+        if (string.IsNullOrWhiteSpace(_auth.Token))
+            throw new UnauthorizedAccessException();
 
-        EnsureAuthenticated();
-
-        var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            $"api/MGT_SalesOrder/MaterialLookup?keyword={Uri.EscapeDataString(keyword.Trim())}");
-
-        request.Headers.Authorization =
+        _http.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", _auth.Token);
-        request.Headers.TryAddWithoutValidation("X-Menu", "Sales");
-        request.Headers.TryAddWithoutValidation("X-Page", "NOF Report");
 
-        using var response = await _http.SendAsync(request, cancellationToken);
+        var url = $"api/MGT_SalesOrder/ProductGroupLookup?keyword={Uri.EscapeDataString(keyword)}";
+        var response = await _http.GetAsync(url);
 
-        var items = await ReadResponseAsync<List<MaterialLookupApiItem>>(response, cancellationToken)
-                    ?? new List<MaterialLookupApiItem>();
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            throw new UnauthorizedAccessException();
 
-        return items
-            .Where(x => !string.IsNullOrWhiteSpace(x.Code))
-            .Select(x => new MaterialLookup
-            {
-                Code = x.Code!,
-                Name = x.Name ?? ""
-            })
-            .ToList();
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        return JsonSerializer.Deserialize<List<ProductGroupLookup>>(json, JsonOptions)
+               ?? new List<ProductGroupLookup>();
     }
 
     // ── Private Helpers ───────────────────────────────────────────────────────
@@ -183,6 +173,9 @@ public sealed class NofReportService : INofReportService
 
         [JsonPropertyName("pageSize")]
         public int PageSize { get; set; }
+
+        [JsonPropertyName("productGroup")]
+        public string? productGroup { get; set; }
     }
 
     private sealed class NofApiPagedResponse

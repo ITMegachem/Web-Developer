@@ -43,6 +43,7 @@ namespace Mgt.Lit.Core.DTOs
         public DateTime? DateTo { get; set; }
         public int Page { get; set; } = 1;
         public int PageSize { get; set; } = 50;
+        public string? ProductGroup { get; set; }
     }
 
     // Response

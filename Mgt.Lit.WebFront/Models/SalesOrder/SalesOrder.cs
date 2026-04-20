@@ -17,6 +17,10 @@ namespace Mgt.Lit.WebFront.Models.SalesOrder
         public string SalesEmployee { get; set; } = string.Empty;
         public string SoldToMappingAddress { get; set; } = string.Empty;
         public string ShipToMappingAddress { get; set; } = string.Empty;
+
+        public string? PurchaseOrderByCustomer { get; set; }
+        public decimal? OrderQuantity { get; set; }
+        public string? RequestedQuantityUnit { get; set; }
     }
 
     public sealed class SalesOrderFilter
@@ -100,6 +104,11 @@ namespace Mgt.Lit.WebFront.Models.SalesOrder
 
         [JsonPropertyName("salesGroup")]
         public string? SalesGroup { get; set; }
+        [JsonPropertyName("industryCode")]
+        public string? IndustryCode { get; set; }
+
+        [JsonPropertyName("industryName")]
+        public string? IndustryName { get; set; }
     }
 
     public sealed class PlantDto
@@ -180,6 +189,11 @@ namespace Mgt.Lit.WebFront.Models.SalesOrder
 
         [JsonPropertyName("EXP_Date")]
         public DateTime? ExpDate { get; set; }
+        [JsonPropertyName("industryCode")]
+        public string? IndustryCode { get; set; }
+
+        [JsonPropertyName("industryName")]
+        public string? IndustryName { get; set; }
     }
 
     public sealed class MaterialStockApiResponse
@@ -282,6 +296,8 @@ namespace Mgt.Lit.WebFront.Models.SalesOrder
         public DateTime? DateTo { get; set; }
         public int Page { get; set; } = 1;
         public int PageSize { get; set; } = 50;
+        public string? ProductGroup { get; set; }
+
     }
 
 }

@@ -47,6 +47,13 @@ namespace Mgt.Lit.Core.DTOs
         public string? MaterialGroup { get; set; }
         public string? MaterialGroupDescription { get; set; }
         public string? SalesGroup { get; set; }
+        [JsonPropertyName("industryCode")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)] // ✅ บังคับออกเสมอ
+        public string? IndustryCode { get; set; }
+
+        [JsonPropertyName("industryName")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)] // ✅ บังคับออกเสมอ
+        public string? IndustryName { get; set; }
     }
     public class PlantDto
     {

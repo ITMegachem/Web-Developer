@@ -105,8 +105,21 @@
                        @bind="filters.Batch"
                        placeholder="@T("ChooseBatch")" />
             </div>
-
-            <div class="col-12 col-lg-2">
+            <div class="col-12 col-md-4">
+                <label class="modern-label">Material Description</label>
+                <div class="form-control modern-input"
+                     style="background:#fff0f0; border: 2px solid #dc3545; color:#dc3545; min-height:38px;">
+                    @if (!string.IsNullOrWhiteSpace(selectedMaterialName))
+                    {
+                        @selectedMaterialName
+                    }
+                    else
+                    {
+                        <span class="text-muted">description material</span>
+                    }
+                </div>
+            </div>
+            <div class="col-12 col-lg-2 ms-auto">
                 <button class="btn btn-search-pill w-100"
                         disabled="@isLoading"
                         @onclick="RunSearch">
@@ -120,7 +133,6 @@
                     }
                 </button>
             </div>
-
         </div>
     </div>
 
@@ -134,18 +146,20 @@
                         <th style="font-size: 110% !important; font-weight: 800 !important;">@T("MaterialDescription")</th>
                         <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("BatchNo")</th>
                         <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Storage Loc</th>
-                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("Unresticted Stock")</th>
-                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Block Stock</th>
-                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Quality Inspection</th>
-                        
-                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("Unit")</th>
                         <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("EXPDate")</th>
                         @if (!HideCostColumns)
                         {
-                            <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Packet/Price</th>
                             <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Cost / KG</th>
+                            <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Cost / Package</th>
                             <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("TotalValue")</th>
                         }
+                        
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("Unresticted Stock")</th>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Block Stock</th>
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">Quality Inspection</th>                      
+                        <th style="font-size: 110% !important; font-weight: 800 !important;" class="text-center">@T("Unit")</th>
+                        
+                       
                     </tr>
                 </thead>
                 <tbody>
@@ -158,19 +172,23 @@
                                 <td>@r.MaterialDescription</td>
                                 <td class="text-center">@r.BatchNo</td>
                                 <td class="text-center">@r.StorageLocation</td>
-                                <td class="text-center">@r.Unrestricted_Stock.ToString("N0")</td>
-                                <td class="text-center">@r.Blocked_Stock</td>
-                                <td class="text-center">@r.Stock_in_QI</td>
-                                <td class="text-center">@r.Unit</td>
                                 <td class="text-center">@r.ExpDate?.ToString("dd/MM/yyyy")</td>
                                 @if (!HideCostColumns)
                                 {
-                                    <td class="text-center">@r.CostPerKg.ToString("N2")</td>
                                     <td class="text-center fw-bold">@r.UnitKg.ToString("N2")</td>
+                                    <td class="text-center">@r.CostPerKg.ToString("N2")</td>
+                                    
                                     <td class="text-center">
                                         @(r.TotalValue > 0 ? r.TotalValue.ToString("N2") : "")
                                     </td>
                                 }
+                                
+                                <td class="text-center">@r.Unrestricted_Stock.ToString("N0")</td>
+                                <td class="text-center">@r.Blocked_Stock</td>
+                                <td class="text-center">@r.Stock_in_QI</td>
+                                <td class="text-center">@r.Unit</td>
+                                
+                                
                             </tr>
                         }
                     }
@@ -209,21 +227,7 @@
         </div>
     </div>
 
-    <!-- EXPORT -->
-    @* --- ปุ่ม Export --- *@
-    @{
-        var canExport = AuthState.Permission?.UserRole?.ToLower() != "user";
-    }
-    <div class="d-flex justify-content-end mt-4">
-        @if (canExport)
-        {
-            <button class="btn btn-export-pill shadow-sm"
-                    disabled="@(isLoading || !pagedItems.Any())"
-                    @onclick="ExportData">
-                <i class="bi bi-file-earmark-excel-fill me-2"></i> @T("ExportAs") Excel
-            </button>
-        }
-    </div>
+   
 
 </div>
 
@@ -251,7 +255,7 @@
     private bool isLoading;
     private bool _isDisposed;
     private IJSObjectReference? _jsModule;
-
+    private string selectedMaterialName = "";
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender || _isDisposed)
@@ -297,6 +301,7 @@
     {
         materialSearch = e.Value?.ToString() ?? string.Empty;
         filters.Material = null;
+        selectedMaterialName = "";
         _lastSelectedMaterial = null;
         materialResults.Clear();
         showMaterialDropdown = false;
@@ -415,6 +420,7 @@
         _lastSelectedMaterial = item;  // ✅ cache
         filters.Material = item.Code;
         materialSearch = $"{item.Code} {item.Name}";
+        selectedMaterialName = item.Name;
         materialResults.Clear();
         showMaterialDropdown = false;
         materialError = null;
@@ -680,7 +686,7 @@
         pagedItems.Clear();
         totalItems = 0;
         totalPages = 1;
-
+        selectedMaterialName = string.Empty;
         var companyCode = GetCompanyCode(selectedPlant);
 
         filteredMaterialGroups = materialGroups

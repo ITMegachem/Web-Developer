@@ -21,5 +21,9 @@
         public string? Material { get; set; }
         public string? MaterialName { get; set; }
         public string? SalesEmployee { get; set; }
+
+        public string? PurchaseOrderByCustomer { get; set; }
+        public decimal? OrderQuantity { get; set; }
+        public string? RequestedQuantityUnit { get; set; }
     }
 }

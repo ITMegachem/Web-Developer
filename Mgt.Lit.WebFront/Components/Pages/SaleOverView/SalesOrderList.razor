@@ -139,13 +139,17 @@
             <table class="table modern-table mb-0 fixed-table">
                 <thead>
                     <tr>
-                        <th style="font-size: 100% !important; font-weight: 800 !important;">@T("DocDate")</th>
-                        <th style="font-size: 100% !important; font-weight: 800 !important;">Delivery Date</th> 
                         <th style="font-size: 100% !important; font-weight: 800 !important;">@T("SalesOrderDocument")</th>
+                        <th style="font-size: 100% !important; font-weight: 800 !important;">Delivery Date</th> 
+                        
+                        <th style="font-size: 100% !important; font-weight: 800 !important;">Customer Ref.</th>
                         <th style="font-size: 100% !important; font-weight: 800 !important;">@T("SoldTo") / Description</th>
                         <th style="font-size: 100% !important; font-weight: 800 !important;">@T("ShipTo") / Description</th>
-                        <th style="font-size: 100% !important; font-weight: 800 !important;">@T("MaterialCode")</th>
+                        <th style="font-size: 100% !important; font-weight: 800 !important;">@T("MaterialCode")</th>                        
+                        <th style="font-size: 100% !important; font-weight: 800 !important;">Order Qty</th>
+                        <th style="font-size: 100% !important; font-weight: 800 !important;">Unit</th>
                         <th class="d-none d-md-table-cell" style="font-size: 100% !important; font-weight: 800 !important;">@T("SalesEmployee")</th>
+    
                     </tr>
                 </thead>
                 <tbody>
@@ -154,11 +158,10 @@
                         @foreach (var r in pagedItems)
                         {
                             <tr>
-                                <td class="text-nowrap fw-bold date-display-large">
-                                    @(r.DocDate.Year < 2000 ? "-" : r.DocDate.ToString("dd/MM/yyyy"))
-                                </td>
-                                <td class="numeric-green">@(r.DeliveryDate?.ToString("dd/MM/yyyy") ?? "-")</td>  
                                 <td class="numeric-green">@r.SalesOrderDocument</td>
+                                <td class="numeric-green">@(r.DeliveryDate?.ToString("dd/MM/yyyy") ?? "-")</td>  
+                                
+                                <td class="text-nowrap">@(string.IsNullOrEmpty(r.PurchaseOrderByCustomer) ? "-" : r.PurchaseOrderByCustomer)</td>
                                 <td>
                                     <div class="full-data-display"><strong>@r.SoldTo</strong></div>
                                     <div class="full-data-display text-muted small">@r.SoldToDescription</div>
@@ -172,6 +175,12 @@
                                 <td>
                                     <span class="badge-pill-material">@r.MaterialCode</span>
                                     <div class="full-data-display x-small text-muted mt-1">@r.MaterialDescription</div>
+                                </td>
+                                <td class="numeric-green text-nowrap">
+                                    @(r.OrderQuantity.HasValue ? $"{r.OrderQuantity:N0}" : "-")
+                                </td>
+                                <td class="text-nowrap">
+                                    @(string.IsNullOrEmpty(r.RequestedQuantityUnit) ? "-" : r.RequestedQuantityUnit)
                                 </td>
                                 <td class="d-none d-md-table-cell fw-bold">@r.SalesEmployee</td>
                             </tr>
@@ -531,10 +540,12 @@
 
             var result = await SalesOrderService.GetSalesOrdersAsync(filters);
 
+            // กรองเฉพาะ order ที่มี item (ถ้า DTO มี field นี้)
             pagedItems = result.Items ?? new List<SalesOrderDto>();
             totalItems = result.TotalItems;
             totalPages = Math.Max(1, (int)Math.Ceiling((double)totalItems / filters.PageSize));
         }
+        
         catch (UnauthorizedAccessException)
         {
             Nav.NavigateTo("/", replace: true);
@@ -683,9 +694,10 @@
 
             string[] headers =
             {
-                "Doc. Date",
-                "DeliveryDate",
                 "Sales Order Document",
+                "DeliveryDate",
+                
+                "PO By Customer",
                 "Sold to",
                 "Sold to Description",
                 "Sold to Address",        // ✅ เพิ่ม
@@ -694,6 +706,8 @@
                 "Ship to Address",        // ✅ เพิ่ม
                 "Material Code",
                 "Material Description",
+                "Order Qty",
+                "Unit",
                 "Sales Employee"
             };
 
@@ -709,9 +723,10 @@
             var row = 2;
             foreach (var r in all)
             {
-                ws.Cell(row, 1).Value = r.DocDate.ToString("dd/MM/yyyy");
+                ws.Cell(row, 1).Value = r.SalesOrderDocument;
                 ws.Cell(row, 2).Value = r.DeliveryDate;
-                ws.Cell(row, 3).Value = r.SalesOrderDocument;
+                
+                ws.Cell(row, 3).Value = r.PurchaseOrderByCustomer;
                 ws.Cell(row, 4).Value = r.SoldTo;
                 ws.Cell(row, 5).Value = r.SoldToDescription;
                 ws.Cell(row, 6).Value = r.SoldToMappingAddress;   // ✅ เพิ่ม
@@ -720,7 +735,9 @@
                 ws.Cell(row, 9).Value = r.ShipToMappingAddress;   // ✅ เพิ่ม
                 ws.Cell(row, 10).Value = r.MaterialCode;
                 ws.Cell(row, 11).Value = r.MaterialDescription;
-                ws.Cell(row, 12).Value = r.SalesEmployee;
+                ws.Cell(row, 12).Value = r.OrderQuantity.HasValue ? r.OrderQuantity.Value.ToString("N0") : "-";
+                ws.Cell(row, 13).Value = string.IsNullOrEmpty(r.RequestedQuantityUnit) ? "-" : r.RequestedQuantityUnit;
+                ws.Cell(row, 14).Value = r.SalesEmployee;
                 row++;
             }
 
