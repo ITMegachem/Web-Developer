@@ -521,6 +521,9 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                             );
                     }
 
+                    var dept = permission.Department?.ToLower() ?? "";
+                    var isPurchase = dept == "purchase";
+
                     foreach (var item in mergedSapData._Detail)
                     {
                         var refDoc = item.Ref_Doc?.Trim() ?? "";
@@ -529,7 +532,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         bool canViewCustomer = currentScope == DataScopes.CrossCompany ||
                                                currentScope == DataScopes.Company ||
                                                currentScope == DataScopes.Division ||
-                                               ownRefDocs.Contains(refDoc);
+                                               (permission.CanViewCustomer && ownRefDocs.Contains(refDoc));
 
                         if (opSalesLookup.TryGetValue(refDoc, out var opSales))
                         {
@@ -541,7 +544,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                                 {
                                     item.Customer_Code = soldTo;
                                     item.Customer_Name = info.FullName;
-                                    item.IndustryCode = info.IndustryCode; // ✅ เพิ่มกลับมา Entity มีอยู่แล้ว
+                                    item.IndustryCode = info.IndustryCode;
                                     item.IndustryName = info.IndustryName;
                                 }
                                 else
@@ -552,9 +555,8 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                             }
                             else
                             {
-                                item.Customer_Code = string.IsNullOrWhiteSpace(soldTo)
-        ? item.Customer_Code  // ← คง SAP ไว้
-        : soldTo;
+                                // ✅ Purchase เห็น Code, Sales ซ่อนทั้งหมด
+                                item.Customer_Code = isPurchase ? soldTo : null;
                                 item.Customer_Name = null;
                                 item.IndustryCode = null;
                                 item.IndustryName = null;
@@ -564,7 +566,9 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         {
                             if (!canViewCustomer)
                             {
-                                //item.Customer_Code = null;
+                                // ✅ Purchase คง SAP Code ไว้, Sales ซ่อนหมด
+                                if (!isPurchase)
+                                    item.Customer_Code = null;
                                 item.Customer_Name = null;
                                 item.IndustryCode = null;
                                 item.IndustryName = null;
@@ -583,13 +587,19 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
                 // ── CanViewCustomer ────────────────────────────────────────────────────
                 if (!permission.CanViewCustomer)
+                {
+                    var dept = permission.Department?.ToLower() ?? "";
                     foreach (var item in mergedSapData._Detail)
                     {
-                        // ✅ คง Customer_Code ไว้ ซ่อนแค่ Name
                         item.Customer_Name = null;
                         item.IndustryCode = null;
                         item.IndustryName = null;
+
+                        // ✅ Purchase เห็น Code, Sales ไม่เห็น Code
+                        if (dept != "purchase")
+                            item.Customer_Code = null;
                     }
+                }
 
                 mergedSapData.Plant = requestedPlant ?? string.Join(",", plantsToQuery);
                 // ก่อน return Ok(mergedSapData)
