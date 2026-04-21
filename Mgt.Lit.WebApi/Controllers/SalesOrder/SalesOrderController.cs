@@ -186,12 +186,19 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
             // ✅ DataScope กรอง Material
             var material = request.Material?.Trim();
-            var allowedMaterials = await GetAllowedMaterialsAsync(permission);
-            if (allowedMaterials != null &&
-                !string.IsNullOrWhiteSpace(material) &&
-                !allowedMaterials.Contains(material))
-                return Forbid();
+            var scope = ResolveScope(permission);
+            var skipMaterialFilter = scope == DataScopes.Company
+                                  || scope == DataScopes.CrossCompany
+                                  || scope == DataScopes.Division; // ← เพิ่มตรงนี้
 
+            if (!skipMaterialFilter)
+            {
+                var allowedMaterials = await GetAllowedMaterialsAsync(permission);
+                if (allowedMaterials != null &&
+                    !string.IsNullOrWhiteSpace(material) &&
+                    !allowedMaterials.Contains(material))
+                    return Forbid();
+            }
             var sqlItems = await _context.View_MaterialStock_WeightKG
                 .AsNoTracking()
                 .Where(x =>
@@ -302,7 +309,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             if (string.IsNullOrWhiteSpace(material))
                 return BadRequest(new { message = "Material is required." });
 
-            var allowedMaterials = await GetAllowedMaterialsAsync(permission);
+            var allowedMaterials = await GetAllowedMaterialsForMovementAsync(permission);
             if (allowedMaterials != null && !allowedMaterials.Contains(material))
                 return Forbid();
 
@@ -750,10 +757,16 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 return Ok(new List<object>());
 
             var query = _context.View_MGT_GLC_ALL_Sales
-                .AsNoTracking()
-                .Where(x => x.Material != null);
+        .AsNoTracking()
+        .Where(x => x.Material != null);
 
-            query = ApplySalesPermission(query, permission);
+            // ✅ Division ขึ้นไป ไม่ต้อง filter scope
+            var scope = ResolveScope(permission);
+            if (scope == DataScopes.Own)
+                query = ApplySalesPermission(query, permission);
+            else
+                query = query.Where(x => x.SalesOrganization ==
+                          NormalizeKey(permission.SalesOrganizationCode));
             // เป็น
             if (keyword.Length < 2)   // ← ลดจาก 3 เป็น 2
                 return Ok(new List<object>());
@@ -1837,15 +1850,16 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     SalesEmployee = g.Max(x => x.SalesEmployeeID) ?? "-"
                 });
         }
+        // ✅ สำหรับ StockofMaterial — Division ดูได้หมด
         private async Task<HashSet<string>?> GetAllowedMaterialsAsync(View_UserPermission permission)
         {
             var scope = ResolveScope(permission);
 
-            // ✅ CrossCompany และ Company ไม่จำกัด
-            if (scope == DataScopes.Company || scope == DataScopes.CrossCompany)
+            if (scope == DataScopes.Company
+             || scope == DataScopes.CrossCompany
+             || scope == DataScopes.Division) // ← StockofMaterial ใช้ skipMaterialFilter แทน
                 return null;
 
-            // ✅ Division และ Own → จำกัดตาม scope
             var query = _context.View_MGT_GLC_ALL_Sales.AsNoTracking();
             query = ApplySalesPermission(query, permission);
 
@@ -1855,7 +1869,28 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 .Distinct()
                 .ToListAsync();
 
-            // ✅ ถ้าไม่มี material เลย → ส่ง empty set (ไม่ใช่ null)
+            return new HashSet<string>(materials, StringComparer.OrdinalIgnoreCase);
+        }
+
+        // ✅ สำหรับ StockMovement — Division ยังถูก filter ตาม scope
+        private async Task<HashSet<string>?> GetAllowedMaterialsForMovementAsync(View_UserPermission permission)
+        {
+            var scope = ResolveScope(permission);
+
+            // CrossCompany และ Company เท่านั้นที่ดูได้หมด
+            if (scope == DataScopes.Company || scope == DataScopes.CrossCompany)
+                return null;
+
+            // Division และ Own → จำกัดตาม scope
+            var query = _context.View_MGT_GLC_ALL_Sales.AsNoTracking();
+            query = ApplySalesPermission(query, permission);
+
+            var materials = await query
+                .Where(x => x.Material != null)
+                .Select(x => x.Material!)
+                .Distinct()
+                .ToListAsync();
+
             return new HashSet<string>(materials, StringComparer.OrdinalIgnoreCase);
         }
         [Authorize]

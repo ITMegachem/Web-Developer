@@ -72,27 +72,25 @@
                 </div>
             </div>
             @* --- ปุ่ม Toggle Vendor / Customer --- *@
-            @if (IsManagerOrAbove)
-            {
-                <div class="col-12 col-md-auto d-flex align-items-end gap-2 mt-2 mt-md-0">
-                    @if (CanViewVendor)
-                    {
-                        <button class="btn btn-sm @(showVendor ? "btn-success" : "btn-outline-secondary") rounded-pill px-3"
-                                @onclick="() => showVendor = !showVendor">
-                            <i class="bi @(showVendor ? "bi-eye-fill" : "bi-eye-slash-fill") me-1"></i>
-                            @("Vendor")
-                        </button>
-                    }
-                    @if (CanViewCustomer)
-                    {
-                        <button class="btn btn-sm @(showCustomer ? "btn-success" : "btn-outline-secondary") rounded-pill px-3"
-                                @onclick="() => showCustomer = !showCustomer">
-                            <i class="bi @(showCustomer ? "bi-eye-fill" : "bi-eye-slash-fill") me-1"></i>
-                            @("Customer")
-                        </button>
-                    }
-                </div>
-            }
+            @* ✅ แสดงปุ่มถ้า CanView นั้นๆ เป็น true ไม่จำกัดเฉพาะ Manager *@
+            <div class="col-12 col-md-auto d-flex align-items-end gap-2 mt-2 mt-md-0">
+                @if (CanViewVendor)
+                {
+                    <button class="btn btn-sm @(showVendor ? "btn-success" : "btn-outline-secondary") rounded-pill px-3"
+                            @onclick="() => showVendor = !showVendor">
+                        <i class="bi @(showVendor ? "bi-eye-fill" : "bi-eye-slash-fill") me-1"></i>
+                        @("Vendor")
+                    </button>
+                }
+                @if (CanViewCustomer)
+                {
+                    <button class="btn btn-sm @(showCustomer ? "btn-success" : "btn-outline-secondary") rounded-pill px-3"
+                            @onclick="() => showCustomer = !showCustomer">
+                        <i class="bi @(showCustomer ? "bi-eye-fill" : "bi-eye-slash-fill") me-1"></i>
+                        @("Customer")
+                    </button>
+                }
+            </div>
             <div class="col-12 col-md-4 col-lg-2 ms-auto">
                 <button class="btn btn-search-pill w-100"
                         disabled="@string.IsNullOrWhiteSpace(materialSearch)"
@@ -165,7 +163,24 @@
                                     @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoIn))
                                     {
                                         var lines = item.AdditionalInfoIn.Split('\n');
-                                        foreach (var line in lines)
+        
+                                        @* ✅ ETA ก่อน ETD *@
+                                        var eta = lines.FirstOrDefault(l => l.Trim().StartsWith("ETA"));
+                                        var etd = lines.FirstOrDefault(l => l.Trim().StartsWith("ETD"));
+                                        var others = lines.Where(l =>
+                                            !l.Trim().StartsWith("ETA") &&
+                                            !l.Trim().StartsWith("ETD") &&
+                                            !string.IsNullOrWhiteSpace(l));
+
+                                        @if (!string.IsNullOrWhiteSpace(eta))
+                                        {
+                                            <div>@eta.Trim()</div>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(etd))
+                                        {
+                                            <div>@etd.Trim()</div>
+                                        }
+                                        @foreach (var line in others)
                                         {
                                             <div>@line.Trim()</div>
                                         }
@@ -240,7 +255,19 @@
 
 
     @* --- ปุ่ม Export --- *@
-    
+    <div class="d-flex justify-content-end mt-4 gap-3">
+
+        @if (CanExportConsumption)
+        {
+            <button class="btn btn-export-pill shadow-sm"
+                    disabled="@string.IsNullOrWhiteSpace(selectedMaterial)"
+                    @onclick="ExportConsumption">
+                <i class="bi bi-graph-down me-2"></i> Export Consumption
+            </button>
+        }
+
+        
+    </div>
 </div>
 @code {
     private IJSObjectReference? _jsModule;

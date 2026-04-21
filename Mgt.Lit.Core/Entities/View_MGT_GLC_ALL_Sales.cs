@@ -6,7 +6,7 @@ public class View_MGT_GLC_ALL_Sales
 {
     public string? System { get; set; } // เปลี่ยนเป็น string? เพื่อรองรับค่า NULL
     public string? SalesOrganization { get; set; }
-    public string? BillingDocument { get; set; }
+    public string?   BillingDocument { get; set; }
     public string? BillingDocumentType { get; set; }
     public DateTime? BillingDocumentDate { get; set; } // ใช้ DateTime? เผื่อวันที่ว่าง
     public DateTime? DeliveryDate { get; set; }
