@@ -17,6 +17,7 @@ public class AuthState
     public string? ExportPassword { get; set; }
     public int? CurrentCompanyID { get; set; }
     public void Clear() { Token = null; User = null; }
+    public bool? CanViewCost { get; set; }
     public AuthState(ProtectedSessionStorage storage)
     {
         _storage = storage;

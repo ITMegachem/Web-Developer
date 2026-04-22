@@ -19,6 +19,7 @@
 @inject DownloadLogService DownloadLogSvc
 @inject PageContext PageContext
 @inject ISalesOrderService SalesOrderService
+@inject INofReportService NofReportService
 
 
 <div class="so-page-wrapper">
@@ -50,19 +51,29 @@
                     <span class="text-danger small">@plantError</span>
                 }
             </div>
-            <div class="col-6 col-md-4 col-lg-2">
-                <label class="modern-label">@T("Material Group")</label>
-                <input class="form-control modern-input"
-                       list="materialGroupList"
-                       @bind="filters.MaterialGroup"
-                       placeholder="@T("ChooseMaterialGroup")" />
+           <div class="col-6 col-md-4 col-lg-2">
+    <label class="modern-label">Product Group</label>
+    <div class="autocomplete-wrapper">
+        <input class="form-control modern-input"
+               value="@productGroupSearch"
+               @oninput="OnProductGroupSearch"
+               @onfocus="() => showProductGroupDropdown = true"
+               @onblur="OnProductGroupBlur"
+               placeholder="Choose Product Group" />
+        @if (productGroupResults.Any() && showProductGroupDropdown)
+        {
+            <div class="autocomplete-dropdown-card">
+                @foreach (var item in productGroupResults)
+                {
+                    <div class="autocomplete-row" @onclick="() => SelectProductGroup(item)">
+                        <div class="code">@item.Code</div>
+                        <div class="name">@item.Name</div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
 
-                <datalist id="materialGroupList">
-                    @foreach (var g in filteredMaterialGroups)
-                    {
-                        <option value="@g.Name">@g.Code - @g.Name</option>
-                    }
-                </datalist>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
                 <div class="d-flex align-items-center justify-content-between">
@@ -247,7 +258,7 @@
     };
     private int VisibleColumnCount => HideCostColumns ? 9 : 12;
     private List<WarehouseStockDto> allItems = new();
-    private List<MaterialGroupDto> filteredMaterialGroups = new();
+    
     private int totalItems;
     private int totalPages = 1;
     private MaterialLookup? _lastSelectedMaterial;
@@ -256,6 +267,17 @@
     private bool _isDisposed;
     private IJSObjectReference? _jsModule;
     private string selectedMaterialName = "";
+    private string productGroupSearch = "";
+    private bool showProductGroupDropdown = false;
+    private List<ProductGroupLookup> productGroupResults = new();
+    private string? selectedProductGroup;
+    private CancellationTokenSource? _productGroupCts;
+
+    public class ProductGroupLookup
+    {
+        public string Code { get; set; } = "";
+        public string Name { get; set; } = "";
+    }
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender || _isDisposed)
@@ -277,7 +299,7 @@
             await UiState.InitAsync();
 
             _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
-            filteredMaterialGroups = materialGroups;
+            
 
             if (!_isDisposed)
                 await InvokeAsync(StateHasChanged);
@@ -358,17 +380,17 @@
 
             var result = await stockService.GetWarehouseStockCostByBatch(
                 apiPlant,
-                filters.MaterialGroup,
+                selectedProductGroup,
                 apiMaterial,
                 filters.Batch);
 
             allItems = result?.Items?
-                .Where(x =>
-                    
-                    (string.IsNullOrEmpty(filters.MaterialGroup) ||
-                        (!string.IsNullOrEmpty(x.MaterialGroup) &&
-                         x.MaterialGroup.Contains(filters.MaterialGroup, StringComparison.OrdinalIgnoreCase))) &&
-                    (string.IsNullOrEmpty(apiMaterial) ||
+               
+                   .Where(x =>
+        (string.IsNullOrEmpty(selectedProductGroup) ||  // ✅ เปลี่ยนจาก filters.MaterialGroup
+            (!string.IsNullOrEmpty(x.MaterialGroup) &&
+             x.MaterialGroup.Equals(selectedProductGroup, StringComparison.OrdinalIgnoreCase))) &&
+        (string.IsNullOrEmpty(apiMaterial) ||
                         (!string.IsNullOrEmpty(x.MaterialCode) &&
                          x.MaterialCode.Contains(apiMaterial, StringComparison.OrdinalIgnoreCase)) ||
                         (!string.IsNullOrEmpty(x.MaterialDescription) &&
@@ -473,11 +495,11 @@
         var finalMaterial = NormalizeMaterialForApi(filters.Material);
 
         // ✅ บังคับใส่ Material เฉพาะเมื่อไม่ได้เลือก Material Group
-        bool hasMaterialGroup = !string.IsNullOrWhiteSpace(filters.MaterialGroup);
+        bool hasProductGroup = !string.IsNullOrWhiteSpace(selectedProductGroup);
 
-        if (!hasMaterialGroup && string.IsNullOrWhiteSpace(finalMaterial))
+        if (!hasProductGroup && string.IsNullOrWhiteSpace(finalMaterial))
         {
-            materialError = "Please enter Material or select Material Group";
+            materialError = "Please enter Material or select Product Group";
             await InvokeAsync(StateHasChanged);
             return;
         }
@@ -636,7 +658,7 @@
 
     private static readonly Dictionary<string, string> Text = new()
     {
-        ["Title"] = "Management - Warehouse Stock",
+        ["Title"] = "MB52 - 02 Warehouse Stock - Deprecated",
         ["Plant"] = "Plant",
         ["ChoosePlant"] = "Choose Plant",
         ["MaterialGroup"] = "Material Group",
@@ -666,157 +688,36 @@
     }
 
     private void OnPlantChanged()
+{
+    plantError = null;
+    var selectedPlant = filters.Plant;
+    var currentPageSize = filters.PageSize;
+
+    filters = new WarehouseStockFilter
     {
-        plantError = null;
-        var selectedPlant = filters.Plant;
-        var currentPageSize = filters.PageSize;
-
-        filters = new WarehouseStockFilter
-        {
-            Plant = selectedPlant,
-            Page = 1,
-            PageSize = currentPageSize
-        };
-
-        materialSearch = string.Empty;
-        materialResults.Clear();
-        showMaterialDropdown = false;
-        materialError = null;
-        allItems.Clear();
-        pagedItems.Clear();
-        totalItems = 0;
-        totalPages = 1;
-        selectedMaterialName = string.Empty;
-        var companyCode = GetCompanyCode(selectedPlant);
-
-        filteredMaterialGroups = materialGroups
-            .Where(x => string.Equals(x.Plant, companyCode, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-    }
-    private readonly List<MaterialGroupDto> materialGroups = new()
-    {
-        new() { Plant="1000", Code="001", Name="Coating Additive"},
-        new() { Plant="1000", Code="002", Name="Acid"},
-        new() { Plant="1000", Code="003", Name="Alkali"},
-        new() { Plant="1000", Code="004", Name="Amine"},
-        new() { Plant="1000", Code="005", Name="Antioxidant"},
-        new() { Plant="1000", Code="006", Name="Asphalt additive"},
-        new() { Plant="1000", Code="007", Name="Cement Additive"},
-        new() { Plant="1000", Code="008", Name="Defoamer"},
-        new() { Plant="1000", Code="009", Name="EP additive"},
-        new() { Plant="1000", Code="010", Name="Filler"},
-        new() { Plant="1000", Code="011", Name="Flame retardant"},
-        new() { Plant="1000", Code="012", Name="Fragrance"},
-        new() { Plant="1000", Code="013", Name="Friction Modifier"},
-        new() { Plant="1000", Code="014", Name="Isocyanate"},
-        new() { Plant="1000", Code="015", Name="Monomer"},
-        new() { Plant="1000", Code="016", Name="Optical Brightener"},
-        new() { Plant="1000", Code="017", Name="Organic Peroxide"},
-        new() { Plant="1000", Code="018", Name="Persulphate"},
-        new() { Plant="1000", Code="019", Name="Petroleum resin"},
-        new() { Plant="1000", Code="020", Name="Photo Initiator"},
-        new() { Plant="1000", Code="021", Name="Pigment"},
-        new() { Plant="1000", Code="022", Name="Plastic Additive"},
-        new() { Plant="1000", Code="023", Name="Plasticizer"},
-        new() { Plant="1000", Code="024", Name="Polymerization Additive"},
-        new() { Plant="1000", Code="025", Name="Preservative"},
-        new() { Plant="1000", Code="026", Name="Resin / Binder"},
-        new() { Plant="1000", Code="027", Name="Rubber Additive"},
-        new() { Plant="1000", Code="028", Name="Solvent"},
-        new() { Plant="1000", Code="029", Name="Surfactant"},
-        new() { Plant="1000", Code="030", Name="Tackifier"},
-        new() { Plant="1000", Code="031", Name="Wax"},
-        new() { Plant="1000", Code="032", Name="Other"},
-        new() { Plant="2000", Code="500", Name="Active Ingredient"},
-        new() { Plant="2000", Code="501", Name="Additive"},
-        new() { Plant="2000", Code="502", Name="Amino Acid"},
-        new() { Plant="2000", Code="503", Name="Bead/Scrub"},
-        new() { Plant="2000", Code="504", Name="Bleaching agent"},
-        new() { Plant="2000", Code="505", Name="Botanical & Herb"},
-        new() { Plant="2000", Code="506", Name="Color"},
-        new() { Plant="2000", Code="507", Name="Bulking Agent"},
-        new() { Plant="2000", Code="508", Name="Clay"},
-        new() { Plant="2000", Code="509", Name="Cocoa & Chocolate"},
-        new() { Plant="2000", Code="510", Name="Dispersing agent"},
-        new() { Plant="2000", Code="511", Name="Emollient"},
-        new() { Plant="2000", Code="512", Name="Emulsifier"},
-        new() { Plant="2000", Code="513", Name="Essential Oil"},
-        new() { Plant="2000", Code="514", Name="Excipient"},
-        new() { Plant="2000", Code="515", Name="Fibre"},
-        new() { Plant="2000", Code="516", Name="Film former"},
-        new() { Plant="2000", Code="517", Name="Flavor"},
-        new() { Plant="2000", Code="518", Name="Flavor Enhancer"},
-        new() { Plant="2000", Code="519", Name="Fragance"},
-        new() { Plant="2000", Code="520", Name="Hair conditioning"},
-        new() { Plant="2000", Code="521", Name="Hair dye"},
-        new() { Plant="2000", Code="522", Name="Humectant"},
-        new() { Plant="2000", Code="523", Name="Mushroom"},
-        new() { Plant="2000", Code="524", Name="Neutralizer"},
-        new() { Plant="2000", Code="525", Name="Moisturizer"},
-        new() { Plant="2000", Code="526", Name="Natural Oil"},
-        new() { Plant="2000", Code="527", Name="Pigment"},
-        new() { Plant="2000", Code="528", Name="Powder"},
-        new() { Plant="2000", Code="529", Name="Coffee &Tea"},
-        new() { Plant="2000", Code="530", Name="Protein-Animal"},
-        new() { Plant="2000", Code="531", Name="Protein-Plant"},
-        new() { Plant="2000", Code="532", Name="Silicone"},
-        new() { Plant="2000", Code="533", Name="Solubilizer"},
-        new() { Plant="2000", Code="534", Name="Sunscreen"},
-        new() { Plant="2000", Code="535", Name="Surfactant"},
-        new() { Plant="2000", Code="536", Name="Sweetener/ Sugar replacement"},
-        new() { Plant="2000", Code="537", Name="Thickener"},
-        new() { Plant="2000", Code="538", Name="Mineral/Vitamin"},
-        new() { Plant="2000", Code="539", Name="Wax"},
-        new() { Plant="2000", Code="540", Name="Abrasive"},
-        new() { Plant="2000", Code="541", Name="Acidulant"},
-        new() { Plant="2000", Code="542", Name="Anti oxidant"},
-        new() { Plant="2000", Code="543", Name="Enzyme"},
-        new() { Plant="2000", Code="544", Name="Fat & Oil-Algae"},
-        new() { Plant="2000", Code="545", Name="Fat & Oil-Plant"},
-        new() { Plant="2000", Code="546", Name="Firming Agent"},
-        new() { Plant="2000", Code="547", Name="Herb and Spice"},
-        new() { Plant="2000", Code="548", Name="Home care-Conditioning"},
-        new() { Plant="2000", Code="549", Name="Lipid/ Fatty Acid"},
-        new() { Plant="2000", Code="550", Name="Omega"},
-        new() { Plant="2000", Code="551", Name="Pearl pigment"},
-        new() { Plant="2000", Code="552", Name="Pearling agent"},
-        new() { Plant="2000", Code="553", Name="Phytonutrient"},
-        new() { Plant="2000", Code="554", Name="Pigment dispersion"},
-        new() { Plant="2000", Code="555", Name="Prebiotic"},
-        new() { Plant="2000", Code="556", Name="Preservative"},
-        new() { Plant="2000", Code="557", Name="Probiotic"},
-        new() { Plant="2000", Code="558", Name="Stabilizer"},
-        new() { Plant="2000", Code="559", Name="Starch"},
-        new() { Plant="2000", Code="560", Name="Vitamin"}
+        Plant = selectedPlant,
+        Page = 1,
+        PageSize = currentPageSize
     };
 
-    public async ValueTask DisposeAsync()
-    {
-        if (_isDisposed)
-            return;
+    materialSearch = string.Empty;
+    materialResults.Clear();
+    showMaterialDropdown = false;
+    materialError = null;
+    allItems.Clear();
+    pagedItems.Clear();
+    totalItems = 0;
+    totalPages = 1;
+    selectedMaterialName = string.Empty;
 
-        _isDisposed = true;
-        _materialCts?.Cancel();
-        _materialCts?.Dispose();
-        var module = _jsModule;
-        _jsModule = null;
-
-        try
-        {
-            if (module is not null)
-                await module.DisposeAsync();
-        }
-        catch (JSDisconnectedException)
-        {
-        }
-        catch (TaskCanceledException)
-        {
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-
-    }
+    // ✅ reset productGroup
+    productGroupSearch = string.Empty;
+    productGroupResults.Clear();
+    showProductGroupDropdown = false;
+    selectedProductGroup = null;
+}
+    
+    
     private static readonly Dictionary<string, string> DisplayPlantToCompany = new(StringComparer.OrdinalIgnoreCase)
     {
         ["1100"] = "1000",
@@ -892,6 +793,62 @@
             return userIsGreenLeaf || selectedPlantIs2000 || cannotViewCost;
         }
     }
+    private async Task OnProductGroupSearch(ChangeEventArgs e)
+    {
+        productGroupSearch = e.Value?.ToString() ?? "";
+        selectedProductGroup = null;
+        productGroupResults.Clear();
+        showProductGroupDropdown = false;
 
+        if (productGroupSearch.Length < 2)
+        {
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _productGroupCts?.Cancel();
+        _productGroupCts = new CancellationTokenSource();
+        var token = _productGroupCts.Token;
+
+        try
+        {
+            await Task.Delay(300, token);
+            if (token.IsCancellationRequested) return;
+
+            var results = await NofReportService.SearchProductGroupAsync(productGroupSearch);
+            productGroupResults = results
+                .Select(x => new ProductGroupLookup { Code = x.Code, Name = x.Name })
+                .ToList();
+
+            var exact = productGroupResults.FirstOrDefault(x =>
+                x.Code.Equals(productGroupSearch.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            if (exact != null)
+                SelectProductGroup(exact);
+            else
+                showProductGroupDropdown = productGroupResults.Any();
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (TaskCanceledException) { }
+        catch (UnauthorizedAccessException) { Nav.NavigateTo("/", replace: true); }
+    }
+
+    private void SelectProductGroup(ProductGroupLookup item)
+    {
+        selectedProductGroup = item.Code;
+        productGroupSearch = item.Name == item.Code || string.IsNullOrWhiteSpace(item.Name)
+            ? item.Code
+            : $"{item.Code} {item.Name}";
+        productGroupResults.Clear();
+        showProductGroupDropdown = false;
+    }
+
+    private async Task OnProductGroupBlur()
+    {
+        await Task.Delay(200);
+        showProductGroupDropdown = false;
+        await InvokeAsync(StateHasChanged);
+    }
     
 }

@@ -419,43 +419,81 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
                 // ✅ ดึง SalesDocument ที่ user นี้มีสิทธิ์จริงๆ
                 HashSet<string> ownRefDocs = new(StringComparer.OrdinalIgnoreCase);
-
                 if (refDocs.Any() &&
-                    currentScope != DataScopes.CrossCompany &&
-                    currentScope != DataScopes.Company &&
-                    currentScope != DataScopes.Division)
+    currentScope != DataScopes.CrossCompany &&
+    currentScope != DataScopes.Company)
                 {
-                    // วิธีที่ 1: เทียบจาก View_MGT_GLC_ALL_Sales
-                    var ownDocQuery = _context.View_MGT_GLC_ALL_Sales
+                    // ✅ หา SalesOrder จาก refDocs ผ่าน Op_SalesOrder ก่อน
+                    var salesOrdersFromRefDocs = await _context.View_Sales_with_Op_SalesOrder
                         .AsNoTracking()
-                        .Where(x => x.SalesDocument != null && refDocs.Contains(x.SalesDocument));
-
-                    ownDocQuery = ApplySalesPermission(ownDocQuery, permission);
-
-                    ownRefDocs = (await ownDocQuery
-                        .Select(x => x.SalesDocument!)
+                        .Where(x => x.PartnerFunction == "Z2" &&
+                                    x.Customer != null &&
+                                   (EF.Functions.Like(x.Customer, "MGT%") ||
+                                    EF.Functions.Like(x.Customer, "GLC%")) &&
+                                    x.SalesOrder != null &&
+                                    refDocs.Contains(x.SalesOrder))
+                        .Select(x => x.SalesOrder!)
                         .Distinct()
-                        .ToListAsync())
-                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                    // วิธีที่ 2: fallback เทียบ MGT Code ของ user
-                    var userMgtCode = permission.Username?.Trim();
-                    if (!string.IsNullOrWhiteSpace(userMgtCode))
+                        .ToListAsync();
+                    // ก่อน if (salesOrdersFromRefDocs.Any())
+                   
+                    if (salesOrdersFromRefDocs.Any())
                     {
-                        var ownOpDocs = await _context.View_Sales_with_Op_SalesOrder
-                            .AsNoTracking()
-                            .Where(x => x.PartnerFunction == "Z2" &&
-                                        x.Customer != null &&
-                                        x.Customer.Trim().ToUpper() == userMgtCode.ToUpper() &&
-                                        x.SalesOrder != null &&
-                                        refDocs.Contains(x.SalesOrder))
-                            .Select(x => x.SalesOrder!)
-                            .Distinct()
-                            .ToListAsync();
+                        if (currentScope == DataScopes.Division)
+                        {
+                            // ✅ Division: filter ด้วย allowedUsernames ใน division
+                            var allowedUsernames = await GetAllowedUsernamesAsync(permission, currentScope);
 
-                        foreach (var doc in ownOpDocs)
-                            ownRefDocs.Add(doc);
+                            ownRefDocs = (await _context.View_Sales_with_Op_SalesOrder
+                                .AsNoTracking()
+                                .Where(x => x.PartnerFunction == "Z2" &&
+                                            x.Customer != null &&
+                                            allowedUsernames.Contains(x.Customer.Trim().ToUpper()) &&
+                                            x.SalesOrder != null &&
+                                            salesOrdersFromRefDocs.Contains(x.SalesOrder))
+                                .Select(x => x.SalesOrder!)
+                                .Distinct()
+                                .ToListAsync())
+                                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        }
+                        else
+                        {
+                            // ✅ Own: filter ด้วย View_MGT_GLC_ALL_Sales ตาม scope
+                            var ownDocQuery = _context.View_MGT_GLC_ALL_Sales
+                                .AsNoTracking()
+                                .Where(x => x.SalesDocument != null &&
+                                            salesOrdersFromRefDocs.Contains(x.SalesDocument));
+
+                            ownDocQuery = ApplySalesPermission(ownDocQuery, permission);
+
+                            ownRefDocs = (await ownDocQuery
+                                .Select(x => x.SalesDocument!)
+                                .Distinct()
+                                .ToListAsync())
+                                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                            // fallback username สำหรับ Own
+                            var userMgtCode = permission.Username?.Trim();
+                            if (!string.IsNullOrWhiteSpace(userMgtCode))
+                            {
+                                var ownOpDocs = await _context.View_Sales_with_Op_SalesOrder
+                                    .AsNoTracking()
+                                    .Where(x => x.PartnerFunction == "Z2" &&
+                                                x.Customer != null &&
+                                                x.Customer.Trim().ToUpper() == userMgtCode.ToUpper() &&
+                                                x.SalesOrder != null &&
+                                                refDocs.Contains(x.SalesOrder))
+                                    .Select(x => x.SalesOrder!)
+                                    .Distinct()
+                                    .ToListAsync();
+
+                                foreach (var doc in ownOpDocs)
+                                    ownRefDocs.Add(doc);
+                            }
+                        }
                     }
+
+                    Console.WriteLine($"[DEBUG] ownRefDocs.Count={ownRefDocs.Count}");
                 }
 
                 if (refDocs.Any())
@@ -504,10 +542,10 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         var customerData = await _context.View_MGT_GLC_ALL_Sales
                             .AsNoTracking()
                             .Where(x => x.SoldToParty != null &&
-                                        soldToPartiesRaw.Contains(x.SoldToParty)) // ✅ ใช้ raw ใน SQL
+                                        soldToPartiesRaw.Contains(x.SoldToParty))
                             .Select(x => new
                             {
-                                SoldToParty = x.SoldToParty!.Trim(), // ✅ Trim ใน Select (in-memory)
+                                SoldToParty = x.SoldToParty!.Trim(),
                                 x.CustomerFullName,
                                 x.IndustryCode,
                                 x.IndustryName
@@ -526,6 +564,41 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                                     IndustryName: g.First().IndustryName ?? ""
                                 )
                             );
+
+                        // ✅ fallback จาก Mapping_Soldtos สำหรับ SO ที่ยังไม่ Billing
+                        var missingSoldTos = soldToParties
+                            .Where(s => !customerInfoDict.ContainsKey(s))
+                            .ToList();
+
+                        if (missingSoldTos.Any())
+                        {
+                            var mappingData = await _context.Mapping_Soldtos
+                                .AsNoTracking()
+                                .Where(x => x.Customer != null &&
+                                            missingSoldTos.Contains(x.Customer.Trim()))
+                                .Select(x => new
+                                {
+                                    Customer = x.Customer!.Trim(),
+                                    x.FullName
+                                })
+                                .Distinct()
+                                .ToListAsync();
+                            Console.WriteLine($"[DEBUG MAPPING] mappingData.Count={mappingData.Count}");
+                            foreach (var m in mappingData.Take(5))
+                                Console.WriteLine($"[DEBUG MAPPING] Customer={m.Customer} FullName={m.FullName}");
+                            foreach (var m in mappingData)
+                            {
+                                if (!string.IsNullOrWhiteSpace(m.Customer) &&
+                                    !customerInfoDict.ContainsKey(m.Customer))
+                                {
+                                    customerInfoDict[m.Customer] = (
+                                        FullName: m.FullName ?? "",
+                                        IndustryCode: "",
+                                        IndustryName: ""
+                                    );
+                                }
+                            }
+                        }
                     }
 
                     var dept = permission.Department?.ToLower() ?? "";
@@ -537,10 +610,8 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         if (string.IsNullOrWhiteSpace(refDoc)) continue;
 
                         bool canViewCustomer = currentScope == DataScopes.CrossCompany ||
-                                               currentScope == DataScopes.Company ||
-                                               currentScope == DataScopes.Division ||
-                                               (permission.CanViewCustomer && ownRefDocs.Contains(refDoc));
-
+                        currentScope == DataScopes.Company ||
+                        (permission.CanViewCustomer && ownRefDocs.Contains(refDoc));
                         if (opSalesLookup.TryGetValue(refDoc, out var opSales))
                         {
                             var soldTo = opSales.SoldToParty?.Trim() ?? "";
@@ -610,10 +681,10 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
                 mergedSapData.Plant = requestedPlant ?? string.Join(",", plantsToQuery);
                 // ก่อน return Ok(mergedSapData)
-                foreach (var d in mergedSapData._Detail)
+                /*foreach (var d in mergedSapData._Detail)
                 {
                     Console.WriteLine($"[STOCK] Ref={d.Ref_Doc} Industry={d.IndustryCode}/{d.IndustryName}");
-                }
+                }*/
                 return Ok(mergedSapData);
             }
             catch (Exception ex)
@@ -741,38 +812,38 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
             return Ok(result);
         }
-        [Authorize]
         [HttpGet("MaterialLookup")]
         public async Task<IActionResult> GetMaterialLookup([FromQuery] string keyword)
         {
             var permission = await GetCurrentPermissionAsync();
-            if (permission == null)
-                return Unauthorized();
+            if (permission == null) return Unauthorized();
 
             if (!permission.Page3Access && !permission.Page2Access)
                 return Forbid();
 
             keyword = keyword?.Trim() ?? "";
-            if (string.IsNullOrWhiteSpace(keyword))
+            if (string.IsNullOrWhiteSpace(keyword) || keyword.Length < 2)
                 return Ok(new List<object>());
 
+            // ✅ ทุก scope ค้นหาได้ทั้งหมดใน SalesOrg ของตัวเอง
             var query = _context.View_MGT_GLC_ALL_Sales
-        .AsNoTracking()
-        .Where(x => x.Material != null);
+                .AsNoTracking()
+                .Where(x => x.Material != null);
 
-            // ✅ Division ขึ้นไป ไม่ต้อง filter scope
             var scope = ResolveScope(permission);
-            if (scope == DataScopes.Own)
-                query = ApplySalesPermission(query, permission);
+            if (scope == DataScopes.CrossCompany)
+            {
+                // CrossCompany ไม่ filter SalesOrg
+            }
             else
+            {
+                // ทุกคนเห็น material ใน SalesOrg ของตัวเอง
                 query = query.Where(x => x.SalesOrganization ==
                           NormalizeKey(permission.SalesOrganizationCode));
-            // เป็น
-            if (keyword.Length < 2)   // ← ลดจาก 3 เป็น 2
-                return Ok(new List<object>());
+            }
 
-            var likeStart = $"{keyword}%";   // starts-with
-            var likeAny = $"%{keyword}%";  // contains
+            var likeStart = $"{keyword}%";
+            var likeAny = $"%{keyword}%";
             _context.Database.SetCommandTimeout(60);
 
             var items = await query
@@ -783,7 +854,6 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 {
                     Code = x.Material,
                     Name = x.MaterialName,
-                    // ✅ priority: 0 = code starts-with, 1 = name starts-with, 2 = contains only
                     Priority = EF.Functions.Like(x.Material, likeStart) ? 0
                              : EF.Functions.Like(x.MaterialName, likeStart) ? 1
                              : 2
@@ -792,7 +862,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 .OrderBy(x => x.Priority)
                 .ThenBy(x => x.Code)
                 .Take(20)
-                .Select(x => new { x.Code, x.Name })   // strip priority ออกก่อน return
+                .Select(x => new { x.Code, x.Name })
                 .ToListAsync();
 
             return Ok(items);
@@ -1049,7 +1119,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             var permission = await GetCurrentPermissionAsync();
             if (permission == null) return Unauthorized();
 
-            if (!permission.Page1Access) return Forbid();
+            if (!permission.Page1Access && !permission.Page2Access) return Forbid();
 
             keyword = keyword?.Trim() ?? "";
 
@@ -1435,13 +1505,26 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     .ToListAsync();
 
                 // Step 5: ดึง MaterialName
-                var materialCodes = viewData.Select(x => x.Material).Where(x => !string.IsNullOrEmpty(x)).Distinct().ToList();
+                // Step 5b: ย้ายขึ้นมาก่อน เพื่อให้ได้ sapItemList
+                var sapItemList = await _sapService.GetSalesOrderItemsAsync(soNumbers);
+
+                // Step 5: รวม material codes จากทั้ง 2 แหล่ง
+                var materialCodes = viewData.Select(x => x.Material)
+                    .Where(x => !string.IsNullOrEmpty(x)).Distinct().ToList();
+
+                var sapMaterialCodesForDesc = sapItemList
+                    .Where(x => !string.IsNullOrWhiteSpace(x.Material))
+                    .Select(x => x.Material!).Distinct().ToList();
+
+                // ✅ ใช้ allMaterialCodes query แทน materialCodes
+                var allMaterialCodes = materialCodes.Union(sapMaterialCodesForDesc).Distinct().ToList();
+
                 var materialDict = new Dictionary<string, string>();
-                if (materialCodes.Any())
+                if (allMaterialCodes.Any())  // ✅ เปลี่ยนจาก materialCodes.Any()
                 {
                     var materialInfo = await _context.View_MaterialStock_WeightKG
                         .AsNoTracking()
-                        .Where(x => x.Material != null && materialCodes.Contains(x.Material))
+                        .Where(x => x.Material != null && allMaterialCodes.Contains(x.Material)) // ✅ ใช้ allMaterialCodes
                         .GroupBy(x => x.Material)
                         .Select(g => new { Material = g.Key, MaterialDescription = g.First().MaterialDescription })
                         .ToListAsync();
@@ -1449,26 +1532,30 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     materialDict = materialInfo
                         .Where(x => x.Material != null)
                         .ToDictionary(x => x.Material!, x => x.MaterialDescription ?? "");
+
+                    // ✅ Fallback: View_MGT_GLC_ALL_Sales สำหรับที่ยังหาไม่เจอ
+                    var missing = allMaterialCodes
+                        .Where(m => !string.IsNullOrEmpty(m) && !materialDict.ContainsKey(m!))
+                        .ToList();
+
+                    if (missing.Any())
+                    {
+                        var fallback = await _context.View_MGT_GLC_ALL_Sales
+                            .AsNoTracking()
+                            .Where(x => x.Material != null && missing.Contains(x.Material))
+                            .Select(x => new { x.Material, x.MaterialName })
+                            .Distinct()
+                            .ToListAsync();
+
+                        foreach (var f in fallback)
+                            if (!string.IsNullOrEmpty(f.Material) && !materialDict.ContainsKey(f.Material))
+                                materialDict[f.Material] = f.MaterialName ?? "";
+                    }
                 }
 
-                // Step 5b: ดึง Material จาก SAP
-                var sapItemList = await _sapService.GetSalesOrderItemsAsync(soNumbers);
-                var sapMaterialCodes = sapItemList.Select(x => x.Material).Distinct().ToList();
-                var sapMaterialDict = new Dictionary<string, string>();
-
-                if (sapMaterialCodes.Any())
-                {
-                    var sapMaterialInfo = await _context.View_MaterialStock_WeightKG
-                        .AsNoTracking()
-                        .Where(x => x.Material != null && sapMaterialCodes.Contains(x.Material))
-                        .GroupBy(x => x.Material)
-                        .Select(g => new { Material = g.Key, g.First().MaterialDescription })
-                        .ToListAsync();
-
-                    sapMaterialDict = sapMaterialInfo
-                        .Where(x => x.Material != null)
-                        .ToDictionary(x => x.Material!, x => x.MaterialDescription ?? "");
-                }
+                // sapMaterialDict ไม่จำเป็นต้องแยกอีกต่อไป เพราะรวมใน materialDict แล้ว
+                var sapMaterialDict = materialDict; // ✅ ใช้ dict เดียวกัน
+                var sapMaterialCodes = sapMaterialCodesForDesc;
 
                 // Step 6: รวมข้อมูล — ✅ filter เฉพาะ SO ที่มี z2 ที่ allowed
                 var allowedSalesOrderNumbers = scope == DataScopes.Own || scope == DataScopes.Division
@@ -1495,15 +1582,31 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
                         if (!string.IsNullOrEmpty(material))
                         {
-                            materialDict.TryGetValue(material, out materialName);
-                            materialName ??= view?.MaterialName ?? "";
+                            // ✅ ลอง materialDict (View_MaterialStock_WeightKG) ก่อน
+                            if (!materialDict.TryGetValue(material, out materialName)
+                                || string.IsNullOrEmpty(materialName))
+                            {
+                                // ✅ fallback → sapMaterialDict
+                                if (!sapMaterialDict.TryGetValue(material, out materialName)
+                                    || string.IsNullOrEmpty(materialName))
+                                {
+                                    // ✅ fallback สุดท้าย → MaterialName จาก View_MGT_GLC_ALL_Sales
+                                    materialName = view?.MaterialName ?? "";
+                                }
+                            }
                         }
                         else
                         {
+                            // ✅ ถ้า view ไม่มี Material → ลองจาก SAP
                             material = sapItem.Material ?? "";
                             if (!string.IsNullOrEmpty(material))
-                                sapMaterialDict.TryGetValue(material, out materialName);
+                            {
+                                if (!sapMaterialDict.TryGetValue(material, out materialName)
+                                    || string.IsNullOrEmpty(materialName))
+                                    materialName = "";
+                            }
                         }
+                        
 
                         return new
                         {
@@ -1545,7 +1648,16 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                                           !string.IsNullOrWhiteSpace(v.Material)) ||
                         soWithSapItems.Contains(x.SalesOrderDocument))
                     .ToList();
-
+                if (!string.IsNullOrWhiteSpace(request.Material))
+                {
+                    var matKeyword = request.Material.Trim().ToUpper();
+                    items = items
+                        .Where(x =>
+                            (x.Material ?? "").ToUpper().Contains(matKeyword) ||
+                            (x.MaterialName ?? "").ToUpper().Contains(matKeyword))
+                        .ToList();
+                }
+               
                 var filteredTotal = items.Count;
                 var pagedItems = items
                     .Skip((request.Page - 1) * request.PageSize)
@@ -1872,26 +1984,12 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             return new HashSet<string>(materials, StringComparer.OrdinalIgnoreCase);
         }
 
-        // ✅ สำหรับ StockMovement — Division ยังถูก filter ตาม scope
+        
+        // ✅ สำหรับ StockMovement — Division ดูได้หมดเหมือน StockofMaterial
         private async Task<HashSet<string>?> GetAllowedMaterialsForMovementAsync(View_UserPermission permission)
         {
-            var scope = ResolveScope(permission);
-
-            // CrossCompany และ Company เท่านั้นที่ดูได้หมด
-            if (scope == DataScopes.Company || scope == DataScopes.CrossCompany)
-                return null;
-
-            // Division และ Own → จำกัดตาม scope
-            var query = _context.View_MGT_GLC_ALL_Sales.AsNoTracking();
-            query = ApplySalesPermission(query, permission);
-
-            var materials = await query
-                .Where(x => x.Material != null)
-                .Select(x => x.Material!)
-                .Distinct()
-                .ToListAsync();
-
-            return new HashSet<string>(materials, StringComparer.OrdinalIgnoreCase);
+            // ทุก scope ดู material ได้หมด ไม่จำกัด
+            return null;
         }
         [Authorize]
         [HttpPost("debug-stockmovement")]
