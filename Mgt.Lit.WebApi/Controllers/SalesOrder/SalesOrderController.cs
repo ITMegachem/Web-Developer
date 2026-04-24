@@ -186,19 +186,19 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
             // ✅ DataScope กรอง Material
             var material = request.Material?.Trim();
-            var scope = ResolveScope(permission);
-            var skipMaterialFilter = scope == DataScopes.Company
-                                  || scope == DataScopes.CrossCompany
-                                  || scope == DataScopes.Division; // ← เพิ่มตรงนี้
+            //var scope = ResolveScope(permission);
+            //var skipMaterialFilter = scope == DataScopes.Company
+            //                      || scope == DataScopes.CrossCompany
+            //                      || scope == DataScopes.Division; // ← เพิ่มตรงนี้
 
-            if (!skipMaterialFilter)
-            {
-                var allowedMaterials = await GetAllowedMaterialsAsync(permission);
-                if (allowedMaterials != null &&
-                    !string.IsNullOrWhiteSpace(material) &&
-                    !allowedMaterials.Contains(material))
-                    return Forbid();
-            }
+            //if (!skipMaterialFilter)
+            //{
+            //    var allowedMaterials = await GetAllowedMaterialsAsync(permission);
+            //    if (allowedMaterials != null &&
+            //        !string.IsNullOrWhiteSpace(material) &&
+            //        !allowedMaterials.Contains(material))
+            //        return Forbid();
+            //}
             var sqlItems = await _context.View_MaterialStock_WeightKG
                 .AsNoTracking()
                 .Where(x =>
@@ -833,11 +833,11 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             var scope = ResolveScope(permission);
             if (scope == DataScopes.CrossCompany)
             {
-                // CrossCompany ไม่ filter SalesOrg
+                // ไม่ filter
             }
             else
             {
-                // ทุกคนเห็น material ใน SalesOrg ของตัวเอง
+                // ✅ filter แค่ SalesOrg ของตัวเอง แต่ไม่ filter ตาม employee
                 query = query.Where(x => x.SalesOrganization ==
                           NormalizeKey(permission.SalesOrganizationCode));
             }
@@ -1135,7 +1135,15 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 .AsNoTracking()
                 .Where(x => x.ProductGroup != null && x.ProductGroup != "");
 
-            query = ApplySalesPermission(query, permission);
+            // ✅ ลบ ApplySalesPermission ออก — filter แค่ SalesOrg ของตัวเอง
+            var scope = ResolveScope(permission);
+            if (scope != DataScopes.CrossCompany)
+            {
+                var salesOrg = NormalizeKey(permission.SalesOrganizationCode);
+                if (!string.IsNullOrWhiteSpace(salesOrg))
+                    query = query.Where(x => x.SalesOrganization == salesOrg);
+            }
+            // ✅ ไม่มี ApplySalesPermission แล้ว → เห็น ProductGroup ทั้งหมดใน SalesOrg
 
             var items = await query
                 .Where(x => EF.Functions.Like(x.ProductGroup, likeAny))
@@ -1148,7 +1156,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 .OrderBy(x => x.Priority)
                 .ThenBy(x => x.Code)
                 .Take(20)
-                .Select(x => new { x.Code, Name = x.Code }) // ✅ ถ้าไม่มี ProductGroupName ใช้ Code แทน
+                .Select(x => new { x.Code, Name = x.Code })
                 .ToListAsync();
 
             return Ok(items);
@@ -1538,18 +1546,53 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         .Where(m => !string.IsNullOrEmpty(m) && !materialDict.ContainsKey(m!))
                         .ToList();
 
+                    // ✅ เพิ่ม fallback จาก View_MaterialStock_WeightKG ก่อน
                     if (missing.Any())
                     {
-                        var fallback = await _context.View_MGT_GLC_ALL_Sales
+                        var weightFallback = await _context.View_MaterialStock_WeightKG
                             .AsNoTracking()
                             .Where(x => x.Material != null && missing.Contains(x.Material))
-                            .Select(x => new { x.Material, x.MaterialName })
-                            .Distinct()
+                            .Select(x => new { x.Material, x.MaterialDescription })
                             .ToListAsync();
 
-                        foreach (var f in fallback)
+                        foreach (var f in weightFallback)
                             if (!string.IsNullOrEmpty(f.Material) && !materialDict.ContainsKey(f.Material))
-                                materialDict[f.Material] = f.MaterialName ?? "";
+                                materialDict[f.Material] = f.MaterialDescription ?? "";
+
+                        // ✅ ยังขาดอยู่ → ลอง View_MGT_GLC_ALL_Sales (ไม่ filter scope)
+                        // ✅ ยังขาดอยู่ → ลอง Ms_ProductDescription (ไม่มี scope filter)
+                        var stillMissing = missing.Where(m => !materialDict.ContainsKey(m!)).ToList();
+                        if (stillMissing.Any())
+                        {
+                            // ✅ ลอง Ms_ProductDescription ก่อน
+                            var productDescFallback = await _context.Ms_ProductDescription
+                                .AsNoTracking()
+                                .Where(x => x.Product != null &&
+                                            stillMissing.Contains(x.Product) &&
+                                            x.Language == "EN")  // ✅ เอาเฉพาะ English
+                                .Select(x => new { Product = x.Product, Description = x.ProductDescription })
+                                .ToListAsync();
+
+                            foreach (var f in productDescFallback)
+                                if (!string.IsNullOrEmpty(f.Product) && !materialDict.ContainsKey(f.Product))
+                                    materialDict[f.Product] = f.Description ?? "";
+
+                            // ✅ ยังขาดอยู่ → ลอง View_MGT_GLC_ALL_Sales (ไม่ filter scope)
+                            var stillMissing2 = stillMissing.Where(m => !materialDict.ContainsKey(m!)).ToList();
+                            if (stillMissing2.Any())
+                            {
+                                var salesFallback = await _context.View_MGT_GLC_ALL_Sales
+                                    .AsNoTracking()
+                                    .Where(x => x.Material != null && stillMissing2.Contains(x.Material))
+                                    .Select(x => new { x.Material, x.MaterialName })
+                                    .Distinct()
+                                    .ToListAsync();
+
+                                foreach (var f in salesFallback)
+                                    if (!string.IsNullOrEmpty(f.Material) && !materialDict.ContainsKey(f.Material))
+                                        materialDict[f.Material] = f.MaterialName ?? "";
+                            }
+                        }
                     }
                 }
 

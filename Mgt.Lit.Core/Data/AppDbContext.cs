@@ -87,6 +87,11 @@ namespace Mgt.Lit.Core.Data
                 entity.HasKey(x => new { x.SOrg, x.CustomerGroup });
                 entity.ToTable("Ms_CustomerGroup");
             });
+            modelBuilder.Entity<Ms_ProductDescription>(entity =>
+            {
+                entity.HasNoKey();
+                entity.ToTable("Ms_ProductDescription");
+            });
         }
 
         public DbSet<Entities.RefreshToken> RefreshTokens { get; set; }
@@ -100,6 +105,7 @@ namespace Mgt.Lit.Core.Data
         public DbSet<Mapping_Shipto> Mapping_Shiptos { get; set; }
         public DbSet<Op_SalesOrder> Op_SalesOrders { get; set; }
         public DbSet<Ms_CustomerGroup> Ms_CustomerGroups { get; set; }
+        public DbSet<Ms_ProductDescription> Ms_ProductDescription { get; set; }
 
     }
 }

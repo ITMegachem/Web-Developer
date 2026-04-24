@@ -87,7 +87,6 @@
                     }
                 </div>
                 <div class="autocomplete-wrapper">
-
                     <input class="form-control modern-input"
                            value="@materialSearch"
                            @oninput="OnMaterialSearch"
@@ -107,7 +106,6 @@
                             }
                         </div>
                     }
-
                 </div>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
@@ -327,8 +325,18 @@
         _lastSelectedMaterial = null;
         materialResults.Clear();
         showMaterialDropdown = false;
+        if (string.IsNullOrWhiteSpace(materialSearch))
+        {
+            allItems.Clear();
+            pagedItems.Clear();
+            totalItems = 0;
+            totalPages = 1;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
 
-        if (string.IsNullOrWhiteSpace(materialSearch) || materialSearch.Length < 2)
+        // ✅ ลบ if ซ้ำที่สองออก (บรรทัด 190-194 ในโค้ดปัจจุบัน)
+        if (materialSearch.Length < 2)
         {
             await InvokeAsync(StateHasChanged);
             return;
@@ -365,6 +373,20 @@
         catch (TaskCanceledException) { }
         catch (UnauthorizedAccessException) { Nav.NavigateTo("/", replace: true); }
         catch { materialResults.Clear(); showMaterialDropdown = false; }
+    }
+    private async Task ClearMaterial()
+    {
+        materialSearch = string.Empty;
+        filters.Material = null;
+        selectedMaterialName = "";
+        _lastSelectedMaterial = null;
+        materialResults.Clear();
+        showMaterialDropdown = false;
+        allItems.Clear();
+        pagedItems.Clear();
+        totalItems = 0;
+        totalPages = 1;
+        await InvokeAsync(StateHasChanged);
     }
     private async Task LoadDataAsync()
     {
