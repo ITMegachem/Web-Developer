@@ -247,10 +247,18 @@
 
     // ── Dashboard permissions ─────────────────────────────────────────────────
 
-    /// DB1 : Admin หรือ Manager ของ companyID = 1
-    private bool CanViewDB1 =>
-        PrimaryCompanyID == 1 && (IsAdmin || IsManager);
+    /// DB1 : Admin หรือ Manager ของ companyID = 1 ที่ไม่ใช่ Purchase
+    private string? Department =>
+     AuthState.Permission?.Department;
 
+    // ✅ เพิ่ม property นี้
+    private bool IsPurchaseDept =>
+        string.Equals(Department, "purchase", StringComparison.OrdinalIgnoreCase);
+
+    private bool CanViewDB1 =>
+        PrimaryCompanyID == 1 &&
+        (IsAdmin || IsManager) &&
+        !IsPurchaseDept;
     /// DB2 : Leader ของ companyID = 1 และ division = BU2
     private bool CanViewDB2 =>
         PrimaryCompanyID == 1 &&

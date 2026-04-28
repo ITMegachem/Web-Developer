@@ -247,6 +247,27 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                              .Select(x => x.SalesGroup)
                              .Distinct())
                     });
+            var msProductDict = await _context.Ms_Product
+    .AsNoTracking()
+    .Where(x => string.IsNullOrEmpty(material) || x.Product == material)
+    .Select(x => new { x.Product, x.NetWeight })
+    .ToListAsync();
+
+            // ✅ Parse ใน memory แทน ไม่ให้ EF แปลงใน SQL
+            var msProductLookup = msProductDict
+                .Where(x => x.Product != null)
+                .Select(x => new
+                {
+                    x.Product,
+                    NetWeightDecimal = decimal.TryParse(
+                        x.NetWeight,
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out var v) && v > 0 ? v : (decimal?)null
+                })
+                .Where(x => x.NetWeightDecimal != null)
+                .GroupBy(x => x.Product!)
+                .ToDictionary(g => g.Key, g => g.First().NetWeightDecimal);
 
             var items = sapData
                 .Where(s => string.IsNullOrEmpty(request.Plant) ||
@@ -258,9 +279,13 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
         materialGroupDict.TryGetValue(s.Material_Code ?? "", out var matInfo);
 
         decimal unitKg = 0;
-        if (sql?.NetWeight != null && sql.NetWeight > 0)
-            unitKg = s.Price_KG / sql.NetWeight.Value;
+        decimal? netWeight = sql?.NetWeight;
 
+        if (netWeight == null || netWeight <= 0)
+            msProductLookup.TryGetValue(s.Material_Code ?? "", out netWeight);
+
+        if (netWeight != null && netWeight > 0)
+            unitKg = s.Price_KG / netWeight.Value;
         return new MaterialStockResponseDto
         {
             MaterialCode = s.Material_Code,
@@ -637,7 +662,8 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                                 item.Customer_Code = isPurchase ? soldTo : null;
                                 item.Customer_Name = null;
                                 item.IndustryCode = null;
-                                item.IndustryName = null;
+                                if (customerInfoDict.TryGetValue(soldTo, out var info))
+                                    item.IndustryName = info.IndustryName;
                             }
                         }
                         else
@@ -649,7 +675,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                                     item.Customer_Code = null;
                                 item.Customer_Name = null;
                                 item.IndustryCode = null;
-                                item.IndustryName = null;
+                                //item.IndustryName = null;
                             }
                         }
                     }
@@ -671,7 +697,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     {
                         item.Customer_Name = null;
                         item.IndustryCode = null;
-                        item.IndustryName = null;
+                        //item.IndustryName = null;
 
                         // ✅ Purchase เห็น Code, Sales ไม่เห็น Code
                         if (dept != "purchase")

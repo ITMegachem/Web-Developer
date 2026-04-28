@@ -123,6 +123,7 @@ namespace Mgt.Lit.WebApi.Controllers
 
             return Ok(new
             {
+                UserID = user.UserID, // ✅ เพิ่มบรรทัดนี้
                 Token = accessToken,
                 Username = user.Username,
                 FullName = user.FullName,
@@ -133,6 +134,7 @@ namespace Mgt.Lit.WebApi.Controllers
                 Companies = companies,
                 Permission = permission == null ? null : new
                 {
+                    UserID = user.UserID, // 🔥 เพิ่มตรงนี้
                     permission.CompanyID,
                     permission.UserRole,
                     permission.RoleKey,
@@ -218,22 +220,20 @@ namespace Mgt.Lit.WebApi.Controllers
         {
             var username = User.FindFirst(ClaimTypes.Name)?.Value;
             if (string.IsNullOrEmpty(username))
-                return Unauthorized();
+                return Unauthorized("No username in token");
 
             var user = await _context.MsUsers.FirstOrDefaultAsync(u => u.Username == username);
             if (user == null)
                 return NotFound("User not found");
 
-            // ✅ เทียบแบบตรง ๆ (ตาม DB ที่เก็บ Password เป็น text)
             if (user.Password != dto.CurrentPassword)
                 return BadRequest("Current password is incorrect");
 
             user.Password = dto.NewPassword;
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(); // ✅ ไม่ update TokenVersion
 
             return Ok(new { message = "Password updated" });
         }
-
         [HttpPost("refresh")]
         public async Task<IActionResult> Refresh()
         {
@@ -400,6 +400,7 @@ namespace Mgt.Lit.WebApi.Controllers
                 currentCompanyId = dto.CompanyID,
                 Permission = permission == null ? null : new
                 {
+                    UserID = user.UserID, // 🔥 เพิ่มบรรทัดนี้
                     permission.CompanyID,
                     permission.UserRole,
                     permission.RoleKey,
@@ -407,11 +408,12 @@ namespace Mgt.Lit.WebApi.Controllers
                     permission.Page1Access,
                     permission.Page2Access,
                     permission.Page3Access,
-                    permission.Page4Access,  
+                    permission.Page4Access,
                     permission.DataScope,
                     permission.CanViewVendor,
                     permission.CanViewCost,
-                    permission.CanViewCustomer  
+                    permission.Department,
+                    permission.CanViewCustomer
                 }
             });
         }

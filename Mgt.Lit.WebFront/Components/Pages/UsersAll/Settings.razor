@@ -55,32 +55,38 @@
             }
 
             <div class="mt-3 d-flex flex-column gap-2">
-                <div class="pwd-field-wrap">
-                    <i class="bi bi-lock pwd-field-icon"></i>
-                    <input class="pwd-input"
-                           type="password"
-                           placeholder="@T("CurrentPwd")"
-                           @bind="CurrentPassword" />
-                </div>
-                <div class="pwd-field-wrap">
-                    <i class="bi bi-key pwd-field-icon"></i>
-                    <input class="pwd-input"
-                           type="password"
-                           placeholder="@T("NewPwd")"
-                           @bind="NewPassword" />
-                </div>
-                <div class="pwd-field-wrap">
-                    <i class="bi bi-check2-circle pwd-field-icon"></i>
-                    <input class="pwd-input"
-                           type="password"
-                           placeholder="@T("ConfirmPwd")"
-                           @bind="ConfirmPassword" />
-                </div>
-            </div>
+    <div class="pwd-field-wrap">
+        <i class="bi bi-lock pwd-field-icon"></i>
+        <input class="pwd-input"
+               type="@(showCurrent ? "text" : "password")"
+               placeholder="@T("CurrentPwd")"
+               @bind="CurrentPassword" />
+        <i class="bi @(showCurrent ? "bi-eye-slash" : "bi-eye") pwd-eye-icon"
+           @onclick="() => showCurrent = !showCurrent"></i>
+    </div>
+    <div class="pwd-field-wrap">
+        <i class="bi bi-key pwd-field-icon"></i>
+        <input class="pwd-input"
+               type="@(showNew ? "text" : "password")"
+               placeholder="@T("NewPwd")"
+               @bind="NewPassword" />
+        <i class="bi @(showNew ? "bi-eye-slash" : "bi-eye") pwd-eye-icon"
+           @onclick="() => showNew = !showNew"></i>
+    </div>
+    <div class="pwd-field-wrap">
+        <i class="bi bi-check2-circle pwd-field-icon"></i>
+        <input class="pwd-input"
+               type="@(showConfirm ? "text" : "password")"
+               placeholder="@T("ConfirmPwd")"
+               @bind="ConfirmPassword" />
+        <i class="bi @(showConfirm ? "bi-eye-slash" : "bi-eye") pwd-eye-icon"
+           @onclick="() => showConfirm = !showConfirm"></i>
+    </div>
+</div>
 
             <button class="btn-save mt-3"
-                    disabled="@busy"
-                    @onclick="ChangePassword">
+        disabled="@(busy || !_isReady)"
+        @onclick="ChangePassword">
                 @if (busy)
                 {
                     <span class="spinner-border spinner-border-sm me-2"></span>
@@ -205,12 +211,30 @@
     .btn-save:hover { background: #4d7c0f; }
     .btn-save:active { transform: scale(0.97); }
     .btn-save:disabled { background: #d1d5db; cursor: not-allowed; }
+    .pwd-eye-icon {
+    position: absolute;
+    right: 14px;
+    color: #94a3b8;
+    font-size: 15px;
+    cursor: pointer;
+    transition: color .2s;
+}
+
+.pwd-eye-icon:hover {
+    color: #65a30d;
+}
+
+/* เพิ่ม padding-right ให้ input ไม่ทับ icon */
+.pwd-input {
+    padding-right: 40px;
+}
 </style>
 
 @code {
     private bool IsEn;
     private bool _isAdmin;
-    
+    private bool _isReady = false;
+    private bool _hasChanged = false;
     private string CurrentPassword = "";
     private string NewPassword = "";
     private string ConfirmPassword = "";
@@ -218,7 +242,17 @@
     private bool busy;
     private string? msg;
     private string msgClass = "alert-info";
-
+    private bool showCurrent = false;
+private bool showNew = false;
+private bool showConfirm = false;
+ protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _isReady = true;
+            StateHasChanged();
+        }
+    }
     private static readonly Dictionary<string, Dictionary<string, string>> Text = new()
     {
         ["en"] = new()
@@ -316,9 +350,11 @@
 
     private async Task ChangePassword()
     {
+        // ✅ ป้องกัน double call
+        if (busy || _hasChanged) return;
+        
         msg = null;
 
-        // ✅ เช็คว่ากรอกครบ
         if (string.IsNullOrWhiteSpace(CurrentPassword) ||
             string.IsNullOrWhiteSpace(NewPassword) ||
             string.IsNullOrWhiteSpace(ConfirmPassword))
@@ -328,7 +364,6 @@
             return;
         }
 
-        // ✅ เช็ค password strength
         if (!IsPasswordStrong(NewPassword))
         {
             msg = T("PwdWeak");
@@ -336,7 +371,6 @@
             return;
         }
 
-        // ✅ เช็ค confirm match
         if (NewPassword != ConfirmPassword)
         {
             msg = T("PwdMismatch");
@@ -347,6 +381,8 @@
         try
         {
             busy = true;
+            _hasChanged = true; // ✅ lock ไม่ให้เรียกซ้ำ
+            StateHasChanged();
 
             var (ok, err) = await AccountService.ChangePasswordAsync(new ChangePasswordRequest
             {
@@ -364,11 +400,14 @@
             }
             else
             {
-                // ✅ แปลง 400 Bad Request เป็นข้อความที่อ่านง่าย
-                msg = (err != null && err.Contains("incorrect"))
-                    ? T("PwdWrongCurrent")
-                    : T("PwdFail");
-                msgClass = "alert-danger";
+               // ✅ เปลี่ยนจากเดิม
+    // msg = (err != null && err.Contains("incorrect"))
+    //     ? T("PwdWrongCurrent")
+    //     : T("PwdFail");
+    
+    // ✅ เป็นแบบนี้ — แสดง raw error จริง
+    msg = err ?? T("PwdFail");
+    msgClass = "alert-danger";
             }
         }
         catch
@@ -379,6 +418,7 @@
         finally
         {
             busy = false;
+            _hasChanged = false; // ✅ unlock หลังเสร็จ
         }
     }
 }

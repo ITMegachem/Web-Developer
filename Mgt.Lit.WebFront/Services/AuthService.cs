@@ -36,6 +36,7 @@ public class AuthService
         _authState.Token = result.Token;
 
         await _storage.SetAsync("authToken", result.Token);
+        await _storage.SetAsync("UserID", result.UserID);
         await _storage.SetAsync("fullName", result.FullName ?? string.Empty);
         await _storage.SetAsync("username", result.Username ?? string.Empty);
         await _storage.SetAsync("userRole", result.UserRole ?? string.Empty);
@@ -131,6 +132,8 @@ public class AuthService
 
         try
         {
+
+
             await _storage.DeleteAsync("authToken");
             await _storage.DeleteAsync("fullName");
             await _storage.DeleteAsync("username");

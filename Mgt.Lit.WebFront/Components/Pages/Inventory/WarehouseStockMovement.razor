@@ -295,15 +295,22 @@
     {
         get
         {
-            if (AuthState.Permission == null) return false;
+            var p = AuthState.Permission;
+            if (p == null) return false;
 
-            // ✅ เพิ่มการเช็ค CanViewCost
-            if (!AuthState.Permission.CanViewCost) return false;
+            // 🔒 Block user
+            if (new[] { 39, 55, 56, 57 }.Contains(p.UserID))
+                return false;
 
-            var role = AuthState.Permission.UserRole?.ToLower() ?? "";
-            var dept = AuthState.Permission.Department?.ToLower() ?? "";
-            if (dept == "sales" && role == "user") return false;
+            if (!p.CanViewCost) return false;
 
+            var role = p.UserRole?.ToLower();
+            var dept = p.Department?.ToLower();
+
+            if (dept == "sales" && role == "user")
+                return false;
+            Console.WriteLine($"UserID: {AuthState.Permission?.UserID}");
+            Console.WriteLine($"Type: {AuthState.Permission?.UserID.GetType()}");
             return true;
         }
     }

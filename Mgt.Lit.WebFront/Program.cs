@@ -57,7 +57,13 @@ builder.Services.AddHttpClient<NofReportService>(client =>
 // ✅ 3. AuthState ต้องมาก่อน AuthService (เพราะ AuthService inject AuthState)
 builder.Services.AddScoped<AuthState>();
 builder.Services.AddScoped<UiState>();
-builder.Services.AddScoped<ApiHttpClient>();
+//builder.Services.AddScoped<ApiHttpClient>();
+builder.Services.AddHttpClient<ApiHttpClient>(client =>
+{
+    client.BaseAddress = new Uri(apiBaseUrl);
+})
+.AddHttpMessageHandler<AuthTokenHandler>();
+
 builder.Services.AddScoped<IAccountService, AccountService>();
 
 // ❌ ลบออก — AddHttpClient<SalesOrderService> ลงทะเบียนแล้ว ห้าม AddScoped ซ้ำ

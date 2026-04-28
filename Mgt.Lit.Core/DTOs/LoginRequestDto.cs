@@ -11,6 +11,7 @@ namespace Mgt.Lit.Core.DTOs
     public class LoginResponseDto
     {
         public string Token { get; set; } = string.Empty;
+        public int UserID { get; set;}
         public string Username { get; set; } = string.Empty;
         public string FullName { get; set; } = string.Empty;
         public string UserRole { get; set; } = string.Empty;
@@ -25,6 +26,7 @@ namespace Mgt.Lit.Core.DTOs
 
     public class UserPermissionDto
     {
+        public int UserID { get; set; }
         public int CompanyID { get; set; }
         public string? Department { get; set; }
         public string UserRole { get; set; } = string.Empty;
