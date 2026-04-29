@@ -171,8 +171,8 @@ public class SapService
         return result;
     }
 
-    public async Task<List<(string SalesOrder, string Material, decimal? OrderQuantity, string RequestedQuantityUnit)>>
-    GetSalesOrderItemsAsync(List<string> salesOrders)
+    public async Task<List<(string SalesOrder, string Material, decimal? OrderQuantity, string RequestedQuantityUnit, string PurchaseOrderByCustomer)>>
+GetSalesOrderItemsAsync(List<string> salesOrders)
     {
         var baseUrl = _configuration["SapConfig:SalesOrder:BaseUrl"];
         var authHeader = _configuration["SapConfig:SalesOrder:AuthHeader"];
@@ -181,14 +181,14 @@ public class SapService
         client.DefaultRequestHeaders.Add("Authorization", authHeader);
         client.DefaultRequestHeaders.Add("Accept", "application/json");
 
-        var result = new List<(string, string, decimal?, string)>();
+        var result = new List<(string, string, decimal?, string, string)>();
 
         try
         {
             var soFilter = string.Join(" or ", salesOrders.Select(s => $"SalesOrder eq '{s}'"));
             var url = $"{baseUrl.TrimEnd('/')}/A_SalesOrderItem" +
                       $"?$filter={soFilter}" +
-                      $"&$select=SalesOrder,Material,RequestedQuantity,RequestedQuantityUnit" + // ✅ เพิ่ม
+                      $"&$select=SalesOrder,Material,RequestedQuantity,RequestedQuantityUnit,PurchaseOrderByCustomer" +
                       $"&$format=json";
 
             var response = await client.GetAsync(url);
@@ -217,8 +217,11 @@ public class SapService
                 var unit = item.TryGetProperty("RequestedQuantityUnit", out var uProp)
                     ? uProp.GetString() ?? "" : "";
 
+                var purchaseOrder = item.TryGetProperty("PurchaseOrderByCustomer", out var poProp)
+                    ? poProp.GetString() ?? "" : "";
+
                 if (!string.IsNullOrEmpty(so) && !string.IsNullOrEmpty(material))
-                    result.Add((so, material, qty, unit));
+                    result.Add((so, material, qty, unit, purchaseOrder));
             }
         }
         catch { }

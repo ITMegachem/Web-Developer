@@ -426,7 +426,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         if (!string.IsNullOrWhiteSpace(item.Material_Code) &&
                             materialDict.TryGetValue(item.Material_Code, out var info))
                         {
-                            
+                            Console.WriteLine($"[SAP] RefDoc={item.Ref_Doc} Plant={item.Plant} Customer={item.Customer_Code}");
                             item.MaterialGroupDescription = info.ProductGroup;
                             item.SalesGroup = info.SalesGroup;
                         }
@@ -461,60 +461,100 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         .Distinct()
                         .ToListAsync();
                     // ก่อน if (salesOrdersFromRefDocs.Any())
-                   
+
                     if (salesOrdersFromRefDocs.Any())
                     {
                         if (currentScope == DataScopes.Division)
                         {
-                            // ✅ Division: filter ด้วย allowedUsernames ใน division
-                            var allowedUsernames = await GetAllowedUsernamesAsync(permission, currentScope);
+                            var division = permission.Division?.Trim().ToUpper() ?? "";
 
                             ownRefDocs = (await _context.View_Sales_with_Op_SalesOrder
                                 .AsNoTracking()
-                                .Where(x => x.PartnerFunction == "Z2" &&
-                                            x.Customer != null &&
-                                            allowedUsernames.Contains(x.Customer.Trim().ToUpper()) &&
+                                .Where(x => x.SalesGroup != null &&
+                                            x.SalesGroup.Trim().ToUpper() == division &&
                                             x.SalesOrder != null &&
-                                            salesOrdersFromRefDocs.Contains(x.SalesOrder))
+                                            refDocs.Contains(x.SalesOrder))
                                 .Select(x => x.SalesOrder!)
                                 .Distinct()
                                 .ToListAsync())
                                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                        }
-                        else
-                        {
-                            // ✅ Own: filter ด้วย View_MGT_GLC_ALL_Sales ตาม scope
-                            var ownDocQuery = _context.View_MGT_GLC_ALL_Sales
+
+                            var billedDocs = await _context.View_MGT_GLC_ALL_Sales
                                 .AsNoTracking()
                                 .Where(x => x.SalesDocument != null &&
-                                            salesOrdersFromRefDocs.Contains(x.SalesDocument));
-
-                            ownDocQuery = ApplySalesPermission(ownDocQuery, permission);
-
-                            ownRefDocs = (await ownDocQuery
+                                            x.SalesGroup != null &&
+                                            x.SalesGroup.Trim().ToUpper() == division &&
+                                            refDocs.Contains(x.SalesDocument))
                                 .Select(x => x.SalesDocument!)
                                 .Distinct()
-                                .ToListAsync())
-                                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                                .ToListAsync();
 
-                            // fallback username สำหรับ Own
-                            var userMgtCode = permission.Username?.Trim();
-                            if (!string.IsNullOrWhiteSpace(userMgtCode))
+                            foreach (var doc in billedDocs)
+                                ownRefDocs.Add(doc);
+                        }
+                        else if (currentScope == DataScopes.Own)
+                        {
+                            var userFullName = permission.FullName?.Trim().ToUpper();
+                            var userUsername = permission.Username?.Trim().ToUpper();
+
+                            // ✅ Step 1: Billing แล้ว → FullName
+                            if (!string.IsNullOrWhiteSpace(userFullName))
                             {
-                                var ownOpDocs = await _context.View_Sales_with_Op_SalesOrder
+                                var billedDocs = await _context.View_MGT_GLC_ALL_Sales
+                                    .AsNoTracking()
+                                    .Where(x => x.SalesDocument != null &&
+                                                x.SalesEmployeeID != null &&
+                                                x.SalesEmployeeID.Trim().ToUpper() == userFullName &&
+                                                refDocs.Contains(x.SalesDocument))
+                                    .Select(x => x.SalesDocument!)
+                                    .Distinct()
+                                    .ToListAsync();
+
+                                foreach (var doc in billedDocs)
+                                    ownRefDocs.Add(doc);
+                            }
+
+                            // ✅ Step 2: ยังไม่ Billing → Username
+                            if (!string.IsNullOrWhiteSpace(userUsername))
+                            {
+                                var opDocs = await _context.View_Sales_with_Op_SalesOrder
                                     .AsNoTracking()
                                     .Where(x => x.PartnerFunction == "Z2" &&
                                                 x.Customer != null &&
-                                                x.Customer.Trim().ToUpper() == userMgtCode.ToUpper() &&
+                                                x.Customer.Trim().ToUpper() == userUsername &&
                                                 x.SalesOrder != null &&
                                                 refDocs.Contains(x.SalesOrder))
                                     .Select(x => x.SalesOrder!)
                                     .Distinct()
                                     .ToListAsync();
 
-                                foreach (var doc in ownOpDocs)
+                                foreach (var doc in opDocs)
                                     ownRefDocs.Add(doc);
                             }
+
+                            // ✅ Step 3: ใช้ Op_SalesOrders เทียบ SalesGroup กับ Division ของ user
+                            var userDivision = permission.Division?.Trim().ToUpper() ?? "";
+
+                            if (!string.IsNullOrWhiteSpace(userDivision))
+                            {
+                                var opSoDocs = await _context.Op_SalesOrders
+                                    .AsNoTracking()
+                                    .Where(x => x.SalesGroup != null &&
+                                                x.SalesGroup.Trim().ToUpper() == userDivision &&
+                                                x.SalesOrder != null &&
+                                                refDocs.Contains(x.SalesOrder))
+                                    .Select(x => x.SalesOrder!)
+                                    .Distinct()
+                                    .ToListAsync();
+
+                                Console.WriteLine($"[OWN] Op_SalesOrders matched={string.Join(",", opSoDocs)}");
+
+                                foreach (var doc in opSoDocs)
+                                    ownRefDocs.Add(doc);
+                            }
+
+
+                            Console.WriteLine($"[OWN] ownRefDocs.Count={ownRefDocs.Count}");
                         }
                     }
 
@@ -634,9 +674,12 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         var refDoc = item.Ref_Doc?.Trim() ?? "";
                         if (string.IsNullOrWhiteSpace(refDoc)) continue;
 
-                        bool canViewCustomer = currentScope == DataScopes.CrossCompany ||
-                        currentScope == DataScopes.Company ||
-                        (permission.CanViewCustomer && ownRefDocs.Contains(refDoc));
+                        bool canViewCustomer =
+    currentScope == DataScopes.CrossCompany ||
+    currentScope == DataScopes.Company ||
+    // ✅ Division — เห็นทุก SO ใน BU ตัวเอง ไม่ต้องเช็ค CanViewCustomer
+    (currentScope == DataScopes.Division && ownRefDocs.Contains(refDoc)) ||
+    (currentScope == DataScopes.Own && ownRefDocs.Contains(refDoc));
                         if (opSalesLookup.TryGetValue(refDoc, out var opSales))
                         {
                             var soldTo = opSales.SoldToParty?.Trim() ?? "";
@@ -689,19 +732,35 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         item.Vendor_Name = null;
                     }
 
-                // ── CanViewCustomer ────────────────────────────────────────────────────
+                Console.WriteLine($"[OWN] ownRefDocs contains 1OR0004143: {ownRefDocs.Contains("1OR0004143")}");
+                Console.WriteLine($"[OWN] ownRefDocs contains 1OR0004142: {ownRefDocs.Contains("1OR0004142")}");
+                Console.WriteLine($"[OWN] ownRefDocs contains 1OR0004145: {ownRefDocs.Contains("1OR0004145")}");
+
+                // และเช็ค canViewCustomer
+                foreach (var item in mergedSapData._Detail)
+                {
+                    var refDoc = item.Ref_Doc?.Trim() ?? "";
+                    Console.WriteLine($"[CHECK] RefDoc={refDoc} inOwnRefDocs={ownRefDocs.Contains(refDoc)} canView=?");
+                }
+                // ── CanViewCustomer ────────────────────────────────────────────────
                 if (!permission.CanViewCustomer)
                 {
                     var dept = permission.Department?.ToLower() ?? "";
-                    foreach (var item in mergedSapData._Detail)
-                    {
-                        item.Customer_Name = null;
-                        item.IndustryCode = null;
-                        //item.IndustryName = null;
 
-                        // ✅ Purchase เห็น Code, Sales ไม่เห็น Code
-                        if (dept != "purchase")
-                            item.Customer_Code = null;
+                    // ✅ Admin (CrossCompany) และ Manager (Company) ไม่ต้อง hide
+                    var skipHide = currentScope == DataScopes.CrossCompany
+                               || currentScope == DataScopes.Company;
+
+                    if (!skipHide)
+                    {
+                        foreach (var item in mergedSapData._Detail)
+                        {
+                            item.Customer_Name = null;
+                            item.IndustryCode = null;
+
+                            if (dept != "purchase")
+                                item.Customer_Code = null;
+                        }
                     }
                 }
 
@@ -1541,6 +1600,11 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 // Step 5: ดึง MaterialName
                 // Step 5b: ย้ายขึ้นมาก่อน เพื่อให้ได้ sapItemList
                 var sapItemList = await _sapService.GetSalesOrderItemsAsync(soNumbers);
+                foreach (var item in sapItemList)
+                {
+                    Console.WriteLine($"[SAP ITEM] SO={item.SalesOrder} Material={item.Material} Qty={item.OrderQuantity}");
+                }
+                Console.WriteLine($"[SAP ITEM] Total={sapItemList.Count}");
 
                 // Step 5: รวม material codes จากทั้ง 2 แหล่ง
                 var materialCodes = viewData.Select(x => x.Material)
@@ -1632,71 +1696,67 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     : null;
 
                 // Step 6: รวมข้อมูล
+                // Step 6: รวมข้อมูล — flatten SO × Items
                 var items = soList
                     .Where(so => allowedSalesOrderNumbers == null ||
                                  allowedSalesOrderNumbers.Contains(so.SalesOrder))
-                    .Select(so =>
+                    .SelectMany(so =>
                     {
-                        var view = viewData.FirstOrDefault(v => v.SalesDocument == so.SalesOrder);
+                        var view = viewData.Where(v => v.SalesDocument == so.SalesOrder).ToList();
                         var soldTo = mappingSoldTo.FirstOrDefault(m => m.SalesOrder == so.SalesOrder);
                         var shipTo = mappingShipTo.FirstOrDefault(m => m.SalesOrder == so.SalesOrder);
                         var z2 = z2Partners.FirstOrDefault(p => p.SalesOrder == so.SalesOrder);
                         var user = users.FirstOrDefault(u => u.Username == z2?.Customer);
-                        var sapItem = sapItemList.FirstOrDefault(s => s.SalesOrder == so.SalesOrder);
 
-                        var material = view?.Material ?? sapItem.Material ?? "";
-                        var materialName = "";
-                        decimal? orderQuantity = sapItem.OrderQuantity;
-                        string requestedQuantityUnit = sapItem.RequestedQuantityUnit ?? "";
+                        // ✅ ดึง SAP items ทั้งหมดของ SO นี้ (ไม่ใช่ FirstOrDefault)
+                        var sapItems = sapItemList.Where(s => s.SalesOrder == so.SalesOrder).ToList();
 
-                        if (!string.IsNullOrEmpty(material))
+                        // ✅ ถ้ามี SAP items → ใช้ SAP items เป็น basis
+                        var sourceItems = sapItems.Any()
+    ? sapItems
+    : new List<(string SalesOrder, string Material, decimal? OrderQuantity, string RequestedQuantityUnit, string PurchaseOrderByCustomer)>
+      { (so.SalesOrder, "", null, "", "") };
+
+                        return sourceItems.Select(sapItem =>
                         {
-                            // ✅ ลอง materialDict (View_MaterialStock_WeightKG) ก่อน
-                            if (!materialDict.TryGetValue(material, out materialName)
-                                || string.IsNullOrEmpty(materialName))
-                            {
-                                // ✅ fallback → sapMaterialDict
-                                if (!sapMaterialDict.TryGetValue(material, out materialName)
-                                    || string.IsNullOrEmpty(materialName))
-                                {
-                                    // ✅ fallback สุดท้าย → MaterialName จาก View_MGT_GLC_ALL_Sales
-                                    materialName = view?.MaterialName ?? "";
-                                }
-                            }
-                        }
-                        else
-                        {
-                            // ✅ ถ้า view ไม่มี Material → ลองจาก SAP
-                            material = sapItem.Material ?? "";
+                            // ✅ หา view ที่ตรง material ด้วย (ถ้ามี billing แล้ว)
+                            var matchedView = view.FirstOrDefault(v => v.Material == sapItem.Material)
+                                              ?? view.FirstOrDefault();
+
+                            var material = matchedView?.Material ?? sapItem.Material ?? "";
+                            string materialName = "";
+
                             if (!string.IsNullOrEmpty(material))
                             {
-                                if (!sapMaterialDict.TryGetValue(material, out materialName)
+                                if (!materialDict.TryGetValue(material, out materialName!)
                                     || string.IsNullOrEmpty(materialName))
-                                    materialName = "";
+                                    materialName = matchedView?.MaterialName ?? "";
                             }
-                        }
-                        
 
-                        return new
-                        {
-                            SalesOrderDocument = so.SalesOrder,
-                            DocDate = so.SalesOrderDate,
-                            DeliveryDate = so.RequestedDeliveryDate,
-                            BillingDocument = view?.BillingDocument ?? "",
-                            BillingDocumentDate = view?.BillingDocumentDate,
-                            SoldToParty = view?.SoldToParty ?? so.SoldToParty ?? "",
-                            SoldToName = view?.SoldToName ?? soldTo?.FullName ?? "",
-                            SoldToAddress = view?.SoldToAddress ?? soldTo?.Address ?? "",
-                            ShiptoCode = view?.ShiptoCode ?? shipTo?.Customer ?? "",
-                            ShipToName = view?.ShipToName ?? shipTo?.FullName ?? "",
-                            ShipToAddress = view?.ShipToAddress ?? shipTo?.Address ?? "",
-                            Material = material,
-                            MaterialName = materialName ?? "",
-                            SalesEmployee = user?.FullName ?? z2?.Customer ?? "",
-                            PurchaseOrderByCustomer = z2?.PurchaseOrderByCustomer ?? "",
-                            OrderQuantity = orderQuantity,
-                            RequestedQuantityUnit = requestedQuantityUnit
-                        };
+                            return new
+                            {
+                                SalesOrderDocument = so.SalesOrder,
+                                DocDate = so.SalesOrderDate,
+                                DeliveryDate = so.RequestedDeliveryDate,
+                                BillingDocument = matchedView?.BillingDocument ?? "",
+                                BillingDocumentDate = matchedView?.BillingDocumentDate,
+                                SoldToParty = matchedView?.SoldToParty ?? so.SoldToParty ?? "",
+                                SoldToName = matchedView?.SoldToName ?? soldTo?.FullName ?? "",
+                                SoldToAddress = matchedView?.SoldToAddress ?? soldTo?.Address ?? "",
+                                ShiptoCode = matchedView?.ShiptoCode ?? shipTo?.Customer ?? "",
+                                ShipToName = matchedView?.ShipToName ?? shipTo?.FullName ?? "",
+                                ShipToAddress = matchedView?.ShipToAddress ?? shipTo?.Address ?? "",
+                                Material = material,
+                                MaterialName = materialName ?? "",
+                                SalesEmployee = user?.FullName ?? z2?.Customer ?? "",
+                                // ✅ ดึงจาก SAP item ก่อน fallback ไป z2Partners
+                                PurchaseOrderByCustomer = !string.IsNullOrEmpty(sapItem.PurchaseOrderByCustomer)
+                                 ? sapItem.PurchaseOrderByCustomer
+                                 : z2?.PurchaseOrderByCustomer ?? "",
+                                OrderQuantity = sapItem.OrderQuantity,
+                                RequestedQuantityUnit = sapItem.RequestedQuantityUnit ?? ""
+                            };
+                        });
                     }).ToList();
 
                 // ✅ filter ออกถ้าไม่มี Material (SAP ไม่มีข้อมูล)
@@ -1705,18 +1765,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     .ToList();
 
                 // ✅ เพิ่ม — filter ออกถ้า SAP ไม่มี item เลย (results: [])
-                var soWithSapItems = sapItemList
-                    .Where(x => !string.IsNullOrWhiteSpace(x.Material))
-                    .Select(x => x.SalesOrder)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                // ✅ เก็บเฉพาะ SO ที่มีข้อมูลใน View (Billing) หรือมี SAP item
-                items = items
-                    .Where(x =>
-                        viewData.Any(v => v.SalesDocument == x.SalesOrderDocument &&
-                                          !string.IsNullOrWhiteSpace(v.Material)) ||
-                        soWithSapItems.Contains(x.SalesOrderDocument))
-                    .ToList();
+                Console.WriteLine($"[ITEMS FINAL] Count={items.Count}");
                 if (!string.IsNullOrWhiteSpace(request.Material))
                 {
                     var matKeyword = request.Material.Trim().ToUpper();

@@ -65,4 +65,5 @@ namespace Mgt.Lit.Core.DTOs
         public decimal? QuantityKG { get; set; }
         public decimal? NetWeight { get; set; }
     }
+    
 }

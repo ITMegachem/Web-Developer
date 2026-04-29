@@ -106,6 +106,6 @@ namespace Mgt.Lit.Core.Data
         public DbSet<Op_SalesOrder> Op_SalesOrders { get; set; }
         public DbSet<Ms_CustomerGroup> Ms_CustomerGroups { get; set; }
         public DbSet<Ms_ProductDescription> Ms_ProductDescription { get; set; }
-
+        
     }
 }
