@@ -32,22 +32,30 @@
 
                 <div class="autocomplete-wrapper">
 
-                    <div class="form-control modern-input"
-                         style="background:#fff0f0; border: 2px solid #dc3545; color:#dc3545; min-height:38px;">
-                        @if (!string.IsNullOrWhiteSpace(selectedMaterialName))
-                        {
-                            @selectedMaterialName
-                        }
-                        @* ✅ fallback จาก stockData ถ้า selectedMaterialName ว่าง *@
-                        else if (!string.IsNullOrWhiteSpace(stockData?.Detail?.FirstOrDefault()?.MaterialDescription))
-                        {
-                            @stockData.Detail.First().MaterialDescription
-                        }
-                        else
-                        {
-                            <span class="text-muted">description material</span>
-                        }
-                    </div>
+                    <input class="form-control modern-input"
+                           value="@materialSearch"
+                           @oninput="OnMaterialSearch"
+                           @onfocus="OnMaterialFocus"
+                           @onblur="OnMaterialBlur"
+                           placeholder="Choose Material..." />
+
+                    @if (materialResults.Any() && showMaterialDropdown)
+                    {
+                        <div class="autocomplete-dropdown-card">
+                            @foreach (var item in materialResults)
+                            {
+                                <div class="autocomplete-row"
+                                     @onclick="() => SelectMaterial(item)">
+
+                                    <div class="code">@item.Code</div>
+                                    <div class="name">@item.Name</div>
+
+                                </div>
+                            }
+                        </div>
+                    }
+
+                </div>
             </div>
             <div class="col-12 col-md-4">
                 <label class="modern-label">Material Description</label>

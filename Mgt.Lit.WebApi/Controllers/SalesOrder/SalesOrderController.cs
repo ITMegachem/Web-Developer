@@ -406,7 +406,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         materialQuery = materialQuery.Where(x => x.SalesOrganization == salesOrg);
 
                     var materialInfo = await materialQuery
-                        .Select(x => new { x.Material,  x.ProductGroup, x.SalesGroup })
+                        .Select(x => new { x.Material, x.ProductGroup, x.SalesGroup })
                         .Distinct()
                         .ToListAsync();
 
@@ -414,7 +414,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         .GroupBy(x => x.Material)
                         .ToDictionary(g => g.Key, g => new
                         {
-                            
+
                             g.First().ProductGroup,
                             SalesGroup = string.Join(", ",
                                 g.Where(x => !string.IsNullOrWhiteSpace(x.SalesGroup))
@@ -514,7 +514,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                                     ownRefDocs.Add(doc);
                             }
 
-                            // ✅ Step 2: ยังไม่ Billing → Username
+                            // ✅ Step 2: ยังไม่ Billing → Username ตรงๆ
                             if (!string.IsNullOrWhiteSpace(userUsername))
                             {
                                 var opDocs = await _context.View_Sales_with_Op_SalesOrder
@@ -532,27 +532,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                                     ownRefDocs.Add(doc);
                             }
 
-                            // ✅ Step 3: ใช้ Op_SalesOrders เทียบ SalesGroup กับ Division ของ user
-                            var userDivision = permission.Division?.Trim().ToUpper() ?? "";
-
-                            if (!string.IsNullOrWhiteSpace(userDivision))
-                            {
-                                var opSoDocs = await _context.Op_SalesOrders
-                                    .AsNoTracking()
-                                    .Where(x => x.SalesGroup != null &&
-                                                x.SalesGroup.Trim().ToUpper() == userDivision &&
-                                                x.SalesOrder != null &&
-                                                refDocs.Contains(x.SalesOrder))
-                                    .Select(x => x.SalesOrder!)
-                                    .Distinct()
-                                    .ToListAsync();
-
-                                Console.WriteLine($"[OWN] Op_SalesOrders matched={string.Join(",", opSoDocs)}");
-
-                                foreach (var doc in opSoDocs)
-                                    ownRefDocs.Add(doc);
-                            }
-
+                            // ✅ ลบ Step 3 (Op_SalesOrders SalesGroup) ออกเพราะทำให้เห็นทั้ง BU
 
                             Console.WriteLine($"[OWN] ownRefDocs.Count={ownRefDocs.Count}");
                         }
