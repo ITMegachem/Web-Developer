@@ -494,51 +494,52 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         }
                         else if (currentScope == DataScopes.Own)
                         {
-                            var userFullName = permission.FullName?.Trim().ToUpper();
                             var userUsername = permission.Username?.Trim().ToUpper();
 
-                            // ✅ Step 1: Billing แล้ว → FullName
-                            if (!string.IsNullOrWhiteSpace(userFullName))
-                            {
-                                var billedDocs = await _context.View_MGT_GLC_ALL_Sales
-                                    .AsNoTracking()
-                                    .Where(x => x.SalesDocument != null &&
-                                                x.SalesEmployeeID != null &&
-                                                x.SalesEmployeeID.Trim().ToUpper() == userFullName &&
-                                                refDocs.Contains(x.SalesDocument))
-                                    .Select(x => x.SalesDocument!)
-                                    .Distinct()
-                                    .ToListAsync();
+                            // ❌ ลบ Step 1 (View_MGT_GLC_ALL_Sales historical)
+                            // ❌ ลบ Step 2 (Z2 Username จาก View_Sales_with_Op_SalesOrder ข้อมูลเก่า)
 
-                                foreach (var doc in billedDocs)
-                                    ownRefDocs.Add(doc);
-                            }
-
-                            // ✅ Step 2: ยังไม่ Billing → Username ตรงๆ
+                            // ✅ Step 3 เท่านั้น: Customer Master ปัจจุบัน
                             if (!string.IsNullOrWhiteSpace(userUsername))
                             {
-                                var opDocs = await _context.View_Sales_with_Op_SalesOrder
-                                    .AsNoTracking()
-                                    .Where(x => x.PartnerFunction == "Z2" &&
-                                                x.Customer != null &&
-                                                x.Customer.Trim().ToUpper() == userUsername &&
-                                                x.SalesOrder != null &&
-                                                refDocs.Contains(x.SalesOrder))
-                                    .Select(x => x.SalesOrder!)
+                                var sapCustomerCodes = mergedSapData._Detail
+                                    .Where(x => !string.IsNullOrWhiteSpace(x.Customer_Code))
+                                    .Select(x => x.Customer_Code!.Trim())
                                     .Distinct()
-                                    .ToListAsync();
+                                    .ToList();
 
-                                foreach (var doc in opDocs)
-                                    ownRefDocs.Add(doc);
+                                if (sapCustomerCodes.Any())
+                                {
+                                    var myCustomerMaster = await _context.Ms_BusinessPartnerCustSalesPartnerFunc
+                                        .AsNoTracking()
+                                        .Where(x => x.PartnerFunction == "Z2" &&
+                                                    x.BPCustomerNumber != null &&
+                                                    x.BPCustomerNumber.Trim().ToUpper() == userUsername &&
+                                                    x.Customer != null &&
+                                                    sapCustomerCodes.Contains(x.Customer.Trim()))
+                                        .Select(x => x.Customer!.Trim())
+                                        .Distinct()
+                                        .ToListAsync();
+
+                                    Console.WriteLine($"[OWN] CustomerMaster={string.Join(",", myCustomerMaster)}");
+
+                                    foreach (var item in mergedSapData._Detail)
+                                    {
+                                        if (!string.IsNullOrWhiteSpace(item.Ref_Doc) &&
+                                            !string.IsNullOrWhiteSpace(item.Customer_Code) &&
+                                            myCustomerMaster.Contains(item.Customer_Code.Trim()))
+                                        {
+                                            ownRefDocs.Add(item.Ref_Doc.Trim());
+                                            Console.WriteLine($"[OWN] Added: {item.Ref_Doc} Customer={item.Customer_Code}");
+                                        }
+                                    }
+                                }
                             }
-
-                            // ✅ ลบ Step 3 (Op_SalesOrders SalesGroup) ออกเพราะทำให้เห็นทั้ง BU
 
                             Console.WriteLine($"[OWN] ownRefDocs.Count={ownRefDocs.Count}");
                         }
                     }
-
-                    Console.WriteLine($"[DEBUG] ownRefDocs.Count={ownRefDocs.Count}");
+                       
                 }
 
                 if (refDocs.Any())
@@ -712,10 +713,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         item.Vendor_Name = null;
                     }
 
-                Console.WriteLine($"[OWN] ownRefDocs contains 1OR0004143: {ownRefDocs.Contains("1OR0004143")}");
-                Console.WriteLine($"[OWN] ownRefDocs contains 1OR0004142: {ownRefDocs.Contains("1OR0004142")}");
-                Console.WriteLine($"[OWN] ownRefDocs contains 1OR0004145: {ownRefDocs.Contains("1OR0004145")}");
-
+               
                 // และเช็ค canViewCustomer
                 foreach (var item in mergedSapData._Detail)
                 {
@@ -890,35 +888,30 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             if (string.IsNullOrWhiteSpace(keyword) || keyword.Length < 2)
                 return Ok(new List<object>());
 
-            // ✅ ทุก scope ค้นหาได้ทั้งหมดใน SalesOrg ของตัวเอง
+            var likeStart = $"{keyword}%";
+            var likeAny = $"%{keyword}%";
+            _context.Database.SetCommandTimeout(60);
+
+            // ── Source 1: View_MGT_GLC_ALL_Sales ────────────────────────────────────
             var query = _context.View_MGT_GLC_ALL_Sales
                 .AsNoTracking()
                 .Where(x => x.Material != null);
 
             var scope = ResolveScope(permission);
-            if (scope == DataScopes.CrossCompany)
+            if (scope != DataScopes.CrossCompany)
             {
-                // ไม่ filter
-            }
-            else
-            {
-                // ✅ filter แค่ SalesOrg ของตัวเอง แต่ไม่ filter ตาม employee
                 query = query.Where(x => x.SalesOrganization ==
                           NormalizeKey(permission.SalesOrganizationCode));
             }
 
-            var likeStart = $"{keyword}%";
-            var likeAny = $"%{keyword}%";
-            _context.Database.SetCommandTimeout(60);
-
-            var items = await query
+            var salesItems = await query
                 .Where(x =>
                     EF.Functions.Like(x.Material, likeAny) ||
                     EF.Functions.Like(x.MaterialName, likeAny))
                 .Select(x => new
                 {
-                    Code = x.Material,
-                    Name = x.MaterialName,
+                    Code = x.Material!,
+                    Name = x.MaterialName ?? "",
                     Priority = EF.Functions.Like(x.Material, likeStart) ? 0
                              : EF.Functions.Like(x.MaterialName, likeStart) ? 1
                              : 2
@@ -930,7 +923,59 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 .Select(x => new { x.Code, x.Name })
                 .ToListAsync();
 
-            return Ok(items);
+            // ── Source 2: Ms_ProductDescription (fallback / supplement) ─────────────
+            var productDescItems = await _context.Ms_ProductDescription
+                .AsNoTracking()
+                .Where(x => x.Product != null && x.Language == "EN" &&
+                            (EF.Functions.Like(x.Product, likeAny) ||
+                             EF.Functions.Like(x.ProductDescription, likeAny)))
+                .Select(x => new { Code = x.Product!, Name = x.ProductDescription ?? "" })
+                .Take(30)
+                .ToListAsync();
+
+            // ── Merge: prefer salesItems, supplement with productDescItems ───────────
+            var existingCodes = salesItems
+                .Select(x => x.Code.Trim().ToUpperInvariant())
+                .ToHashSet();
+
+            var merged = salesItems
+                .Concat(productDescItems
+                    .Where(x => !existingCodes.Contains(x.Code.Trim().ToUpperInvariant())))
+                .OrderBy(x => x.Code.StartsWith(keyword, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(x => x.Code)
+                .Take(20)
+                .Select(x => new { x.Code, x.Name })
+                .ToList();
+
+            return Ok(merged);
+        }
+        [HttpGet("MaterialDescription")]
+        public async Task<IActionResult> GetMaterialDescription([FromQuery] string code)
+        {
+            var permission = await GetCurrentPermissionAsync();
+            if (permission == null) return Unauthorized();
+
+            code = code?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(code)) return Ok(new { description = "" });
+
+            // Try View_MGT_GLC_ALL_Sales first
+            var fromSales = await _context.View_MGT_GLC_ALL_Sales
+                .AsNoTracking()
+                .Where(x => x.Material == code)
+                .Select(x => x.MaterialName)
+                .FirstOrDefaultAsync();
+
+            if (!string.IsNullOrWhiteSpace(fromSales))
+                return Ok(new { description = fromSales });
+
+            // Fallback: Ms_ProductDescription
+            var fromDesc = await _context.Ms_ProductDescription
+                .AsNoTracking()
+                .Where(x => x.Product == code && x.Language == "EN")
+                .Select(x => x.ProductDescription)
+                .FirstOrDefaultAsync();
+
+            return Ok(new { description = fromDesc ?? "" });
         }
         [Authorize]
         [HttpPost("nofreport")]
@@ -1594,7 +1639,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     .Where(x => !string.IsNullOrWhiteSpace(x.Material))
                     .Select(x => x.Material!).Distinct().ToList();
 
-                // ✅ ใช้ allMaterialCodes query แทน materialCodes
+                
                 var allMaterialCodes = materialCodes.Union(sapMaterialCodesForDesc).Distinct().ToList();
 
                 var materialDict = new Dictionary<string, string>();
@@ -1611,12 +1656,12 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         .Where(x => x.Material != null)
                         .ToDictionary(x => x.Material!, x => x.MaterialDescription ?? "");
 
-                    // ✅ Fallback: View_MGT_GLC_ALL_Sales สำหรับที่ยังหาไม่เจอ
+                    
                     var missing = allMaterialCodes
                         .Where(m => !string.IsNullOrEmpty(m) && !materialDict.ContainsKey(m!))
                         .ToList();
 
-                    // ✅ เพิ่ม fallback จาก View_MaterialStock_WeightKG ก่อน
+                    
                     if (missing.Any())
                     {
                         var weightFallback = await _context.View_MaterialStock_WeightKG
@@ -1629,17 +1674,16 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                             if (!string.IsNullOrEmpty(f.Material) && !materialDict.ContainsKey(f.Material))
                                 materialDict[f.Material] = f.MaterialDescription ?? "";
 
-                        // ✅ ยังขาดอยู่ → ลอง View_MGT_GLC_ALL_Sales (ไม่ filter scope)
-                        // ✅ ยังขาดอยู่ → ลอง Ms_ProductDescription (ไม่มี scope filter)
+                        
                         var stillMissing = missing.Where(m => !materialDict.ContainsKey(m!)).ToList();
                         if (stillMissing.Any())
                         {
-                            // ✅ ลอง Ms_ProductDescription ก่อน
+                            
                             var productDescFallback = await _context.Ms_ProductDescription
                                 .AsNoTracking()
                                 .Where(x => x.Product != null &&
                                             stillMissing.Contains(x.Product) &&
-                                            x.Language == "EN")  // ✅ เอาเฉพาะ English
+                                            x.Language == "EN")  
                                 .Select(x => new { Product = x.Product, Description = x.ProductDescription })
                                 .ToListAsync();
 
@@ -1647,7 +1691,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                                 if (!string.IsNullOrEmpty(f.Product) && !materialDict.ContainsKey(f.Product))
                                     materialDict[f.Product] = f.Description ?? "";
 
-                            // ✅ ยังขาดอยู่ → ลอง View_MGT_GLC_ALL_Sales (ไม่ filter scope)
+                            
                             var stillMissing2 = stillMissing.Where(m => !materialDict.ContainsKey(m!)).ToList();
                             if (stillMissing2.Any())
                             {

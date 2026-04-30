@@ -475,16 +475,14 @@
 
         if (!string.IsNullOrWhiteSpace(selectedMaterial))
         {
-            // ✅ เลือกจาก dropdown แล้ว → ใช้ได้เลย
+            // เลือกจาก dropdown แล้ว
         }
         else if (_lastSelectedMaterial != null)
         {
-            // ✅ cache ยังอยู่ → restore
             SelectMaterial(_lastSelectedMaterial);
         }
         else
         {
-            // ✅ พิมพ์ค้าง → exact match จาก results ก่อน
             var matched = materialResults.FirstOrDefault(x =>
                 x.Code.Equals(input, StringComparison.OrdinalIgnoreCase));
 
@@ -494,15 +492,22 @@
             }
             else
             {
-                // ✅ ใช้ค่าที่พิมพ์ตรงๆ ไม่บังคับเลือก
                 selectedMaterial = input.Contains(' ') ? input[..input.IndexOf(' ')] : input;
                 materialSearch = selectedMaterial;
             }
         }
 
+        // ✅ ถ้า selectedMaterialName ยังว่าง → fetch จาก API
+        if (string.IsNullOrWhiteSpace(selectedMaterialName) &&
+            !string.IsNullOrWhiteSpace(selectedMaterial))
+        {
+            selectedMaterialName = await StockService
+                .GetMaterialDescriptionAsync(selectedMaterial);
+        }
+
         materialResults.Clear();
 
-        await InvokeAsync(StateHasChanged); // ✅ ปิด dropdown ก่อน load
+        await InvokeAsync(StateHasChanged);
         await LoadData();
     }
     private async Task ExportData()

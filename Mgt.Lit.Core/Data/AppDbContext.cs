@@ -18,7 +18,7 @@ namespace Mgt.Lit.Core.Data
         // 📊 View สำหรับรายงานการขาย
         public DbSet<View_MGT_GLC_ALL_Sales> View_MGT_GLC_ALL_Sales { get; set; }
         public DbSet<View_MaterialStock_WeightKG> View_MaterialStock_WeightKG { get; set; }
-
+        public DbSet<Ms_BusinessPartnerCustSalesPartnerFunc> Ms_BusinessPartnerCustSalesPartnerFunc { get; set; }
         public DbSet<View_UserPermission> View_UserPermissions { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -28,7 +28,9 @@ namespace Mgt.Lit.Core.Data
                 entity.HasNoKey();
                 entity.ToView("View_UserPermission");
             });
-
+            modelBuilder.Entity<Ms_BusinessPartnerCustSalesPartnerFunc>()
+    .ToTable("Ms_BusinessPartnerCustSalesPartnerFunc")
+    .HasKey(x => x.Id);
             // 🔍 1. จัดการ View (เนื่องจากไม่มี Primary Key และต้องการ Query อย่างเดียว)
             modelBuilder.Entity<View_MGT_GLC_ALL_Sales>(entity =>
             {

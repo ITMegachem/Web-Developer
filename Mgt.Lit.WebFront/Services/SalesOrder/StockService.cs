@@ -113,6 +113,34 @@ public sealed class StockService
 
         return request;
     }
+    public async Task<string> GetMaterialDescriptionAsync(
+    string code,
+    CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticated();
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"api/MGT_SalesOrder/MaterialDescription?code={Uri.EscapeDataString(code)}");
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", _auth.Token);
+
+        using var response = await _http.SendAsync(request, cancellationToken);
+
+        if (!response.IsSuccessStatusCode) return "";
+
+        var result = await response.Content
+            .ReadFromJsonAsync<MaterialDescriptionResult>(JsonOptions, cancellationToken);
+
+        return result?.Description ?? "";
+    }
+
+    private sealed class MaterialDescriptionResult
+    {
+        [JsonPropertyName("description")]
+        public string Description { get; set; } = "";
+    }
 
     private void EnsureAuthenticated()
     {
