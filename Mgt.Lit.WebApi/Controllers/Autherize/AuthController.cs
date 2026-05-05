@@ -8,6 +8,7 @@ using Mgt.Lit.WebApi.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration.UserSecrets;
 using System;
 using System.IdentityModel.Tokens.Jwt;
@@ -44,7 +45,8 @@ namespace Mgt.Lit.WebApi.Controllers
 
             user.TokenVersion = Guid.NewGuid().ToString();
             await _context.SaveChangesAsync();
-
+            var cache = HttpContext.RequestServices.GetRequiredService<IMemoryCache>();
+            cache.Remove($"tv_{user.Username}");
             var companies = await (
                 from uc in _context.MsUserCompanies
                 join c in _context.MsCompanies on uc.CompanyID equals c.CompanyID
@@ -233,6 +235,86 @@ namespace Mgt.Lit.WebApi.Controllers
             await _context.SaveChangesAsync(); // ✅ ไม่ update TokenVersion
 
             return Ok(new { message = "Password updated" });
+        }
+        // AuthController.cs — เพิ่ม endpoint ใหม่
+        [HttpPost("refresh-explicit")]
+        public async Task<IActionResult> RefreshExplicit([FromBody] RefreshExplicitRequest dto)
+        {
+            if (string.IsNullOrWhiteSpace(dto.RefreshToken))
+                return Unauthorized();
+
+            var stored = await _context.RefreshTokens
+                .Include(r => r.User)
+                .FirstOrDefaultAsync(r =>
+                    r.Token == dto.RefreshToken &&
+                    !r.IsRevoked &&
+                    r.ExpiresAt > DateTime.UtcNow);
+
+            if (stored == null)
+                return Unauthorized();
+
+            var user = stored.User;
+            var currentCompanyId = stored.CurrentCompanyID;
+
+            if (currentCompanyId == null)
+            {
+                currentCompanyId = await _context.MsUserCompanies
+                    .Where(x => x.UserID == user.UserID && x.IsPrimary)
+                    .Select(x => (int?)x.CompanyID)
+                    .FirstOrDefaultAsync();
+            }
+
+            stored.LastUsedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            var userCompanies = await (
+                from uc in _context.MsUserCompanies
+                join c in _context.MsCompanies on uc.CompanyID equals c.CompanyID
+                where uc.UserID == user.UserID
+                select new UserCompanyDto
+                {
+                    CompanyID = uc.CompanyID,
+                    CompanyCode = c.CompanyCode,
+                    CompanyName = c.CompanyName,
+                    IsPrimary = uc.IsPrimary
+                }
+            ).ToListAsync();
+
+            var primaryCode = userCompanies
+                .FirstOrDefault(x => x.CompanyID == currentCompanyId)?.CompanyCode;
+
+            View_UserPermission? permission = null;
+            if (currentCompanyId != null)
+            {
+                permission = await _context.View_UserPermissions
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x =>
+                        x.UserID == user.UserID &&
+                        x.CompanyID == currentCompanyId);
+            }
+
+            var newAccessToken = JwtHelper.GenerateToken(
+                user, _config, currentCompanyId,
+                primaryCompanyCode: primaryCode,
+                allCompanies: userCompanies,
+                permission: permission == null ? null : new UserPermissionDto
+                {
+                    Page1Access = permission.Page1Access,
+                    Page2Access = permission.Page2Access,
+                    Page3Access = permission.Page3Access,
+                    Page4Access = permission.Page4Access,
+                    DataScope = permission.DataScope,
+                    CanViewVendor = permission.CanViewVendor,
+                    CanViewCost = permission.CanViewCost,
+                    CanViewCustomer = permission.CanViewCustomer
+                });
+
+            return Ok(new { token = newAccessToken, currentCompanyId });
+        }
+
+        public class RefreshExplicitRequest
+        {
+            public string RefreshToken { get; set; } = "";
         }
         [HttpPost("refresh")]
         public async Task<IActionResult> Refresh()

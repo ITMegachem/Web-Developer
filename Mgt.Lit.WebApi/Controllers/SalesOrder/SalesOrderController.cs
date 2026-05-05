@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using System.Net.ServerSentEvents;
 using System.Runtime;
 using System.Security.Claims;
@@ -2171,6 +2172,541 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 soldToParties = soldToParties,
                 industryData = industryData
             });
+        }
+        [Authorize]
+        [HttpPost("OutboundDeliveryItems")]
+        public async Task<IActionResult> GetOutboundDeliveryItems(
+    [FromBody] OutboundDeliveryRequestDto request)
+        {
+            var permission = await GetCurrentPermissionAsync();
+            if (permission == null) return Unauthorized();
+            if (!permission.Page1Access) return Forbid();
+
+            try
+            {
+                var skip = (request.Page - 1) * request.PageSize;
+
+                // กรอง Plant ตาม Company scope
+                var plant = request.Plant?.Trim();
+                var scope = ResolveScope(permission);
+
+                if (scope != DataScopes.CrossCompany && !string.IsNullOrWhiteSpace(plant))
+                {
+                    if (!permission.CompanyID.HasValue)
+                        return Forbid();
+
+                    if (!CompanyPlants.TryGetValue(permission.CompanyID.Value, out var allowed)
+                        || !allowed.Contains(plant))
+                        return Forbid();
+                }
+
+                // ถ้าไม่ระบุ Plant → ใช้ Plant ของ Company ตัวเอง
+                if (string.IsNullOrWhiteSpace(plant) && scope != DataScopes.CrossCompany)
+                {
+                    if (!permission.CompanyID.HasValue ||
+                        !CompanyPlants.TryGetValue(permission.CompanyID.Value, out var companyPlants))
+                        return Forbid();
+
+                    // ดึง Plant แรกของ Company (ยกเว้น 1900)
+                    plant = companyPlants
+                        .FirstOrDefault(p => !p.Equals("1900", StringComparison.OrdinalIgnoreCase));
+                }
+
+                var jsonResult = await _sapService.GetOutboundDeliveryItemsAsync(
+                    deliveryDocument: request.DeliveryDocument,
+                    material: request.Material,
+                    plant: plant,
+                    top: request.PageSize,
+                    skip: skip);
+
+                // Parse เพื่อ wrap response
+                var sapDoc = JsonDocument.Parse(jsonResult);
+                var results = sapDoc.RootElement
+                                     .GetProperty("d")
+                                     .GetProperty("results");
+
+                var items = new List<object>();
+                foreach (var item in results.EnumerateArray())
+                {
+                    // Parse /Date(ticks)/ → DateTime
+                    static DateTime? ParseSapDate(string? raw)
+                    {
+                        if (string.IsNullOrWhiteSpace(raw)) return null;
+                        var m = System.Text.RegularExpressions.Regex.Match(raw, @"\d+");
+                        return m.Success && long.TryParse(m.Value, out var ms)
+                            ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime
+                            : null;
+                    }
+
+                    items.Add(new
+                    {
+                        DeliveryDocument = item.GetProperty("DeliveryDocument").GetString(),
+                        DeliveryDocumentItem = item.GetProperty("DeliveryDocumentItem").GetString(),
+                        Material = item.GetProperty("Material").GetString(),
+                        MaterialDescription = item.TryGetProperty("DeliveryDocumentItemText", out var desc)
+                                                   ? desc.GetString() : null,
+                        Plant = item.GetProperty("Plant").GetString(),
+                        StorageLocation = item.TryGetProperty("StorageLocation", out var sl)
+                                                   ? sl.GetString() : null,
+                        Batch = item.TryGetProperty("Batch", out var b)
+                                                   ? b.GetString() : null,
+                        ActualDeliveryQuantity = item.TryGetProperty("ActualDeliveryQuantity", out var q)
+                                                     && decimal.TryParse(q.GetString(),
+                                                            System.Globalization.NumberStyles.Any,
+                                                            System.Globalization.CultureInfo.InvariantCulture,
+                                                            out var qVal) ? qVal : (decimal?)null,
+                        DeliveryQuantityUnit = item.TryGetProperty("DeliveryQuantityUnit", out var u)
+                                                   ? u.GetString() : null,
+                        GoodsMovementStatus = item.TryGetProperty("GoodsMovementStatus", out var gms)
+                                                   ? gms.GetString() : null,
+                        SDProcessStatus = item.TryGetProperty("SDProcessStatus", out var sds)
+                                                   ? sds.GetString() : null,
+                        PickingStatus = item.TryGetProperty("PickingStatus", out var ps)
+                                                   ? ps.GetString() : null,
+                        ReferenceSDDocument = item.TryGetProperty("ReferenceSDDocument", out var ref1)
+                                                   ? ref1.GetString() : null,
+                        ManufactureDate = ParseSapDate(
+                                                   item.TryGetProperty("ManufactureDate", out var md)
+                                                       ? md.GetString() : null),
+                        ShelfLifeExpirationDate = ParseSapDate(
+                                                      item.TryGetProperty("ShelfLifeExpirationDate", out var exp)
+                                                          ? exp.GetString() : null),
+                        StorageType = item.TryGetProperty("StorageType", out var st)
+                                                   ? st.GetString() : null,
+                        SalesGroup = item.TryGetProperty("SalesGroup", out var sg)
+                                                   ? sg.GetString() : null,
+                        SalesOffice = item.TryGetProperty("SalesOffice", out var so)
+                                                   ? so.GetString() : null,
+                    });
+                }
+
+                return Ok(new
+                {
+                    page = request.Page,
+                    pageSize = request.PageSize,
+                    count = items.Count,
+                    items
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+        [Authorize]
+        [HttpGet("Customer")]
+        public async Task<IActionResult> GetCustomer([FromQuery] string customerId)
+        {
+            var permission = await GetCurrentPermissionAsync();
+            if (permission == null) return Unauthorized();
+            if (!permission.Page1Access) return Forbid();
+
+            if (string.IsNullOrWhiteSpace(customerId))
+                return BadRequest(new { message = "CustomerId is required." });
+
+            try
+            {
+                var jsonResult = await _sapService.GetCustomerByIdAsync(customerId);
+                var doc = JsonDocument.Parse(jsonResult);
+                var d = doc.RootElement.GetProperty("d");
+
+                static DateTime? ParseSapDate(string? raw)
+                {
+                    if (string.IsNullOrWhiteSpace(raw)) return null;
+                    var m = System.Text.RegularExpressions.Regex.Match(raw, @"\d+");
+                    return m.Success && long.TryParse(m.Value, out var ms)
+                        ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime
+                        : null;
+                }
+
+                // ✅ ใช้ CustomerFullName แทน BPCustomerFullName
+                var customerFullName = d.TryGetProperty("CustomerFullName", out var cfnProp)
+                    ? cfnProp.GetString() : null;
+
+                var result = new
+                {
+                    Customer = d.GetProperty("Customer").GetString(),
+                    CustomerName = d.TryGetProperty("CustomerName", out var cn) ? cn.GetString() : null,
+                    CustomerFullName = customerFullName,
+                    CustomerThaiName = ExtractThaiName(customerFullName), // ✅ แก้แล้ว
+                    BPCustomerName = d.TryGetProperty("BPCustomerName", out var bpn) ? bpn.GetString() : null,
+                    CustomerAccountGroup = d.TryGetProperty("CustomerAccountGroup", out var cag) ? cag.GetString() : null,
+                    CustomerCorporateGroup = d.TryGetProperty("CustomerCorporateGroup", out var ccg) ? ccg.GetString() : null,
+                    TaxNumber3 = d.TryGetProperty("TaxNumber3", out var t3) ? t3.GetString() : null,
+                    Industry = d.TryGetProperty("Industry", out var ind) ? ind.GetString() : null,
+                    DeletionIndicator = d.TryGetProperty("DeletionIndicator", out var del) && del.GetBoolean(),
+                    CreationDate = ParseSapDate(
+                                                 d.TryGetProperty("CreationDate", out var cd)
+                                                     ? cd.GetString() : null),
+                    CreatedByUser = d.TryGetProperty("CreatedByUser", out var cbu) ? cbu.GetString() : null,
+                };
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        static string? ExtractThaiName(string? fullName)
+        {
+            if (string.IsNullOrWhiteSpace(fullName)) return null;
+
+            var thaiStart = fullName
+                .Select((c, i) => new { c, i })
+                .FirstOrDefault(x => x.c >= '\u0E00' && x.c <= '\u0E7F');
+
+            if (thaiStart == null) return null;
+
+            var thaiPart = fullName.Substring(thaiStart.i);
+
+            var slashIndex = thaiPart.IndexOf('/');
+            if (slashIndex >= 0)
+                thaiPart = thaiPart.Substring(0, slashIndex);
+
+            return thaiPart.Trim();
+        }
+
+        [Authorize]
+        [HttpPost("CustomerList")]
+        public async Task<IActionResult> GetCustomerList([FromBody] CustomerRequestDto request)
+        {
+            var permission = await GetCurrentPermissionAsync();
+            if (permission == null) return Unauthorized();
+            if (!permission.Page1Access) return Forbid();
+
+            try
+            {
+                var skip = (request.Page - 1) * request.PageSize;
+
+                var jsonResult = await _sapService.GetCustomerListAsync(
+                    keyword: request.Keyword,
+                    top: request.PageSize,
+                    skip: skip);
+
+                var doc = JsonDocument.Parse(jsonResult);
+                var results = doc.RootElement
+                                 .GetProperty("d")
+                                 .GetProperty("results");
+
+                var items = results.EnumerateArray().Select(item =>
+                {
+                    var fullName = item.TryGetProperty("CustomerFullName", out var cfn)
+                        ? cfn.GetString() : null;
+
+                    return new
+                    {
+                        Customer = item.GetProperty("Customer").GetString(),
+                        CustomerName = item.TryGetProperty("CustomerName", out var cn) ? cn.GetString() : null,
+                        CustomerFullName = fullName,
+                        CustomerThaiName = ExtractThaiName(fullName), // ✅ เพิ่มแล้ว
+                        CustomerAccountGroup = item.TryGetProperty("CustomerAccountGroup", out var cag) ? cag.GetString() : null,
+                        CustomerCorporateGroup = item.TryGetProperty("CustomerCorporateGroup", out var ccg) ? ccg.GetString() : null,
+                        TaxNumber3 = item.TryGetProperty("TaxNumber3", out var t3) ? t3.GetString() : null,
+                        DeletionIndicator = item.TryGetProperty("DeletionIndicator", out var del) && del.GetBoolean(),
+                    };
+                }).ToList();
+
+                return Ok(new
+                {
+                    page = request.Page,
+                    pageSize = request.PageSize,
+                    count = items.Count,
+                    items
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+        [Authorize]
+        [HttpPost("OutboundDeliveryReport")]
+        public async Task<IActionResult> GetOutboundDeliveryReport(
+    [FromBody] OutboundDeliveryReportRequestDto request)
+        {
+            var permission = await GetCurrentPermissionAsync();
+            if (permission == null) return Unauthorized();
+            if (!permission.Page1Access) return Forbid();
+
+            try
+            {
+                // ── 1. กำหนด Plant ตาม scope ──────────────────────────────────────
+                var plant = request.Plant?.Trim();
+                var scope = ResolveScope(permission);
+
+                if (string.IsNullOrWhiteSpace(plant) && scope != DataScopes.CrossCompany)
+                {
+                    if (!permission.CompanyID.HasValue ||
+                        !CompanyPlants.TryGetValue(permission.CompanyID.Value, out var cp))
+                        return Forbid();
+
+                    plant = cp.FirstOrDefault(p =>
+                        !p.Equals("1900", StringComparison.OrdinalIgnoreCase));
+                }
+
+                // ── 2. ดึง Outbound Delivery จาก SAP ─────────────────────────────
+                var skip = (request.Page - 1) * request.PageSize;
+
+                var jsonResult = await _sapService.GetOutboundDeliveryItemsByFilterAsync(
+                    dateFrom: request.DeliveryDateFrom,
+                    dateTo: request.DeliveryDateTo,
+                    plant: plant,
+                    top: request.PageSize * 5, // ดึงเผื่อ filter ทีหลัง
+                    skip: skip);
+
+                var sapDoc = JsonDocument.Parse(jsonResult);
+                var sapItems = sapDoc.RootElement
+                                     .GetProperty("d")
+                                     .GetProperty("results")
+                                     .EnumerateArray()
+                                     .ToList();
+
+                if (!sapItems.Any())
+                    return Ok(new
+                    {
+                        totalCount = 0,
+                        page = request.Page,
+                        pageSize = request.PageSize,
+                        items = new List<object>()
+                    });
+
+                // ── 3. Parse SAP Date ─────────────────────────────────────────────
+                static DateTime? ParseSapDate(string? raw)
+                {
+                    if (string.IsNullOrWhiteSpace(raw)) return null;
+                    var m = System.Text.RegularExpressions.Regex.Match(raw, @"\d+");
+                    return m.Success && long.TryParse(m.Value, out var ms)
+                        ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime
+                        : null;
+                }
+
+                // ── 4. รวบรวม Keys สำหรับ lookup ─────────────────────────────────
+
+                var materialCodes = sapItems
+                    .Select(x => x.TryGetProperty("Material", out var m) ? m.GetString() : null)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x!)
+                    .Distinct()
+                    .ToList();
+
+                // ← ต้องประกาศ refSoNumbers ก่อน
+                var refSoNumbers = sapItems
+                    .Select(x => x.TryGetProperty("ReferenceSDDocument", out var r) ? r.GetString() : null)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x!)
+                    .Distinct()
+                    .ToList();
+                Console.WriteLine($"[DEBUG] materialCodes={materialCodes.Count} refSoNumbers={refSoNumbers.Count}");
+                Console.WriteLine($"[DEBUG] refSoNumbers: {string.Join(",", refSoNumbers)}");
+                // ← แล้วค่อยใช้ refSoNumbers ตรงนี้
+                var soDict = new Dictionary<string, string?>();
+                if (refSoNumbers.Any())
+                {
+                    try
+                    {
+                        var soList = await _context.Op_SalesOrders
+                            .AsNoTracking()
+                            .Where(x => refSoNumbers.Contains(x.SalesOrder))
+                            .Select(x => new { x.SalesOrder, x.SoldToParty })
+                            .ToListAsync();
+
+                        Console.WriteLine($"[DEBUG] soList={soList.Count}");
+
+                        soDict = soList
+                            .GroupBy(x => x.SalesOrder)
+                            .ToDictionary(g => g.Key, g => g.First().SoldToParty);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ERROR] soDict: {ex.Message}");
+                    }
+                }
+
+                var soldToParties = soDict.Values
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x!)
+                    .Distinct()
+                    .ToList();
+                Console.WriteLine($"[DEBUG] soldToParties={soldToParties.Count}");
+                // ── 5. Customer Thai Name จาก SAP Business Partner ────────────────
+                var customerThaiDict = new Dictionary<string, string>(
+                    StringComparer.OrdinalIgnoreCase);
+
+                if (soldToParties.Any())
+                {
+                    // เรียก GetCustomerByIdAsync ทีละตัว (หรือจะ batch ก็ได้)
+                    foreach (var customerId in soldToParties)
+                    {
+                        try
+                        {
+                            var custJson = await _sapService.GetCustomerByIdAsync(customerId);
+                            var custDoc = JsonDocument.Parse(custJson);
+                            var d = custDoc.RootElement.GetProperty("d");
+
+                            var fullName = d.TryGetProperty("CustomerFullName", out var cfn)
+                                ? cfn.GetString() : null;
+
+                            customerThaiDict[customerId] = ExtractThaiName(fullName) ?? "";
+                        }
+                        catch { customerThaiDict[customerId] = ""; }
+                    }
+                }
+
+                // ── 6. Ms_Product ──────────────────────────────────────────────────
+                var productDict = new Dictionary<string, (string? NetWeight, double? GrossWeight, string? WeightUnit)>();
+                if (materialCodes.Any())
+                {
+                    var productList = await _context.Ms_Product
+                        .AsNoTracking()
+                        .Where(x => materialCodes.Contains(x.Product))
+                        .Select(x => new { x.Product, x.NetWeight, x.GrossWeight, x.WeightUnit })
+                        .ToListAsync();
+
+                    productDict = productList.ToDictionary(
+                        x => x.Product,
+                        x => (x.NetWeight, x.GrossWeight, x.WeightUnit));
+                }
+
+
+                // ── 7. Ship To ─────────────────────────────────────────────────────
+                var shipToDict = new Dictionary<string, (string? FullName, string? Address)>();
+                if (refSoNumbers.Any())
+                {
+                    try
+                    {
+                        var shipToList = await _context.Mapping_Shiptos
+                            .AsNoTracking()
+                            .Where(x => x.SalesOrder != null &&
+                                        refSoNumbers.Contains(x.SalesOrder) &&
+                                        x.PartnerFunctionInternalCode == "WE")
+                            .Select(x => new { x.SalesOrder, x.FullName, x.Address })
+                            .ToListAsync();
+
+                        Console.WriteLine($"[DEBUG] shipToList={shipToList.Count}");
+
+                        shipToDict = shipToList
+                            .GroupBy(x => x.SalesOrder!)
+                            .ToDictionary(
+                                g => g.Key,
+                                g => (g.First().FullName, g.First().Address));
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ERROR] shipToDict: {ex.Message}");
+                    }
+                }
+                // ── 8. Map ────────────────────────────────────────────────────────
+                var items = sapItems.Select(item =>
+                {
+                    var material = item.TryGetProperty("Material", out var mat) ? mat.GetString() : null;
+                    var refSo = item.TryGetProperty("ReferenceSDDocument", out var ref1) ? ref1.GetString() : null;
+                    var dateRaw = item.TryGetProperty("ProductAvailabilityDate", out var dr) ? dr.GetString() : null;
+                    var deliveryDate = ParseSapDate(dateRaw);
+
+                    // ← ดึง SoldToParty จาก soDict แทน SAP
+                    soDict.TryGetValue(refSo ?? "", out var soldTo);
+
+                    var qtyStr = item.TryGetProperty("ActualDeliveryQuantity", out var qp)
+                        ? qp.GetString() : null;
+                    decimal? qty = decimal.TryParse(qtyStr,
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var qv)
+                        ? qv : null;
+
+                    // Product
+                    productDict.TryGetValue(material ?? "", out var prod);
+
+                    decimal? netWeight = decimal.TryParse(
+                        prod.NetWeight ?? "",
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var nw) ? nw : null;
+
+                    decimal? grossWeight = prod.GrossWeight.HasValue
+                        ? (decimal?)Convert.ToDecimal(prod.GrossWeight)
+                        : null;
+
+                    decimal? totalGross = (qty.HasValue && grossWeight.HasValue)
+                        ? qty * grossWeight : null;
+
+                    // Ship To
+                    shipToDict.TryGetValue(refSo ?? "", out var shipTo);
+
+                    // Customer Thai
+                    customerThaiDict.TryGetValue(soldTo ?? "", out var thaiName);
+
+                    return new OutboundDeliveryReportItemDto
+                    {
+                        DeliveryDate = deliveryDate,
+                        SoldToParty = soldTo,  // ← จาก soDict
+                        CustomerNameThai = thaiName,
+                        MaterialDescription = item.TryGetProperty("DeliveryDocumentItemText", out var desc)
+                                                  ? desc.GetString() : null,
+                        BatchNo = item.TryGetProperty("Batch", out var b)
+                                                  ? b.GetString() : null,
+                        Quantity = qty,
+                        Unit = item.TryGetProperty("DeliveryQuantityUnit", out var u)
+                                                  ? u.GetString() : null,
+                        ShipToName = shipTo.FullName,
+                        ShipToAddress = shipTo.Address,
+                        NetWeight = netWeight,
+                        GrossWeight = grossWeight,
+                        TotalGrossWeight = totalGross,
+                        RouteNameThai = thaiName,
+                        Month = deliveryDate?.Month,
+                        Year = deliveryDate?.Year,
+                        DeliveryDocument = item.TryGetProperty("DeliveryDocument", out var dd)
+                                                  ? dd.GetString() : null,
+                        Material = material,
+                        ReferenceSODocument = refSo
+                    };
+                }).ToList();
+                // ── 9. Filter หลัง map ────────────────────────────────────────────
+                if (!string.IsNullOrWhiteSpace(request.CustomerName))
+                {
+                    var kw = request.CustomerName.Trim().ToUpper();
+                    items = items.Where(x =>
+                        (x.CustomerNameThai ?? "").ToUpper().Contains(kw) ||
+                        (x.SoldToParty ?? "").ToUpper().Contains(kw))
+                        .ToList();
+                }
+
+                if (!string.IsNullOrWhiteSpace(request.Material))
+                {
+                    var kw = request.Material.Trim().ToUpper();
+                    items = items.Where(x =>
+                        (x.Material ?? "").ToUpper().Contains(kw) ||
+                        (x.MaterialDescription ?? "").ToUpper().Contains(kw))
+                        .ToList();
+                }
+
+                if (!string.IsNullOrWhiteSpace(request.RouteName))
+                {
+                    var kw = request.RouteName.Trim().ToUpper();
+                    items = items.Where(x =>
+                        (x.RouteNameThai ?? "").ToUpper().Contains(kw))
+                        .ToList();
+                }
+
+                var totalCount = items.Count;
+                var paged = items
+                    .Skip((request.Page - 1) * request.PageSize)
+                    .Take(request.PageSize)
+                    .ToList();
+
+                return Ok(new
+                {
+                    totalCount,
+                    page = request.Page,
+                    pageSize = request.PageSize,
+                    items = paged
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
         }
 
     }

@@ -228,4 +228,148 @@ GetSalesOrderItemsAsync(List<string> salesOrders)
 
         return result;
     }
+    public async Task<string> GetOutboundDeliveryItemsAsync(
+    string? deliveryDocument = null,
+    string? material = null,
+    string? plant = null,
+    int top = 100,
+    int skip = 0)
+    {
+        var baseUrl = _configuration["SapConfig:OutboundDelivery:BaseUrl"];
+        var authHeader = _configuration["SapConfig:OutboundDelivery:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        var filters = new List<string>();
+        if (!string.IsNullOrWhiteSpace(deliveryDocument))
+            filters.Add($"DeliveryDocument eq '{deliveryDocument.Trim()}'");
+        if (!string.IsNullOrWhiteSpace(material))
+            filters.Add($"Material eq '{material.Trim()}'");
+        if (!string.IsNullOrWhiteSpace(plant))
+            filters.Add($"Plant eq '{plant.Trim()}'");
+
+        var url = $"{baseUrl!.TrimEnd('/')}/A_OutbDeliveryItem" +
+                  $"?$top={top}&$skip={skip}&$format=json";
+
+        if (filters.Any())
+            url += $"&$filter={string.Join(" and ", filters)}";
+
+        Console.WriteLine($"[DEBUG] OutboundDelivery URL: {url}");
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"SAP Error: {result}");
+
+        return result;
+    }
+    public async Task<string> GetCustomerByIdAsync(string customerId)
+    {
+        var baseUrl = _configuration["SapConfig:BusinessPartner:BaseUrl"];
+        var authHeader = _configuration["SapConfig:BusinessPartner:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        var url = $"{baseUrl!.TrimEnd('/')}/A_Customer('{customerId.Trim()}')";
+
+        Console.WriteLine($"[DEBUG] Customer URL: {url}");
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"SAP Error: {result}");
+
+        return result;
+    }
+
+    public async Task<string> GetCustomerListAsync(
+        string? keyword = null,
+        int top = 50,
+        int skip = 0)
+    {
+        var baseUrl = _configuration["SapConfig:BusinessPartner:BaseUrl"];
+        var authHeader = _configuration["SapConfig:BusinessPartner:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        var filters = new List<string>();
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            var k = keyword.Trim();
+            filters.Add(
+                $"(substringof('{k}', Customer) or " +
+                $"substringof('{k}', CustomerName) or " +
+                $"substringof('{k}', CustomerFullName))");
+        }
+
+        var url = $"{baseUrl!.TrimEnd('/')}/A_Customer" +
+                  $"?$top={top}&$skip={skip}&$format=json" +
+                  $"&$select=Customer,CustomerName,CustomerFullName,CustomerAccountGroup," +
+                  $"TaxNumber3,CustomerCorporateGroup,DeletionIndicator";
+
+        if (filters.Any())
+            url += $"&$filter={string.Join(" and ", filters)}";
+
+        Console.WriteLine($"[DEBUG] CustomerList URL: {url}");
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"SAP Error: {result}");
+
+        return result;
+    }
+    public async Task<string> GetOutboundDeliveryItemsByFilterAsync(
+     DateTime? dateFrom = null,
+     DateTime? dateTo = null,
+     string? plant = null,
+     int top = 100,
+     int skip = 0)
+    {
+        var baseUrl = _configuration["SapConfig:OutboundDelivery:BaseUrl"];
+        var authHeader = _configuration["SapConfig:OutboundDelivery:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        var filters = new List<string>();
+
+        if (dateFrom.HasValue)
+            filters.Add($"ProductAvailabilityDate ge datetime'{dateFrom.Value:yyyy-MM-dd}T00:00:00'");
+        if (dateTo.HasValue)
+            filters.Add($"ProductAvailabilityDate le datetime'{dateTo.Value:yyyy-MM-dd}T23:59:59'");
+        if (!string.IsNullOrWhiteSpace(plant))
+            filters.Add($"Plant eq '{plant.Trim()}'");
+
+        var url = $"{baseUrl!.TrimEnd('/')}/A_OutbDeliveryItem" +
+                  $"?$top={top}&$skip={skip}&$format=json" +
+                  $"&$select=DeliveryDocument,DeliveryDocumentItem,Material," +
+                  $"DeliveryDocumentItemText,Plant,Batch,ActualDeliveryQuantity," +
+                  $"DeliveryQuantityUnit,ProductAvailabilityDate," +
+                  $"ReferenceSDDocument,GoodsMovementStatus,SDProcessStatus," +
+                  $"SalesOffice,SalesGroup"; // ← ใช้ SalesOffice แทน SoldToParty
+
+        if (filters.Any())
+            url += $"&$filter={string.Join(" and ", filters)}";
+
+        Console.WriteLine($"[DEBUG] OutboundDelivery Report URL: {url}");
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"SAP Error: {result}");
+
+        return result;
+    }
 }

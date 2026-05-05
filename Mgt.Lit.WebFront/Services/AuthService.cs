@@ -19,6 +19,7 @@ public class AuthService
         _storage = storage;
     }
 
+    // ✅ LoginAsync อันเดียว — รวมการเก็บ refreshToken ไว้แล้ว
     public async Task<LoginResponseDto?> LoginAsync(LoginRequestDto req)
     {
         var response = await _http.PostAsJsonAsync("api/member/login", req);
@@ -35,6 +36,19 @@ public class AuthService
 
         _authState.Token = result.Token;
 
+        // ✅ ดึง refreshToken จาก Set-Cookie header แล้วเก็บใน storage
+        if (response.Headers.TryGetValues("Set-Cookie", out var cookies))
+        {
+            var rtCookie = cookies
+                .FirstOrDefault(c => c.StartsWith("refreshToken="));
+            if (rtCookie != null)
+            {
+                var rt = rtCookie.Split('=')[1].Split(';')[0];
+                await _storage.SetAsync("refreshToken", rt);
+                Console.WriteLine("[AuthService] refreshToken saved to storage");
+            }
+        }
+
         await _storage.SetAsync("authToken", result.Token);
         await _storage.SetAsync("UserID", result.UserID);
         await _storage.SetAsync("fullName", result.FullName ?? string.Empty);
@@ -43,14 +57,13 @@ public class AuthService
         await _storage.SetAsync("division", result.Division ?? string.Empty);
         await _storage.SetAsync("primaryCompanyID", result.PrimaryCompanyID);
         await _storage.SetAsync("primaryCompanyCode", result.PrimaryCompanyCode ?? string.Empty);
-        //await _storage.SetAsync("currentCompanyID", result.CurrentCompanyID ?? result.PrimaryCompanyID);
         await _storage.SetAsync("companies", result.Companies);
         await _storage.SetAsync("permission", result.Permission);
 
         await _authState.InitializeAsync(force: true);
-
         return result;
     }
+
     public async Task<RefreshResponseDto?> RefreshAsync()
     {
         var response = await _http.PostAsync("api/member/refresh", null);
@@ -73,6 +86,7 @@ public class AuthService
 
         return result;
     }
+
     public async Task<SwitchCompanyResponseDto?> SwitchCompanyAsync(int companyId)
     {
         var response = await _http.PostAsJsonAsync("api/member/switch-company", new SwitchCompanyRequest
@@ -94,12 +108,13 @@ public class AuthService
         _authState.Token = result.Token;
         await _storage.SetAsync("authToken", result.Token);
         await _storage.SetAsync("currentCompanyID", result.CurrentCompanyId);
+
         if (result.Permission != null)
         {
             await _storage.SetAsync("permission", new Mgt.Lit.Core.Entities.View_UserPermission
             {
                 UserRole = result.Permission.UserRole,
-                Department = result.Permission.Department,  // ✅ ต้องมีใน LoginResponseDto ด้วย
+                Department = result.Permission.Department,
                 RoleKey = result.Permission.RoleKey,
                 Tier = result.Permission.Tier,
                 Page1Access = result.Permission.Page1Access,
@@ -114,27 +129,20 @@ public class AuthService
         }
 
         await _authState.InitializeAsync(force: true);
-
         return result;
     }
 
     public async Task LogoutAsync()
     {
-        try
-        {
-            await _http.PostAsync("api/member/logout", null);
-        }
-        catch
-        {
-        }
+        try { await _http.PostAsync("api/member/logout", null); }
+        catch { }
 
         _authState.Reset();
 
         try
         {
-
-
             await _storage.DeleteAsync("authToken");
+            await _storage.DeleteAsync("refreshToken"); // ✅ ลบ refreshToken ด้วย
             await _storage.DeleteAsync("fullName");
             await _storage.DeleteAsync("username");
             await _storage.DeleteAsync("userRole");
@@ -145,8 +153,6 @@ public class AuthService
             await _storage.DeleteAsync("companies");
             await _storage.DeleteAsync("permission");
         }
-        catch
-        {
-        }
+        catch { }
     }
 }

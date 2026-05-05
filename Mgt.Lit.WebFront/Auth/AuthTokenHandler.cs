@@ -11,46 +11,40 @@ public class AuthTokenHandler : DelegatingHandler
     private readonly AuthState _auth;
     private readonly ProtectedSessionStorage _storage;
     private readonly IHttpClientFactory _factory;
-    private readonly IHttpContextAccessor _httpContextAccessor;
 
-    // ✅ Queue สำหรับกัน refresh ซ้อนกัน
-    private static readonly SemaphoreSlim _refreshLock = new(1, 1);
-    private static Task<bool>? _refreshTask;
+    // ✅ ลบ _httpContextAccessor ออกแล้ว ไม่ต้องใช้อีก
+    private readonly SemaphoreSlim _refreshLock = new(1, 1);
+    private Task<bool>? _refreshTask;
 
     public AuthTokenHandler(
         AuthState auth,
         ProtectedSessionStorage storage,
-        IHttpClientFactory factory,
-        IHttpContextAccessor httpContextAccessor)
+        IHttpClientFactory factory)
+    // ✅ ลบ IHttpContextAccessor httpContextAccessor ออก
     {
         _auth = auth;
         _storage = storage;
         _factory = factory;
-        _httpContextAccessor = httpContextAccessor;
     }
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
-        Console.WriteLine($"[AuthTokenHandler] Sending: {request.RequestUri}");
-        // ✅ ใส่ token ปัจจุบันก่อนส่ง
         AttachToken(request, _auth.Token);
 
         var response = await base.SendAsync(request, cancellationToken);
-        Console.WriteLine($"[AuthTokenHandler] Status: {response.StatusCode}");
-        // ✅ ถ้าไม่ใช่ 401 → return ปกติ
+
         if (response.StatusCode != HttpStatusCode.Unauthorized)
             return response;
-        Console.WriteLine("[AuthTokenHandler] Got 401 → Starting refresh...");
-        // ✅ ถ้า 401 → รอ refresh (ถ้ามีคนกำลัง refresh อยู่ ให้รอ)
-        var refreshed = await RefreshWithQueueAsync(cancellationToken);
-        Console.WriteLine($"[AuthTokenHandler] Refresh result: {refreshed}");
-        if (!refreshed)
-            return response; // refresh ไม่ได้ → return 401 ให้ caller จัดการ
 
-        // ✅ Retry request เดิมด้วย token ใหม่
-        // ต้อง clone เพราะ HttpRequestMessage ใช้ซ้ำไม่ได้
+        Console.WriteLine("[AuthTokenHandler] Got 401 → Starting refresh...");
+
+        var refreshed = await RefreshWithQueueAsync(cancellationToken);
+
+        if (!refreshed)
+            return response;
+
         Console.WriteLine("[AuthTokenHandler] Retrying request with new token...");
         using var retryRequest = await CloneRequestAsync(request);
         AttachToken(retryRequest, _auth.Token);
@@ -63,11 +57,9 @@ public class AuthTokenHandler : DelegatingHandler
         await _refreshLock.WaitAsync(cancellationToken);
         try
         {
-            // ✅ ถ้ามี refresh task ที่กำลังทำอยู่ → รอผลแทน
             if (_refreshTask != null && !_refreshTask.IsCompleted)
                 return await _refreshTask;
 
-            // ✅ สร้าง refresh task ใหม่
             _refreshTask = DoRefreshAsync(cancellationToken);
             return await _refreshTask;
         }
@@ -77,28 +69,26 @@ public class AuthTokenHandler : DelegatingHandler
         }
     }
 
-    // AuthTokenHandler.cs
+    // ✅ เหลืออันเดียว — อ่านจาก ProtectedSessionStorage
     private async Task<bool> DoRefreshAsync(CancellationToken cancellationToken)
     {
         try
         {
-            var client = _factory.CreateClient("RefreshClient");
+            var rtResult = await _storage.GetAsync<string>("refreshToken");
 
-            // ✅ ดึง refreshToken cookie จาก Browser request
-            var refreshCookie = _httpContextAccessor.HttpContext?
-                .Request.Cookies["refreshToken"];
+            Console.WriteLine($"[REFRESH] Token in storage: " +
+                $"{(rtResult.Success && !string.IsNullOrWhiteSpace(rtResult.Value) ? "FOUND" : "NOT FOUND")}");
 
-            Console.WriteLine($"[AuthTokenHandler] refreshToken cookie: {(string.IsNullOrEmpty(refreshCookie) ? "NOT FOUND" : "FOUND")}");
-
-            if (string.IsNullOrWhiteSpace(refreshCookie))
+            if (!rtResult.Success || string.IsNullOrWhiteSpace(rtResult.Value))
                 return false;
 
-            // ✅ ส่ง Cookie ไปกับ request
-            var request = new HttpRequestMessage(HttpMethod.Post, "api/member/refresh");
-            request.Headers.TryAddWithoutValidation("Cookie", $"refreshToken={refreshCookie}");
+            var client = _factory.CreateClient("RefreshClient");
+            var response = await client.PostAsJsonAsync(
+                "api/member/refresh-explicit",
+                new { RefreshToken = rtResult.Value },
+                cancellationToken);
 
-            var response = await client.SendAsync(request, cancellationToken);
-            Console.WriteLine($"[AuthTokenHandler] Refresh status: {response.StatusCode}");
+            Console.WriteLine($"[REFRESH] Status: {response.StatusCode}");
 
             if (!response.IsSuccessStatusCode)
                 return false;
@@ -111,11 +101,13 @@ public class AuthTokenHandler : DelegatingHandler
 
             _auth.Token = result.Token;
             await _storage.SetAsync("authToken", result.Token);
+
+            Console.WriteLine("[REFRESH] Success — new token saved");
             return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AuthTokenHandler] Refresh exception: {ex.Message}");
+            Console.WriteLine($"[REFRESH ERROR] {ex.Message}");
             return false;
         }
         finally
@@ -135,14 +127,12 @@ public class AuthTokenHandler : DelegatingHandler
     {
         var clone = new HttpRequestMessage(original.Method, original.RequestUri);
 
-        // Copy headers ยกเว้น Authorization (จะใส่ใหม่)
         foreach (var header in original.Headers)
         {
             if (header.Key == "Authorization") continue;
             clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
 
-        // Copy content
         if (original.Content != null)
         {
             var bytes = await original.Content.ReadAsByteArrayAsync();

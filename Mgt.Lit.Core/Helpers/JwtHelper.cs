@@ -62,7 +62,9 @@ namespace Mgt.Lit.Core.Helpers
                 expires: DateTime.UtcNow.AddMinutes(
     double.Parse(config["Jwt:ExpireMinutes"] ?? "60")),
                 signingCredentials: creds);
-
+            // JwtHelper.cs — ตรวจสอบว่าอ่านค่าจาก config จริง
+            var expireMinutes = int.Parse(config["Jwt:ExpireMinutes"] ?? "60");
+            var expiry = DateTime.UtcNow.AddMinutes(expireMinutes);
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
     }

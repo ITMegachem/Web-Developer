@@ -14,64 +14,63 @@ var apiBaseUrl = builder.Environment.IsDevelopment()
     ? builder.Configuration["ApiBaseUrlDev"]
     : builder.Configuration["ApiBaseUrlDocker"];
 
-// ✅ 1. ลงทะเบียน AuthTokenHandler ก่อน (ต้องมาก่อนที่จะ AddHttpMessageHandler)
+// ✅ AuthState ต้องมาก่อน เพราะ AuthTokenHandler inject AuthState
+builder.Services.AddScoped<AuthState>();
+builder.Services.AddScoped<UiState>();
+
+// ✅ AuthTokenHandler — ลบ IHttpContextAccessor ออกแล้ว
 builder.Services.AddScoped<AuthTokenHandler>();
-builder.Services.AddHttpContextAccessor();
-// ✅ 2. AuthService — ไม่ผ่าน Handler (ทำ login/refresh/logout เอง)
+
+// ❌ ลบบรรทัดนี้ออก — ไม่ต้องใช้แล้ว
+// builder.Services.AddHttpContextAccessor();
+
+// ✅ AuthService — ไม่ผ่าน Handler (ทำ login/refresh/logout เอง)
 builder.Services.AddHttpClient<AuthService>(client =>
 {
-    client.BaseAddress = new Uri(apiBaseUrl);
+    client.BaseAddress = new Uri(apiBaseUrl!);
+    client.Timeout = TimeSpan.FromSeconds(30);
 });
 
 // ✅ RefreshClient — ไม่ผ่าน Handler (กัน infinite loop)
+// ไม่ต้องใช้ CookieContainer แล้ว เพราะส่ง token ใน body
 builder.Services.AddHttpClient("RefreshClient", client =>
 {
-    client.BaseAddress = new Uri(apiBaseUrl);
-})
-.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-{
-    UseCookies = true,
-    CookieContainer = new System.Net.CookieContainer()
+    client.BaseAddress = new Uri(apiBaseUrl!);
+    client.Timeout = TimeSpan.FromSeconds(15);
 });
-// ✅ StockService ผ่าน AuthTokenHandler
+
+// ✅ Services ที่ผ่าน AuthTokenHandler
 builder.Services.AddHttpClient<StockService>(client =>
 {
-    client.BaseAddress = new Uri(apiBaseUrl);
+    client.BaseAddress = new Uri(apiBaseUrl!);
+    client.Timeout = TimeSpan.FromSeconds(60);
 })
 .AddHttpMessageHandler<AuthTokenHandler>();
 
-// ✅ SalesOrderService ผ่าน AuthTokenHandler
 builder.Services.AddHttpClient<SalesOrderService>(client =>
 {
-    client.BaseAddress = new Uri(apiBaseUrl);
+    client.BaseAddress = new Uri(apiBaseUrl!);
+    client.Timeout = TimeSpan.FromSeconds(60);
 })
 .AddHttpMessageHandler<AuthTokenHandler>();
 
-// ✅ NofReportService ผ่าน AuthTokenHandler
 builder.Services.AddHttpClient<NofReportService>(client =>
 {
-    client.BaseAddress = new Uri(apiBaseUrl);
+    client.BaseAddress = new Uri(apiBaseUrl!);
+    client.Timeout = TimeSpan.FromSeconds(60);
 })
 .AddHttpMessageHandler<AuthTokenHandler>();
 
-// ✅ 3. AuthState ต้องมาก่อน AuthService (เพราะ AuthService inject AuthState)
-builder.Services.AddScoped<AuthState>();
-builder.Services.AddScoped<UiState>();
-//builder.Services.AddScoped<ApiHttpClient>();
 builder.Services.AddHttpClient<ApiHttpClient>(client =>
 {
-    client.BaseAddress = new Uri(apiBaseUrl);
+    client.BaseAddress = new Uri(apiBaseUrl!);
+    client.Timeout = TimeSpan.FromSeconds(60);
 })
 .AddHttpMessageHandler<AuthTokenHandler>();
 
+// ✅ Services อื่น
 builder.Services.AddScoped<IAccountService, AccountService>();
 
-// ❌ ลบออก — AddHttpClient<SalesOrderService> ลงทะเบียนแล้ว ห้าม AddScoped ซ้ำ
-// builder.Services.AddScoped<ISalesOrderService, SalesOrderService>();
-// ❌ ลบออก — AddHttpClient<NofReportService> ลงทะเบียนแล้ว ห้าม AddScoped ซ้ำ
-// builder.Services.AddScoped<INofReportService, NofReportService>();
-
-// ✅ ลง Interface mapping แทน
 builder.Services.AddScoped<ISalesOrderService>(sp =>
     sp.GetRequiredService<SalesOrderService>());
 builder.Services.AddScoped<INofReportService>(sp =>
@@ -82,8 +81,14 @@ builder.Services.AddScoped<PageContext>();
 builder.Services.AddScoped<LoggingHeaderHandler>();
 
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
-
+    .AddInteractiveServerComponents()
+    .AddHubOptions(options =>
+    {
+        options.ClientTimeoutInterval = TimeSpan.FromMinutes(10);
+        options.KeepAliveInterval = TimeSpan.FromMinutes(3);
+        options.HandshakeTimeout = TimeSpan.FromSeconds(30);
+        options.MaximumReceiveMessageSize = 102400;
+    });
 builder.Services
     .AddBlazorise(options =>
     {

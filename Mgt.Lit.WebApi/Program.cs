@@ -4,6 +4,7 @@ using Mgt.Lit.Core.Services;
 using Mgt.Lit.WebApi.Filters;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
 using System.Text;
@@ -56,31 +57,31 @@ builder.Services
         {
             OnTokenValidated = async context =>
             {
-                var dbContext = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+                var cache = context.HttpContext.RequestServices
+                    .GetRequiredService<IMemoryCache>();
 
-                // 1. ดึง Username และ TokenVersion จาก Claim ที่เราใส่ไว้ใน Token
                 var username = context.Principal?.FindFirst(ClaimTypes.Name)?.Value;
                 var tokenVersion = context.Principal?.FindFirst("TokenVersion")?.Value;
 
-                if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(tokenVersion))
+                var cacheKey = $"tv_{username}";
+
+                if (!cache.TryGetValue(cacheKey, out string? cachedVersion))
                 {
-                    context.Fail("Unauthorized: Missing token version.");
-                    return;
+                    var dbContext = context.HttpContext.RequestServices
+                        .GetRequiredService<AppDbContext>();
+                    cachedVersion = await dbContext.MsUsers
+                        .AsNoTracking()
+                        .Where(u => u.Username == username)
+                        .Select(u => u.TokenVersion)
+                        .FirstOrDefaultAsync();
+
+                    cache.Set(cacheKey, cachedVersion, TimeSpan.FromMinutes(5));
                 }
 
-                // 2. ไปเช็กใน Database ว่าตอนนี้ User คนนี้มี Version ตรงกับในมือไหม
-                var userVersionInDb = await dbContext.MsUsers
-                    .AsNoTracking()
-                    .Where(u => u.Username == username)
-                    .Select(u => u.TokenVersion) // สมมติว่ามี Column นี้ในตารางนะคะ
-                    .FirstOrDefaultAsync();
-
-                // 3. ถ้าไม่ตรงกัน แปลว่ามีการ Login ใหม่ไปแล้ว
-                if (userVersionInDb != tokenVersion)
-                {
-                    context.Fail("Unauthorized: This session has been invalidated by a new login.");
-                }
+                if (cachedVersion != tokenVersion)
+                    context.Fail("Session invalidated.");
             }
+        
         };
     });
 builder.Services.AddAuthorization();
@@ -109,7 +110,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 //builder.Services.AddSwaggerGen();
-
+builder.Services.AddMemoryCache();
 var app = builder.Build();
 
 // =======================
