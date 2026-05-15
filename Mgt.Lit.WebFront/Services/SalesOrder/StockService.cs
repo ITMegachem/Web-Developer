@@ -7,6 +7,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using static Mgt.Lit.WebFront.Pages.ManageOutboubDeliveries;
 
 public sealed class StockService
 {
@@ -148,7 +149,65 @@ public sealed class StockService
             throw new UnauthorizedAccessException("Token is missing");
     }
 
-    
+    public async Task<string> GetProductDescriptionFromSapAsync(
+    string material,
+    CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            EnsureAuthenticated();
+
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"api/MGT_SalesOrder/ProductDescription" +
+                $"?material={Uri.EscapeDataString(material)}&language=EN");
+
+            request.Headers.Authorization =
+                new AuthenticationHeaderValue("Bearer", _auth.Token);
+
+            using var response = await _http.SendAsync(request, cancellationToken);
+
+            if (!response.IsSuccessStatusCode) return "";
+
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            var doc = JsonDocument.Parse(json);
+
+            return doc.RootElement.TryGetProperty("description", out var desc)
+                ? desc.GetString() ?? ""
+                : "";
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] GetProductDescriptionFromSapAsync: {ex.Message}");
+            return "";
+        }
+    }
+
+    public async Task<OutboundDeliveryResponse?> GetOutboundDeliveriesAsync(
+     OutboundDeliveryReportRequest? request = null,
+     CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticated();
+
+        var body = request ?? new OutboundDeliveryReportRequest();
+
+        using var req = new HttpRequestMessage(HttpMethod.Post,
+            "api/MGT_SalesOrder/OutboundDeliveryReport")
+        {
+            Content = JsonContent.Create(body)
+        };
+
+        req.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", _auth.Token);
+
+        if (!string.IsNullOrWhiteSpace(_pageContext.Menu))
+            req.Headers.TryAddWithoutValidation("X-Menu", _pageContext.Menu);
+        if (!string.IsNullOrWhiteSpace(_pageContext.Page))
+            req.Headers.TryAddWithoutValidation("X-Page", _pageContext.Page);
+
+        using var response = await _http.SendAsync(req, cancellationToken);
+        return await ReadResponseAsync<OutboundDeliveryResponse>(response, cancellationToken);
+    }
 
     private sealed class StockRequirementRequest
     {
@@ -157,6 +216,37 @@ public sealed class StockService
 
         [JsonPropertyName("Material")]
         public string Material { get; set; } = string.Empty;
+    }
+    public sealed class OutboundDeliveryReportRequest
+    {
+        [JsonPropertyName("deliveryDateFrom")]
+        public DateTime? DeliveryDateFrom { get; set; }
+
+        [JsonPropertyName("deliveryDateTo")]
+        public DateTime? DeliveryDateTo { get; set; }
+        [JsonPropertyName("documentDateFrom")]
+        public DateTime? DocumentDateFrom { get; set; }   // ✅ เปลี่ยน
+
+        [JsonPropertyName("documentDateTo")]
+        public DateTime? DocumentDateTo { get; set; }     // ✅ เพิ่ม
+
+        [JsonPropertyName("customerName")]
+        public string? CustomerName { get; set; }
+
+        [JsonPropertyName("material")]
+        public string? Material { get; set; }
+
+        [JsonPropertyName("routeName")]
+        public string? RouteName { get; set; }
+
+        [JsonPropertyName("plant")]
+        public string? Plant { get; set; }
+
+        [JsonPropertyName("page")]
+        public int Page { get; set; } = 1;
+
+        [JsonPropertyName("pageSize")]
+        public int PageSize { get; set; } = 100;
     }
 
     private sealed class WarehouseStockSearchRequest

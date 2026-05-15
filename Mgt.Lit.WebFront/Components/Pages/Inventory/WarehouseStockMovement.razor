@@ -499,12 +499,17 @@
 
         // ✅ ถ้า selectedMaterialName ยังว่าง → fetch จาก API
         if (string.IsNullOrWhiteSpace(selectedMaterialName) &&
-            !string.IsNullOrWhiteSpace(selectedMaterial))
+     !string.IsNullOrWhiteSpace(selectedMaterial))
         {
+            // ← ดึงจาก SAP ก่อน
             selectedMaterialName = await StockService
-                .GetMaterialDescriptionAsync(selectedMaterial);
-        }
+                .GetProductDescriptionFromSapAsync(selectedMaterial);
 
+            // ← fallback DB
+            if (string.IsNullOrWhiteSpace(selectedMaterialName))
+                selectedMaterialName = await StockService
+                    .GetMaterialDescriptionAsync(selectedMaterial);
+        }
         materialResults.Clear();
 
         await InvokeAsync(StateHasChanged);
@@ -587,19 +592,26 @@
     private async Task ExportConsumption()
     {
         if (!CanExportConsumption) return;
-
-        if (string.IsNullOrWhiteSpace(selectedMaterial))
-            return;
+        if (string.IsNullOrWhiteSpace(selectedMaterial)) return;
 
         var data = await StockService.GetMaterialConsumption(selectedMaterial);
-
-        if (data == null || !data.Any())
-            return;
+        if (data == null || !data.Any()) return;
 
         using var wb = new XLWorkbook();
         var ws = wb.Worksheets.Add("Consumption");
 
-        // ── Header ────────────────────────────────────────────────────────────
+        // ── ✅ Material Info Rows (เพิ่มใหม่) ───────────────────────────────────
+        ws.Cell(1, 1).Value = "Material Code:";
+        ws.Cell(1, 2).Value = selectedMaterial;
+        ws.Cell(2, 1).Value = "Material Name:";
+        ws.Cell(2, 2).Value = selectedMaterialName;
+
+        ws.Cell(1, 1).Style.Font.Bold = true;
+        ws.Cell(2, 1).Style.Font.Bold = true;
+        ws.Cell(1, 2).Style.Font.FontColor = XLColor.DarkBlue;
+        ws.Cell(2, 2).Style.Font.FontColor = XLColor.DarkBlue;
+
+        // ── Header Row เริ่มที่แถว 4 (เว้น 1 แถว) ──────────────────────────────
         string[] headers =
 {
     "Year",
@@ -618,14 +630,15 @@
     "Total", "Total (KG)"
 };
 
+        int headerRow = 4; // ✅ เลื่อนลงมา
         for (int i = 0; i < headers.Length; i++)
-            ws.Cell(1, i + 1).Value = headers[i];
+            ws.Cell(headerRow, i + 1).Value = headers[i];
 
-        ws.Row(1).Style.Font.Bold = true;
-        ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightGreen;
+        ws.Row(headerRow).Style.Font.Bold = true;
+        ws.Row(headerRow).Style.Fill.BackgroundColor = XLColor.LightGreen;
 
-        // ── Data Rows ─────────────────────────────────────────────────────────
-        int row = 2;
+        // ── Data Rows เริ่มที่แถว 5 ────────────────────────────────────────────
+        int row = headerRow + 1;
         foreach (var item in data)
         {
             ws.Cell(row, 1).Value = item.Year;
@@ -695,13 +708,19 @@
         ws.Columns().AdjustToContents();
 
         // ── Download ──────────────────────────────────────────────────────────
+        // ── Download ───────────────────────────────────────────────────────────
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
         var base64 = Convert.ToBase64String(ms.ToArray());
 
+        // ✅ ชื่อไฟล์มี Material Name ด้วย
+        var safeName = string.IsNullOrWhiteSpace(selectedMaterialName)
+            ? selectedMaterial
+            : $"{selectedMaterial}_{selectedMaterialName.Replace(" ", "_").Replace("/", "-")}";
+
         await _jsModule.InvokeVoidAsync(
             "downloadFileFromBytes",
-            $"MaterialConsumption_{selectedMaterial}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
+            $"Consumption_{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             base64);
     }

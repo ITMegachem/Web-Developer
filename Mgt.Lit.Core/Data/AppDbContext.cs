@@ -94,6 +94,11 @@ namespace Mgt.Lit.Core.Data
                 entity.HasNoKey();
                 entity.ToTable("Ms_ProductDescription");
             });
+            modelBuilder.Entity<Ms_BusinessPartnerCustomerThaiName>(entity =>
+            {
+                entity.HasKey(x => x.CustomerCode);  // ✅ Primary Key
+                entity.ToTable("Ms_BusinessPartnerCustomerThaiName");
+            });
         }
 
         public DbSet<Entities.RefreshToken> RefreshTokens { get; set; }
@@ -105,9 +110,10 @@ namespace Mgt.Lit.Core.Data
         public DbSet<View_Sales_with_Op_SalesOrder> View_Sales_with_Op_SalesOrder { get; set; }
         public DbSet<Mapping_Soldto> Mapping_Soldtos { get; set; }
         public DbSet<Mapping_Shipto> Mapping_Shiptos { get; set; }
-        public DbSet<Op_SalesOrder> Op_SalesOrders { get; set; }
+        public DbSet<Op_SalesOrder> Op_SalesOrder { get; set; }
         public DbSet<Ms_CustomerGroup> Ms_CustomerGroups { get; set; }
         public DbSet<Ms_ProductDescription> Ms_ProductDescription { get; set; }
-        
+        public DbSet<Ms_BusinessPartnerCustomerThaiName> Ms_BusinessPartnerCustomerThaiName { get; set; }
+
     }
 }

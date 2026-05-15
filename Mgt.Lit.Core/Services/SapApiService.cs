@@ -331,6 +331,8 @@ GetSalesOrderItemsAsync(List<string> salesOrders)
     public async Task<string> GetOutboundDeliveryItemsByFilterAsync(
      DateTime? dateFrom = null,
      DateTime? dateTo = null,
+     DateTime? documentDateFrom = null,   // ✅ เปลี่ยน
+    DateTime? documentDateTo = null,     // ✅ เพิ่ม
      string? plant = null,
      int top = 100,
      int skip = 0)
@@ -343,14 +345,18 @@ GetSalesOrderItemsAsync(List<string> salesOrders)
         client.DefaultRequestHeaders.Add("Accept", "application/json");
 
         var filters = new List<string>();
-
         if (dateFrom.HasValue)
             filters.Add($"ProductAvailabilityDate ge datetime'{dateFrom.Value:yyyy-MM-dd}T00:00:00'");
         if (dateTo.HasValue)
             filters.Add($"ProductAvailabilityDate le datetime'{dateTo.Value:yyyy-MM-dd}T23:59:59'");
+        if (documentDateFrom.HasValue)
+            filters.Add($"CreationDate ge datetime'{documentDateFrom.Value:yyyy-MM-dd}T00:00:00'");
+        if (documentDateTo.HasValue)
+            filters.Add($"CreationDate le datetime'{documentDateTo.Value:yyyy-MM-dd}T23:59:59'");
         if (!string.IsNullOrWhiteSpace(plant))
             filters.Add($"Plant eq '{plant.Trim()}'");
-
+        if (!filters.Any())
+            return "{\"d\":{\"results\":[]}}";
         var url = $"{baseUrl!.TrimEnd('/')}/A_OutbDeliveryItem" +
                   $"?$top={top}&$skip={skip}&$format=json" +
                   $"&$select=DeliveryDocument,DeliveryDocumentItem,Material," +
@@ -363,6 +369,151 @@ GetSalesOrderItemsAsync(List<string> salesOrders)
             url += $"&$filter={string.Join(" and ", filters)}";
 
         Console.WriteLine($"[DEBUG] OutboundDelivery Report URL: {url}");
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"SAP Error: {result}");
+
+        return result;
+    }
+    public async Task<string?> GetProductDescriptionAsync(string material, string language = "EN")
+    {
+        var baseUrl = _configuration["SapConfig:ProductMaster:BaseUrl"];
+        var authHeader = _configuration["SapConfig:ProductMaster:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        var url = $"{baseUrl!.TrimEnd('/')}/A_ProductDescription" +
+                  $"?$filter=Product eq '{material}' and Language eq '{language}'" +
+                  $"&$select=Product,Language,ProductDescription" +
+                  $"&$format=json";
+
+        Console.WriteLine($"[DEBUG] ProductDescription URL: {url}");
+
+        var response = await client.GetAsync(url);
+        if (!response.IsSuccessStatusCode) return null;
+
+        var json = await response.Content.ReadAsStringAsync();
+        var doc = JsonDocument.Parse(json);
+
+        var results = doc.RootElement
+            .GetProperty("d")
+            .GetProperty("results")
+            .EnumerateArray()
+            .ToList();
+
+        return results.FirstOrDefault()
+            .TryGetProperty("ProductDescription", out var desc)
+            ? desc.GetString()
+            : null;
+    }
+    public async Task<string> GetProductMasterAsync(IEnumerable<string> materialCodes)
+    {
+        var baseUrl = _configuration["SapConfig:ProductMaster:BaseUrl"];
+        var authHeader = _configuration["SapConfig:ProductMaster:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        var codeList = materialCodes.ToList();
+        var filter = string.Join(" or ", codeList.Select(m => $"Product eq '{m}'"));
+
+        // ✅ ใช้ชื่อ field จริงจาก SAP response
+        var url = $"{baseUrl!.TrimEnd('/')}/A_Product" +
+           $"?$filter={filter}" +
+           $"&$select=Product,NetWeight,GrossWeight,WeightUnit," +
+           $"YY1_IMPORTLICENSE_PRD,YY1_MM_TRANSPORTCLASS_PRD,YY1_MM_STORAGECLASS_PRD" +
+           $"&$format=json";
+
+        Console.WriteLine($"[DEBUG] ProductMaster URL: {url}");
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
+        Console.WriteLine($"[DEBUG] ProductMaster RAW: {result}");
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"SAP ProductMaster Error: {result}");
+
+        return result;
+    }
+
+    public async Task<string> GetProductClassificationAsync(IEnumerable<string> materialCodes)
+    {
+        // A_ProductPlantMRPArea or A_ProductDescription — Class No. from A_ProductValuationAccount
+        // Class No. typically lives in A_ProductClassification
+        var baseUrl = _configuration["SapConfig:ProductMaster:BaseUrl"];
+        var authHeader = _configuration["SapConfig:ProductMaster:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        var filter = string.Join(" or ", materialCodes.Select(m => $"Product eq '{m}'"));
+
+        var url = $"{baseUrl!.TrimEnd('/')}/A_ProductPlant" +
+                  $"?$filter={filter}" +
+                  $"&$select=Product,Plant" +
+                  $"&$format=json";
+
+        Console.WriteLine($"[DEBUG] ProductPlant URL: {url}");
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            return "{}";
+
+        return result;
+    }
+    private static readonly Dictionary<string, string> _storageClassMap = new()
+    {
+        ["001"] = "3A : ของเหลวไวไฟ",
+        ["002"] = "3B : ของเหลวไวไฟ",
+        ["003"] = "4.1A : ของแข็งไวไฟ",
+        ["004"] = "4.1B : ของแข็งไวไฟ",
+        ["005"] = "4.2 : สารที่มีความเสี่ยงต่อการลุกติดไฟได้เอง",
+        ["006"] = "4.3 : สารที่ให้กาซไวไฟเมื่อสัมผัสกับน้ำ",
+        ["007"] = "5.1A : สารออกซิไดซ์",
+        ["008"] = "5.1B : สารออกซิไดซ์",
+        ["009"] = "5.1C : สารออกซิไดซ์",
+        ["010"] = "5.2 : สารเปอร์ออกไซด์อินทรีย์",
+        ["011"] = "6.1A : สารติดไฟที่มีคุณสมบัติความเป็นพิษ",
+        ["012"] = "6.1B : สารไม่ติดไฟที่มีคุณสมบัติความเป็นพิษ",
+        ["013"] = "8A : สารติดไฟที่มีคุณสมบัติกัดกร่อน",
+        ["014"] = "8B : สารไม่ติดไฟที่มีคุณสมบัติกัดกร่อน",
+        ["015"] = "10 : ของเหลวติดไฟที่ไม่อยู่ในประเภท 3A หรือ 3B",
+        ["016"] = "11 : ของแข็งติดไฟ",
+        ["017"] = "12 : ของเหลวไม่ติดไฟ",
+        ["018"] = "13 : ของแข็งไม่ติดไฟ",
+        ["999"] = "Other"
+    };
+
+    public string? GetStorageClassDescription(string? code)
+        => code != null && _storageClassMap.TryGetValue(code, out var desc) ? desc : null;
+
+    public async Task<string> GetCustomersByCodesAsync(List<string> customerCodes)
+    {
+        var baseUrl = _configuration["SapConfig:BusinessPartner:BaseUrl"];
+        var authHeader = _configuration["SapConfig:BusinessPartner:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        // สร้าง filter: Customer eq '1000031' or Customer eq '1000247' or ...
+        var filter = string.Join(" or ", customerCodes.Select(c => $"Customer eq '{c.Trim()}'"));
+
+        var url = $"{baseUrl!.TrimEnd('/')}/A_Customer" +
+                  $"?$top={customerCodes.Count + 10}&$format=json" +
+                  $"&$select=Customer,CustomerFullName" +
+                  $"&$filter={filter}";
+
+        Console.WriteLine($"[DEBUG] CustomersByCodes URL: {url}");
 
         var response = await client.GetAsync(url);
         var result = await response.Content.ReadAsStringAsync();

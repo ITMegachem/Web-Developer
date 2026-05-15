@@ -96,7 +96,13 @@ builder.Services
     })
     .AddBootstrap5Providers()
     .AddFontAwesomeIcons();
-
+// ✅ เพิ่มต่อจาก named clients อื่น
+builder.Services.AddHttpClient("ApiClient", client =>
+{
+    client.BaseAddress = new Uri(apiBaseUrl!);
+    client.Timeout = TimeSpan.FromSeconds(60);
+})
+.AddHttpMessageHandler<AuthTokenHandler>();
 var app = builder.Build();
 
 if (!app.Environment.IsDevelopment())

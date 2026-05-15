@@ -1,0 +1,585 @@
+﻿@namespace Mgt.Lit.WebFront.Pages
+@page "/manage-outbound-deliveries"
+@layout AppLayout
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+@using ClosedXML.Excel
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@using Mgt.Lit.WebFront.Services
+@using Mgt.Lit.WebFront.Services.Member
+@using Mgt.Lit.WebFront.Services.Models
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject NavigationManager Nav
+@inject Mgt.Lit.WebFront.Services.UiState UiState
+@inject StockService stockService
+@inject DownloadLogService DownloadLogSvc
+@inject PageContext PageContext
+
+<div class="so-page-wrapper">
+
+    <!-- HEADER -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-2">
+        <h2 class="page-title">Outbound Deliveries</h2>
+        <div class="date-badge">@DateTime.Now.ToString("dd MMM yyyy")</div>
+    </div>
+
+    <!-- FILTER CARD -->
+    <div class="filter-card-modern shadow-sm mb-4">
+        <div class="row g-3 align-items-end">
+
+            <div class="col-12 col-md-6 col-lg-3">
+                <label class="modern-label">Document Date</label>
+                <input id="documentDateRange"
+                       class="form-control modern-input"
+                       placeholder="Select date range"
+                       autocomplete="off" readonly />
+            </div>
+
+            <div class="col-12 col-md-6 col-lg-3">
+                <label class="modern-label">Delivery Date</label>
+                <input id="deliveryDateRange"
+                       class="form-control modern-input"
+                       placeholder="Select date range"
+                       autocomplete="off" readonly />
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
+                <label class="modern-label">Customer Name</label>
+                <input class="form-control modern-input"
+                       @bind="filters.CustomerName"
+                       @bind:event="oninput"
+                       placeholder="Search customer..." />
+            </div>
+
+            <div class="col-6 col-md-4 col-lg-2">
+                <label class="modern-label">Material Name</label>
+                <input class="form-control modern-input"
+                       @bind="filters.MaterialName"
+                       @bind:event="oninput"
+                       placeholder="Search material..." />
+            </div>
+
+            <div class="col-6 col-md-4 col-lg-2">
+                <label class="modern-label">Route Name</label>
+                <input class="form-control modern-input"
+                       @bind="filters.RouteName"
+                       @bind:event="oninput"
+                       placeholder="Search route..." />
+            </div>
+
+            <div class="col-12 col-lg-2 ms-auto">
+                <button class="btn btn-search-pill w-100"
+                        disabled="@isLoading"
+                        @onclick="RunSearch">
+                    @if (isLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm"></span>
+                    }
+                    else
+                    {
+                        <span><i class="bi bi-search me-1"></i> Run</span>
+                    }
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- TABLE CARD -->
+    <div class="table-card-container shadow-sm">
+
+        <!-- toolbar -->
+        <div class="d-flex justify-content-between align-items-center px-3 pt-2 pb-1">
+            <span class="text-muted small">@totalItems record(s) found</span>
+            @if (allItems.Any())
+            {
+                <button class="btn btn-sm btn-success rounded-pill px-3"
+                        disabled="@isLoading"
+                        @onclick="ExportData">
+                    <i class="bi bi-download me-1"></i> Export Excel
+                </button>
+            }
+        </div>
+
+        <div class="table-responsive flex-grow-1">
+            <table class="table modern-table mb-0">
+                <thead>
+                    <tr>
+                        <th style="font-size:110%;font-weight:800">#</th>
+                        <th style="font-size:110%;font-weight:800">Date</th>
+                        <th style="font-size:110%;font-weight:800">Sold-to</th>
+                        <th style="font-size:110%;font-weight:800">Customer Name</th>
+                        <th style="font-size:110%;font-weight:800">Material Description</th>
+                        <th style="font-size:110%;font-weight:800" class="text-center">Batch No.</th>
+                        <th style="font-size:110%;font-weight:800" class="text-center">Quant.</th>
+                        <th style="font-size:110%;font-weight:800" class="text-center">Pack</th>
+                        <th style="font-size:110%;font-weight:800">Ship to</th>
+                        <th style="font-size:110%;font-weight:800" class="text-center">License</th>
+                        <th style="font-size:110%;font-weight:800" class="text-center">Class No.</th>
+                        <th style="font-size:110%;font-weight:800" class="text-center">Net Weight</th>
+                        <th style="font-size:110%;font-weight:800" class="text-center">Gross Weight</th>
+                        <th style="font-size:110%;font-weight:800" class="text-center">Total Gross Wt</th>
+                        <th style="font-size:110%;font-weight:800">Route Name</th>
+                        <th style="font-size:110%;font-weight:800" class="text-center">Month</th>
+                        <th style="font-size:110%;font-weight:800" class="text-center">Year</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (pagedItems.Any())
+                    {
+                        int rowNum = (filters.Page - 1) * filters.PageSize + 1;
+                        @foreach (var r in pagedItems)
+                        {
+                            <tr>
+                                <td class="text-muted" style="font-size:12px">@rowNum</td>
+                                <td style="white-space:nowrap">@r.DeliveryDate?.ToString("dd/MM/yyyy")</td>
+                                <td class="numeric-green">@r.SoldToParty</td>
+                                <td>@r.CustomerNameThai</td>
+                                <td>@r.MaterialDescription</td>
+                                <td class="text-center" style="font-family:monospace;font-size:12px">
+                                    @(string.IsNullOrEmpty(r.BatchNo) ? "-" : r.BatchNo)
+                                </td>
+                                <td class="text-center fw-bold">@r.Quantity?.ToString("N0")</td>
+                                <td class="text-center text-muted">@r.Unit</td>
+                                <td style="font-size:12px">@r.ShipToName</td>
+                                <td class="text-center">
+                                    <span class="badge bg-warning text-dark" style="font-size:11px">@r.License</span>
+                                </td>
+                                <td class="text-center">
+                                    @if (!string.IsNullOrEmpty(r.StorageClassCode))
+                                    {
+                                        <span class="badge bg-secondary" style="font-size:11px">
+                                            @r.StorageClassCode
+                                        </span>
+                                        @if (!string.IsNullOrEmpty(r.StorageClassDescription))
+                                        {
+                                            <div style="font-size:10px; color:#666; margin-top:2px;
+                                                max-width:120px; margin-left:auto; margin-right:auto;
+                                                white-space:nowrap; overflow:hidden;
+                                                text-overflow:ellipsis;"
+                                                 title="@r.StorageClassDescription">
+                                                @r.StorageClassDescription
+                                            </div>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">-</span>
+                                    }
+                                </td>
+                                <td class="text-center">@r.NetWeight?.ToString("N3")</td>
+                                <td class="text-center">@r.GrossWeight?.ToString("N3")</td>
+                                <td class="text-center fw-bold" style="color:#0a58ca">
+                                    @(((r.Quantity ?? 0) * (r.GrossWeight ?? 0)).ToString("N2"))
+                                </td>
+                                <td class="text-center">@r.Month</td>
+                                <td class="text-center">@r.Year</td>
+                            </tr>
+                            rowNum++;
+                        }
+                    }
+                    else if (!isLoading)
+                    {
+                        <tr>
+                            <td colspan="17" class="text-center py-5 text-muted">
+                                <i class="bi bi-inbox fs-3 d-block mb-2"></i>
+                                No data found
+                            </td>
+                        </tr>
+                    }
+                    else
+                    {
+                        <tr>
+                            <td colspan="17" class="text-center py-5">
+                                <span class="spinner-border spinner-border-sm me-2"></span> Loading...
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <!-- PAGINATION -->
+        <div class="table-footer-pagination">
+            <div class="text-muted small">
+                Page @filters.Page of @totalPages
+            </div>
+            <div class="pagination-controls d-flex align-items-center gap-3">
+                <button class="pill-nav-btn"
+                        disabled="@(filters.Page <= 1 || isLoading)"
+                        @onclick="PrevPage">
+                    <i class="bi bi-chevron-left"></i>
+                </button>
+                <button class="pill-nav-btn"
+                        disabled="@(filters.Page >= totalPages || isLoading)"
+                        @onclick="NextPage">
+                    <i class="bi bi-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+@code {
+
+    // ─── Filter model ──────────────────────────────────────────────────────────
+    private OutboundDeliveryFilter filters = new() { Page = 1, PageSize = 15 };
+
+    public class OutboundDeliveryFilter
+    {
+        public DateTime? DocumentDateFrom { get; set; }
+        public DateTime? DocumentDateTo { get; set; }
+        public DateTime? DeliveryDateFrom { get; set; }  // ✅ เพิ่ม
+        public DateTime? DeliveryDateTo { get; set; }    // ✅ เพิ่ม
+        public string? CustomerName { get; set; }
+        public string? MaterialName { get; set; }
+        public string? RouteName { get; set; }
+        public int Page { get; set; } = 1;
+        public int PageSize { get; set; } = 15;
+    }
+    // ─── DTO matching the API response ────────────────────────────────────────
+    public class OutboundDeliveryDto
+    {
+        public DateTime? DeliveryDate { get; set; }
+        public string? SoldToParty { get; set; }
+        public string? CustomerNameThai { get; set; }
+        public string? MaterialDescription { get; set; }
+        public string? BatchNo { get; set; }
+        public decimal? Quantity { get; set; }      // ✅ nullable
+        public string? Unit { get; set; }
+        public string? ShipToName { get; set; }
+        public string? ShipToAddress { get; set; }
+        public string? License { get; set; }
+        public string? ClassNo { get; set; }
+        public decimal? NetWeight { get; set; }     // ✅ nullable
+        public decimal? GrossWeight { get; set; }   // ✅ nullable
+        public decimal? TotalGrossWeight { get; set; } // ✅ nullable
+        public string? RouteNameThai { get; set; }
+        public int? Month { get; set; }             // ✅ nullable
+        public int? Year { get; set; }              // ✅ nullable
+        public string? DeliveryDocument { get; set; }
+        public string? Material { get; set; }
+        public string? ReferenceSODocument { get; set; }
+        public string? StorageClassCode { get; set; }
+        public string? StorageClassDescription { get; set; }
+    }
+
+    public class OutboundDeliveryResponse
+    {
+        public int TotalCount { get; set; }
+        public int Page { get; set; }
+        public int PageSize { get; set; }
+        public List<OutboundDeliveryDto> Items { get; set; } = new();
+    }
+
+    // ─── State ────────────────────────────────────────────────────────────────
+
+    private int totalItems;
+    private int totalPages = 1;
+    private bool isLoading;
+    private bool _isDisposed;
+    private IJSObjectReference? _jsModule;
+
+    // ─── Lifecycle ────────────────────────────────────────────────────────────
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _isDisposed) return;
+
+        try
+        {
+            PageContext.Menu = "Sales";
+            PageContext.Page = "Outbound Deliveries";
+
+            await AuthState.InitializeAsync();
+
+            if (string.IsNullOrWhiteSpace(AuthState.Token))
+            {
+                Nav.NavigateTo("/", replace: true);
+                return;
+            }
+
+            await UiState.InitAsync();
+
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+
+            // ✅ เพิ่มตรงนี้ หลัง _jsModule ได้แล้ว
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await _jsModule.InvokeVoidAsync("initDocumentDatePicker", _dotNetRef);
+            await _jsModule.InvokeVoidAsync("initDeliveryDatePicker", _dotNetRef);
+
+            if (!_isDisposed)
+                await InvokeAsync(StateHasChanged);
+        }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+    }
+    private DotNetObjectReference<ManageOutboubDeliveries>? _dotNetRef;
+
+    [JSInvokable]
+    public async Task OnDocumentDateRangeChanged(string? from, string? to)
+    {
+        filters.DocumentDateFrom = !string.IsNullOrEmpty(from) ? DateTime.Parse(from) : null;
+        filters.DocumentDateTo = !string.IsNullOrEmpty(to) ? DateTime.Parse(to) : null;
+
+        // ✅ ถ้า clear → รัน search ใหม่อัตโนมัติ
+        if (string.IsNullOrEmpty(from) && string.IsNullOrEmpty(to))
+        {
+            filters.Page = 1;
+            rawItems.Clear();
+            await LoadDataAsync();
+            return;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task OnDeliveryDateRangeChanged(string? from, string? to)
+    {
+        filters.DeliveryDateFrom = !string.IsNullOrEmpty(from) ? DateTime.Parse(from) : null;
+        filters.DeliveryDateTo = !string.IsNullOrEmpty(to) ? DateTime.Parse(to) : null;
+
+        // ✅ ถ้า clear → รัน search ใหม่อัตโนมัติ
+        if (string.IsNullOrEmpty(from) && string.IsNullOrEmpty(to))
+        {
+            filters.Page = 1;
+            rawItems.Clear();
+            await LoadDataAsync();
+            return;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+    public void Dispose()
+    {
+        _isDisposed = true;
+        _dotNetRef?.Dispose();  // ✅ เพิ่ม
+    }
+
+    // ─── Search ───────────────────────────────────────────────────────────────
+    private async Task RunSearch()
+    {
+        filters.Page = 1;
+        rawItems.Clear(); // ✅ clear ก่อนทุกครั้ง เพื่อให้ LoadDataAsync เรียก API ใหม่
+        await LoadDataAsync();
+    }
+    private List<OutboundDeliveryDto> rawItems = new();   // ← เพิ่ม
+    private List<OutboundDeliveryDto> allItems = new();
+    private List<OutboundDeliveryDto> pagedItems = new();
+    private async Task LoadDataAsync()
+    {
+        try
+        {
+            isLoading = true;
+            if (!_isDisposed) await InvokeAsync(StateHasChanged);
+
+            // ✅ ถ้าไม่มี filter วันที่เลย → ไม่ดึงข้อมูล
+            if (filters.DeliveryDateFrom == null &&
+                filters.DeliveryDateTo == null &&
+                filters.DocumentDateFrom == null &&
+                filters.DocumentDateTo == null)
+            {
+                allItems = new();
+                pagedItems = new();
+                totalItems = 0;
+                totalPages = 1;
+                return;
+            }
+
+            var request = new StockService.OutboundDeliveryReportRequest
+            {
+                DeliveryDateFrom = filters.DeliveryDateFrom,
+                DeliveryDateTo = filters.DeliveryDateTo,
+                DocumentDateFrom = filters.DocumentDateFrom,
+                DocumentDateTo = filters.DocumentDateTo,
+                Plant = "1100",
+                Page = 1,
+                PageSize = 9999
+            };
+            var result = await stockService.GetOutboundDeliveriesAsync(request);
+
+            rawItems = (result?.Items ?? new())
+    .Select(r => new OutboundDeliveryDto
+    {
+        DeliveryDate = r.DeliveryDate,
+        SoldToParty = r.SoldToParty,
+        CustomerNameThai = r.CustomerNameThai,
+        MaterialDescription = r.MaterialDescription,
+        BatchNo = r.BatchNo,
+        Quantity = r.Quantity,
+        Unit = r.Unit,
+        ShipToName = r.ShipToName,
+        ShipToAddress = r.ShipToAddress,
+        License = r.License,
+        ClassNo = r.ClassNo,
+        NetWeight = r.NetWeight,
+        GrossWeight = r.GrossWeight,
+        TotalGrossWeight = r.TotalGrossWeight,
+        RouteNameThai = r.RouteNameThai,
+        Month = r.Month,
+        Year = r.Year,
+        DeliveryDocument = r.DeliveryDocument,
+        ReferenceSODocument = r.ReferenceSODocument,
+        StorageClassCode = r.StorageClassCode,        // ✅ เพิ่มบรรทัดนี้
+        StorageClassDescription = r.StorageClassDescription
+    })
+    .ToList();
+            // ✅ ไม่ต้อง filter client-side อีกแล้ว เพราะ API กรองมาแล้ว
+            allItems = rawItems;
+            totalItems = allItems.Count;
+            totalPages = Math.Max(1, (int)Math.Ceiling((double)totalItems / filters.PageSize));
+            if (filters.Page > totalPages) filters.Page = totalPages;
+            ApplyPaging();
+        }
+        catch (UnauthorizedAccessException) { Nav.NavigateTo("/", replace: true); }
+        finally
+        {
+            isLoading = false;
+            if (!_isDisposed) await InvokeAsync(StateHasChanged);
+        }
+    }
+   
+    // ✅ filter แยกออกมา เรียกได้โดยไม่ต้อง hit API ใหม่
+    private void ApplyFilter()
+    {
+        allItems = rawItems.Where(r =>
+            (filters.DeliveryDateFrom == null ||
+                (r.DeliveryDate.HasValue && r.DeliveryDate.Value.Date >= filters.DeliveryDateFrom.Value.Date)) &&
+            (filters.DeliveryDateTo == null ||
+                (r.DeliveryDate.HasValue && r.DeliveryDate.Value.Date <= filters.DeliveryDateTo.Value.Date)) &&
+            (string.IsNullOrWhiteSpace(filters.CustomerName) ||
+                (r.CustomerNameThai ?? "").Contains(filters.CustomerName, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrWhiteSpace(filters.MaterialName) ||
+                (r.MaterialDescription ?? "").Contains(filters.MaterialName, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrWhiteSpace(filters.RouteName) ||
+                (r.RouteNameThai ?? "").Contains(filters.RouteName, StringComparison.OrdinalIgnoreCase))
+        ).ToList();
+
+        totalItems = allItems.Count;
+        totalPages = Math.Max(1, (int)Math.Ceiling((double)totalItems / filters.PageSize));
+        if (filters.Page > totalPages) filters.Page = totalPages;
+        ApplyPaging();
+    }
+
+    // ─── Pagination ───────────────────────────────────────────────────────────
+    private void ApplyPaging()
+    {
+        pagedItems = allItems
+            .Skip((filters.Page - 1) * filters.PageSize)
+            .Take(filters.PageSize)
+            .ToList();
+    }
+
+    private Task PrevPage()
+    {
+        if (filters.Page > 1) { filters.Page--; ApplyPaging(); }
+        return Task.CompletedTask;
+    }
+
+    private Task NextPage()
+    {
+        if (filters.Page < totalPages) { filters.Page++; ApplyPaging(); }
+        return Task.CompletedTask;
+    }
+
+    // ─── Export ───────────────────────────────────────────────────────────────
+    private async Task ExportData()
+    {
+        if (!allItems.Any()) return;
+
+        try
+        {
+            isLoading = true;
+            if (!_isDisposed) await InvokeAsync(StateHasChanged);
+
+            var username = AuthState.Permission?.Username;
+            var fileName = $"OutboundDeliveries_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await DownloadLogSvc.LogDownloadAsync(username, fileName);
+
+            _jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("OutboundDeliveries");
+
+            // headers
+            var headers = new[]
+ {
+    "Date", "Sold-to", "Customer Name", "Material Description",
+    "Batch No.", "Quantity", "Pack", "Ship To", "Ship To Address",
+    "License", "Class No.",
+     "Storage Class Description",  // ✅ เพิ่ม
+    "Net Weight", "Gross Weight",
+    "Total Gross Weight", "Route Name", "Month", "Year",
+    "Delivery Document", "Reference SO"
+};
+
+            for (int i = 0; i < headers.Length; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+
+            var headerRow = ws.Row(1);
+            headerRow.Style.Font.Bold = true;
+            headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+
+            int row = 2;
+            foreach (var r in allItems)
+            {
+                int col = 1;
+                ws.Cell(row, col++).Value = r.DeliveryDate?.ToString("dd/MM/yyyy") ?? "";
+                ws.Cell(row, col++).Value = r.SoldToParty ?? "";
+                ws.Cell(row, col++).Value = r.CustomerNameThai ?? "";
+                ws.Cell(row, col++).Value = r.MaterialDescription ?? "";
+                ws.Cell(row, col++).Value = r.BatchNo ?? "";
+                ws.Cell(row, col++).Value = (double)(r.Quantity ?? 0);
+                ws.Cell(row, col++).Value = r.Unit ?? "";
+                ws.Cell(row, col++).Value = r.ShipToName ?? "";
+                ws.Cell(row, col++).Value = r.ShipToAddress ?? "";
+                ws.Cell(row, col++).Value = r.License ?? "";
+                ws.Cell(row, col++).Value = r.StorageClassCode ?? "";
+                ws.Cell(row, col++).Value = r.StorageClassDescription ?? "";
+                ws.Cell(row, col++).Value = (double)(r.NetWeight ?? 0);
+                ws.Cell(row, col++).Value = (double)(r.GrossWeight ?? 0);
+                ws.Cell(row, col++).Value = (double)((r.Quantity ?? 0) * (r.GrossWeight ?? 0));
+                ws.Cell(row, col++).Value = r.RouteNameThai ?? "";
+                ws.Cell(row, col++).Value = r.Month ?? 0;
+                ws.Cell(row, col++).Value = r.Year ?? 0;
+                ws.Cell(row, col++).Value = r.DeliveryDocument ?? "";
+                ws.Cell(row, col++).Value = r.ReferenceSODocument ?? "";
+                row++;
+            }
+
+            ws.Columns().AdjustToContents();
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+
+            if (_jsModule is not null && !_isDisposed)
+            {
+                try
+                {
+                    await _jsModule.InvokeVoidAsync(
+                        "downloadFileFromBytes",
+                        fileName,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        base64);
+                }
+                catch (JSDisconnectedException) { }
+                catch (TaskCanceledException) { }
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Nav.NavigateTo("/", replace: true);
+        }
+        finally
+        {
+            isLoading = false;
+            if (!_isDisposed) await InvokeAsync(StateHasChanged);
+        }
+    }
+    // ✅ แทนที่ method เดิมทั้งก้อน
+    private async Task<OutboundDeliveryResponse?> FetchOutboundDeliveriesAsync()
+    {
+        return await stockService.GetOutboundDeliveriesAsync();
+    }
+}

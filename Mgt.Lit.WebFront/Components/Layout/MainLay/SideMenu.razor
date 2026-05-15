@@ -157,6 +157,16 @@
                                             </NavLink>
                                         </li>
                                     }
+                                    @* ── ใน <div class="collapse show" id="mgtMenu"> ── *@
+                                    @if (CanPage5)
+                                    {
+                                        <li>
+                                            <NavLink href="/manage-outbound-deliveries" class="sub-pill-link">
+                                                <img src="/images/inventory-alt.png" class="sub-icon-img" />
+                                                <span>@T("OutboundDeliveries")</span>
+                                            </NavLink>
+                                        </li>
+                                    }
                                     
                                 </ul>
                             </div>
@@ -196,6 +206,15 @@
                                         @T("Sales Report")
                                     </NavLink>
                                 }
+                                @* ── ใน flyout-panel (IsCollapsed) ── *@
+                                @if (CanPage5)
+                                {
+                                    <NavLink href="/manage-outbound-deliveries" class="flyout-item">
+                                        <span class="flyout-dot"></span>
+                                        @T("OutboundDeliveries")
+                                    </NavLink>
+                                }
+                               
                             </div>
                         }
 
@@ -279,8 +298,15 @@
     private bool CanPage2 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 2);
     private bool CanPage3 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 3);
     private bool CanPage4 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 4);
+    private bool IsCsrDept =>
+    string.Equals(Department, "csr", StringComparison.OrdinalIgnoreCase);
 
-    private bool HasAnyManagementPage => CanPage1 || CanPage2 || CanPage3 || CanPage4;
+    private bool IsWarehouseDept =>
+        string.Equals(Department, "warehouse", StringComparison.OrdinalIgnoreCase);
+
+    private bool CanPage5 =>
+        IsAdmin || IsCsrDept || IsWarehouseDept;
+    private bool HasAnyManagementPage => CanPage1 || CanPage2 || CanPage3 || CanPage4 || CanPage5;
 
     // ── lifecycle ─────────────────────────────────────────────────────────────
 

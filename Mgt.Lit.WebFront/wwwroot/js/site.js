@@ -59,3 +59,53 @@ export function getDateRangeValue() {
     const element = document.getElementById("dateRange");
     return element ? element.value : "";
 }
+function createLitepicker(elementId, dotnetRef, methodName) {
+    const element = document.getElementById(elementId);
+    if (!element) { console.log(`${elementId} not found`); return; }
+
+    element.setAttribute("autocomplete", "off");
+
+    const picker = new Litepicker({
+        element: element,
+        singleMode: false,
+        format: "DD/MM/YYYY",
+        autoApply: true,
+        resetButton: true,
+        dropdowns: { minYear: 2020, maxYear: 2030, months: true, years: true },
+        setup: (picker) => {
+            picker.on("selected", (start, end) => {
+                dotnetRef.invokeMethodAsync(methodName,
+                    start.format("YYYY-MM-DD"),
+                    end.format("YYYY-MM-DD"));
+            });
+            picker.on("clear:selection", () => {
+                element.value = "";  // ✅ clear input
+                dotnetRef.invokeMethodAsync(methodName, "", "");
+            });
+        }
+    });
+
+    // ✅ ถ้าผู้ใช้ลบข้อความเองใน input
+    element.addEventListener("input", () => {
+        if (element.value === "") {
+            picker.clearSelection();
+            dotnetRef.invokeMethodAsync(methodName, "", "");
+        }
+    });
+
+    // ✅ เพิ่ม: ถ้ากด Backspace/Delete ให้ clear
+    element.addEventListener("keydown", (e) => {
+        if (e.key === "Backspace" || e.key === "Delete") {
+            picker.clearSelection();
+            element.value = "";
+            dotnetRef.invokeMethodAsync(methodName, "", "");
+        }
+    });
+}
+export function initDocumentDatePicker(dotnetRef) {
+    createLitepicker("documentDateRange", dotnetRef, "OnDocumentDateRangeChanged");
+}
+
+export function initDeliveryDatePicker(dotnetRef) {
+    createLitepicker("deliveryDateRange", dotnetRef, "OnDeliveryDateRangeChanged");
+}

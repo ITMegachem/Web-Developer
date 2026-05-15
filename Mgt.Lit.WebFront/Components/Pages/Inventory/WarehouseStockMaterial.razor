@@ -193,7 +193,7 @@
                                 }
                                 
                                 <td class="text-center">@r.Unrestricted_Stock.ToString("N0")</td>
-                                <td class="text-center">@r.Blocked_Stock</td>
+                                <td class="text-center">@r.Blocked_Stock</td>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
                                 <td class="text-center">@r.Stock_in_QI</td>
                                 <td class="text-center">@r.Unit</td>
                                 
@@ -405,7 +405,10 @@
                 selectedProductGroup,
                 apiMaterial,
                 filters.Batch);
-
+            foreach (var item in result?.Items ?? [])
+            {
+                Console.WriteLine($"[DEBUG] BatchNo raw = '{item.BatchNo}'");
+            }
             allItems = result?.Items?
                
                    .Where(x =>
@@ -461,10 +464,10 @@
     }
     private void SelectMaterial(MaterialLookup item)
     {
-        _lastSelectedMaterial = item;  // ✅ cache
+        _lastSelectedMaterial = item;
         filters.Material = item.Code;
-        materialSearch = $"{item.Code} {item.Name}";
-        selectedMaterialName = item.Name;
+        materialSearch = $"{item.Code} {item.Name}".Trim();
+        selectedMaterialName = item.Name ?? "";
         materialResults.Clear();
         showMaterialDropdown = false;
         materialError = null;
@@ -528,7 +531,15 @@
 
         filters.Material = finalMaterial;
         filters.Page = 1;
+        if (string.IsNullOrWhiteSpace(selectedMaterialName) &&
+    !string.IsNullOrWhiteSpace(finalMaterial))
+        {
+            selectedMaterialName = await FetchProductDescriptionFromSapAsync(finalMaterial);
 
+            // fallback DB
+            if (string.IsNullOrWhiteSpace(selectedMaterialName))
+                selectedMaterialName = await stockService.GetMaterialDescriptionAsync(finalMaterial);
+        }
         await InvokeAsync(StateHasChanged);
         await LoadDataAsync();
     }
@@ -872,5 +883,34 @@
         showProductGroupDropdown = false;
         await InvokeAsync(StateHasChanged);
     }
-    
+    private async Task<string> FetchProductDescriptionFromSapAsync(string material)
+    {
+        try
+        {
+            var client = HttpFactory.CreateClient("ApiClient");
+
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"api/MGT_SalesOrder/ProductDescription" +
+                $"?material={Uri.EscapeDataString(material)}&language=EN");
+
+            request.Headers.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", AuthState.Token);
+
+            using var response = await client.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return "";
+
+            var json = await response.Content.ReadAsStringAsync();
+            var doc = System.Text.Json.JsonDocument.Parse(json);
+
+            return doc.RootElement.TryGetProperty("description", out var desc)
+                ? desc.GetString() ?? ""
+                : "";
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] FetchProductDescriptionFromSapAsync: {ex.Message}");
+            return "";
+        }
+    }
 }
