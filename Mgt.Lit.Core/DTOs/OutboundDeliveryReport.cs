@@ -24,6 +24,7 @@ namespace Mgt.Lit.Core.DTOs
     public class OutboundDeliveryReportItemDto
     {
         public DateTime? DeliveryDate { get; set; }       // 1. Date
+        public string? CustomerNameEn { get; set; }
         public string? SoldToParty { get; set; }           // 2. Sold-to
         public string? CustomerNameThai { get; set; }      // 3. Customer Name (Thai)
         public string? MaterialDescription { get; set; }   // 4. Material Description
@@ -42,6 +43,7 @@ namespace Mgt.Lit.Core.DTOs
         public int? Year { get; set; }                     // 16. Year
                                                            // extras for reference
         public string? DeliveryDocument { get; set; }
+        //public string? CustomerNameEn { get; set; }
         public string? Material { get; set; }
         public string? ReferenceSODocument { get; set; }
         public string? StorageClassCode { get; set; }

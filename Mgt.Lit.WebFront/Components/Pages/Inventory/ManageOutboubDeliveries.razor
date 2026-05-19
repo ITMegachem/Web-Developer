@@ -133,7 +133,7 @@
                                 <td class="text-muted" style="font-size:12px">@rowNum</td>
                                 <td style="white-space:nowrap">@r.DeliveryDate?.ToString("dd/MM/yyyy")</td>
                                 <td class="numeric-green">@r.SoldToParty</td>
-                                <td>@r.CustomerNameThai</td>
+                                <td>@r.CustomerNameEn</td>
                                 <td>@r.MaterialDescription</td>
                                 <td class="text-center" style="font-family:monospace;font-size:12px">
                                     @(string.IsNullOrEmpty(r.BatchNo) ? "-" : r.BatchNo)
@@ -170,6 +170,17 @@
                                 <td class="text-center">@r.GrossWeight?.ToString("N3")</td>
                                 <td class="text-center fw-bold" style="color:#0a58ca">
                                     @(((r.Quantity ?? 0) * (r.GrossWeight ?? 0)).ToString("N2"))
+                                </td>
+                                <!-- Route Name column -->
+                                <td style="font-size:12px">
+                                    @if (!string.IsNullOrEmpty(r.RouteNameThai))
+                                    {
+                                        @r.RouteNameThai
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">@r.SoldToParty</span>
+                                    }
                                 </td>
                                 <td class="text-center">@r.Month</td>
                                 <td class="text-center">@r.Year</td>
@@ -244,6 +255,7 @@
         public string? SoldToParty { get; set; }
         public string? CustomerNameThai { get; set; }
         public string? MaterialDescription { get; set; }
+        public string? CustomerNameEn { get; set; }  // ✅ เพิ่ม
         public string? BatchNo { get; set; }
         public decimal? Quantity { get; set; }      // ✅ nullable
         public string? Unit { get; set; }
@@ -404,6 +416,7 @@
         DeliveryDate = r.DeliveryDate,
         SoldToParty = r.SoldToParty,
         CustomerNameThai = r.CustomerNameThai,
+        CustomerNameEn = r.CustomerNameEn,  // ✅ เพิ่ม
         MaterialDescription = r.MaterialDescription,
         BatchNo = r.BatchNo,
         Quantity = r.Quantity,
@@ -503,15 +516,16 @@
 
             // headers
             var headers = new[]
- {
-    "Date", "Sold-to", "Customer Name", "Material Description",
-    "Batch No.", "Quantity", "Pack", "Ship To", "Ship To Address",
-    "License", "Class No.",
-     "Storage Class Description",  // ✅ เพิ่ม
-    "Net Weight", "Gross Weight",
-    "Total Gross Weight", "Route Name", "Month", "Year",
-    "Delivery Document", "Reference SO"
+{
+    // ✅ ตามภาพก่อน
+    "Date", "Sold-to Party", "Customer Name", "Material Description",
+    "Batch No.", "Quant.", "Pack", "Ship To", "License", "Class No.",
+    "Net Weight", "GW", "Total GW", "Name in Thai",
+    // ✅ ต่อท้ายของเดิม
+    "Ship To Address", "Storage Class Description",
+    "Month", "Year", "Delivery Document", "Reference SO"
 };
+
 
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];
@@ -524,26 +538,27 @@
             foreach (var r in allItems)
             {
                 int col = 1;
-                ws.Cell(row, col++).Value = r.DeliveryDate?.ToString("dd/MM/yyyy") ?? "";
-                ws.Cell(row, col++).Value = r.SoldToParty ?? "";
-                ws.Cell(row, col++).Value = r.CustomerNameThai ?? "";
-                ws.Cell(row, col++).Value = r.MaterialDescription ?? "";
-                ws.Cell(row, col++).Value = r.BatchNo ?? "";
-                ws.Cell(row, col++).Value = (double)(r.Quantity ?? 0);
-                ws.Cell(row, col++).Value = r.Unit ?? "";
-                ws.Cell(row, col++).Value = r.ShipToName ?? "";
-                ws.Cell(row, col++).Value = r.ShipToAddress ?? "";
-                ws.Cell(row, col++).Value = r.License ?? "";
-                ws.Cell(row, col++).Value = r.StorageClassCode ?? "";
-                ws.Cell(row, col++).Value = r.StorageClassDescription ?? "";
-                ws.Cell(row, col++).Value = (double)(r.NetWeight ?? 0);
-                ws.Cell(row, col++).Value = (double)(r.GrossWeight ?? 0);
-                ws.Cell(row, col++).Value = (double)((r.Quantity ?? 0) * (r.GrossWeight ?? 0));
-                ws.Cell(row, col++).Value = r.RouteNameThai ?? "";
-                ws.Cell(row, col++).Value = r.Month ?? 0;
-                ws.Cell(row, col++).Value = r.Year ?? 0;
-                ws.Cell(row, col++).Value = r.DeliveryDocument ?? "";
-                ws.Cell(row, col++).Value = r.ReferenceSODocument ?? "";
+                ws.Cell(row, col++).Value = r.DeliveryDate?.ToString("dd/MM/yyyy") ?? "";  // ✅ Date
+                ws.Cell(row, col++).Value = r.SoldToParty ?? "";                           // Sold-to Party
+                ws.Cell(row, col++).Value = r.CustomerNameEn ?? "";                        // Customer Name (EN)
+                ws.Cell(row, col++).Value = r.MaterialDescription ?? "";                   // Material Description
+                ws.Cell(row, col++).Value = r.BatchNo ?? "";                               // Batch No.
+                ws.Cell(row, col++).Value = (double)(r.Quantity ?? 0);                     // Quant.
+                ws.Cell(row, col++).Value = r.Unit ?? "";                                  // Pack
+                ws.Cell(row, col++).Value = r.ShipToName ?? "";                            // Ship To
+                ws.Cell(row, col++).Value = r.License ?? "";                               // License
+                ws.Cell(row, col++).Value = r.StorageClassCode ?? "";                      // Class No.
+                ws.Cell(row, col++).Value = (double)(r.NetWeight ?? 0);                    // Net Weight
+                ws.Cell(row, col++).Value = (double)(r.GrossWeight ?? 0);                  // GW
+                ws.Cell(row, col++).Value = (double)((r.Quantity ?? 0) * (r.GrossWeight ?? 0)); // Total GW
+                ws.Cell(row, col++).Value = r.CustomerNameThai ?? "";                      // Name in Thai
+                                                                                           // ต่อท้าย
+                ws.Cell(row, col++).Value = r.ShipToAddress ?? "";                         // Ship To Address
+                ws.Cell(row, col++).Value = r.StorageClassDescription ?? "";               // Storage Class Description
+                ws.Cell(row, col++).Value = r.Month ?? 0;                                  // Month
+                ws.Cell(row, col++).Value = r.Year ?? 0;                                   // Year
+                ws.Cell(row, col++).Value = r.DeliveryDocument ?? "";                      // Delivery Document
+                ws.Cell(row, col++).Value = r.ReferenceSODocument ?? "";                   // Reference SO
                 row++;
             }
 

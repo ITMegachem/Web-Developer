@@ -2481,34 +2481,137 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     .Select(x => x!)
                     .Distinct()
                     .ToList();
+                // ── 4.5 หา Delivery ที่ไม่มี SoldToParty (ไม่มี refSo) ──────────
+                var deliveryDocsWithoutSo = sapItems
+                    .Where(x =>
+                    {
+                        var refSo = x.TryGetProperty("ReferenceSDDocument", out var r)
+                            ? r.GetString() : null;
+                        return string.IsNullOrWhiteSpace(refSo);
+                    })
+                    .Select(x => x.TryGetProperty("DeliveryDocument", out var d)
+                        ? d.GetString() : null)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct()
+                    .ToList();
 
-                
+                // ✅ เพิ่ม log ตรงนี้
+                Console.WriteLine($"[DEBUG] deliveryDocsWithoutSo count={deliveryDocsWithoutSo.Count}: {string.Join(", ", deliveryDocsWithoutSo)}");
+
+                // ✅ เพิ่ม log ดู refSo ของทุก item
+                foreach (var x in sapItems)
+                {
+                    var doc = x.TryGetProperty("DeliveryDocument", out var d) ? d.GetString() : "?";
+                    var refSo = x.TryGetProperty("ReferenceSDDocument", out var r) ? r.GetString() : "?";
+                    Console.WriteLine($"[DEBUG] Doc={doc} RefSO='{refSo}'");
+                }
+
+                // ── 4.6 ดึง Header ของ Delivery ที่ไม่มี SO ──────────────────────
+                var deliveryHeaderDict = new Dictionary<string,
+                    (string? SoldToParty, string? ShipToParty)>
+                    (StringComparer.OrdinalIgnoreCase);
+
+                if (deliveryDocsWithoutSo.Any())
+                {
+                    try
+                    {
+                        // เรียก API_OUTBOUND_DELIVERY_SRV/A_OutbDeliveryHeader
+                        var headerJson = await _sapService
+                            .GetOutboundDeliveryHeadersAsync(deliveryDocsWithoutSo);
+                        var headerDoc = JsonDocument.Parse(headerJson);
+                        var headerResults = headerDoc.RootElement
+                            .GetProperty("d").GetProperty("results")
+                            .EnumerateArray();
+
+                        foreach (var h in headerResults)
+                        {
+                            var docNo = h.TryGetProperty("DeliveryDocument", out var dn)
+                                ? dn.GetString() : null;
+                            var soldTo = h.TryGetProperty("SoldToParty", out var st)
+                                ? st.GetString() : null;
+                            var shipTo = h.TryGetProperty("ShipToParty", out var sh)
+                                ? sh.GetString() : null;
+
+                            if (!string.IsNullOrWhiteSpace(docNo))
+                                deliveryHeaderDict[docNo!] = (soldTo, shipTo);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ERROR] DeliveryHeader: {ex.Message}");
+                    }
+                }
+
                 // ── 5. SO → SoldToParty ──────────────────────────────────────────
                 var soDict = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
                 if (refSoNumbers.Any())
                 {
                     try
                     {
-                        // ✅ แก้: ดึงทั้งหมด ไม่จำกัด batch
                         var soList = await _context.Op_SalesOrder
                             .AsNoTracking()
                             .Where(x => refSoNumbers.Contains(x.SalesOrder))
                             .Select(x => new { x.SalesOrder, x.SoldToParty })
                             .ToListAsync();
 
+                        // ✅ Build soDict ก่อน
                         soDict = soList
                             .GroupBy(x => x.SalesOrder)
                             .ToDictionary(
                                 g => g.Key,
                                 g => g.First().SoldToParty,
                                 StringComparer.OrdinalIgnoreCase);
+
+                        // ✅ แล้วค่อย log และ fallback หลัง soDict พร้อมแล้ว
+                        var missingSoNumbers = refSoNumbers
+                            .Where(so => !soDict.ContainsKey(so))
+                            .ToList();
+
+                        Console.WriteLine($"[DEBUG] refSoNumbers count={refSoNumbers.Count}");
+                        Console.WriteLine($"[DEBUG] soDict found={soDict.Count}");
+                        Console.WriteLine($"[DEBUG] Missing SO in DB: {string.Join(", ", missingSoNumbers)}");
+
+                        // ✅ Fallback ดึง SO ที่หาไม่เจอจาก SAP โดยตรง
+                        // ✅ Fallback ดึง SO ที่หาไม่เจอจาก SAP โดยตรง
+                        if (missingSoNumbers.Any())
+                        {
+                            try
+                            {
+                                Console.WriteLine($"[DEBUG] Calling SAP SO fallback for: {string.Join(", ", missingSoNumbers)}");
+
+                                var sapSoJson = await _sapService.GetSalesOrderSoldToAsync(missingSoNumbers);
+
+                                Console.WriteLine($"[DEBUG] SAP SO RAW: {sapSoJson}"); // ✅ เพิ่ม log ดู response จริง
+
+                                var sapSoDoc = JsonDocument.Parse(sapSoJson);
+                                var sapSoResults = sapSoDoc.RootElement
+                                    .GetProperty("d").GetProperty("results")
+                                    .EnumerateArray();
+
+                                foreach (var so in sapSoResults)
+                                {
+                                    var soNo = so.TryGetProperty("SalesOrder", out var sn)
+                                        ? sn.GetString() : null;
+                                    var soldTo = so.TryGetProperty("SoldToParty", out var st)
+                                        ? st.GetString() : null;
+
+                                    if (!string.IsNullOrWhiteSpace(soNo))
+                                        soDict[soNo!] = soldTo;
+
+                                    Console.WriteLine($"[DEBUG] SAP SO fallback: SO={soNo} SoldTo={soldTo}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[ERROR] SAP SO fallback: {ex.Message}");
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"[ERROR] soDict: {ex.Message}");
                     }
                 }
-
                 var soldToParties = soDict.Values
                     .Where(x => !string.IsNullOrWhiteSpace(x))
                     .Select(x => x!)
@@ -2517,6 +2620,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
                 // ── 6. Customer Thai Name ──────────────────────────────────────────
                 var customerThaiDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                //var customerEnDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // ✅ เพิ่ม
 
                 if (soldToParties.Any())
                 {
@@ -2544,8 +2648,173 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     {
                         Console.WriteLine($"[ERROR] customerThaiDict: {ex.Message}");
                     }
-                }
 
+                    // ✅ ดึงชื่ออังกฤษจาก Mapping_Soldtos หรือ Mapping_Shiptos
+                    try
+                    {
+                        var enNames = await _context.Mapping_Shiptos
+                            .AsNoTracking()
+                            .Where(x => x.Customer != null &&
+                                        soldToParties.Contains(x.Customer.Trim()) &&
+                                        x.FullName != null && x.FullName.Trim() != "")
+                            .Select(x => new
+                            {
+                                Customer = x.Customer!.Trim(),
+                                x.FullName
+                            })
+                            .Distinct()
+                            .ToListAsync();
+
+                       
+                    }
+                    catch (Exception ex)
+                    {
+                        
+                    }
+                }
+                // ── 6.5 Fallback: customer ที่ไม่มีใน Ms_BusinessPartnerCustomerThaiName ──
+                var missingCustomers = soldToParties
+                    .Where(c => !customerThaiDict.ContainsKey(c))
+                    .ToList();
+
+                if (missingCustomers.Any())
+                {
+                    // ✅ Fallback 1: หาจาก Mapping_Shipto.Customer → FullName
+                    try
+                    {
+                        var mappingNames = await _context.Mapping_Shiptos
+                            .AsNoTracking()
+                            .Where(x => x.Customer != null &&
+                                        missingCustomers.Contains(x.Customer.Trim()) &&
+                                        x.FullName != null &&
+                                        x.FullName.Trim() != "")
+                            .Select(x => new
+                            {
+                                Customer = x.Customer!.Trim(),
+                                x.FullName
+                            })
+                            .Distinct()
+                            .ToListAsync();
+
+                        foreach (var m in mappingNames)
+                        {
+                            if (!customerThaiDict.ContainsKey(m.Customer))
+                            {
+                                customerThaiDict[m.Customer] = m.FullName!;
+                                Console.WriteLine($"[DEBUG] ThaiName from Mapping_Shipto: {m.Customer} = {m.FullName}");
+                            }
+                        }
+
+                        // ✅ ยังขาดอยู่ → fallback SAP
+                        missingCustomers = missingCustomers
+                            .Where(c => !customerThaiDict.ContainsKey(c))
+                            .ToList();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ERROR] Mapping_Shipto fallback: {ex.Message}");
+                    }
+
+                    // ✅ Fallback 2: SAP
+                    if (missingCustomers.Any())
+                    {
+                        try
+                        {
+                            var sapCustJson = await _sapService.GetCustomersByCodesAsync(missingCustomers);
+                            var sapCustDoc = JsonDocument.Parse(sapCustJson);
+                            var sapCustResults = sapCustDoc.RootElement
+                                .GetProperty("d").GetProperty("results")
+                                .EnumerateArray();
+
+                            foreach (var cust in sapCustResults)
+                            {
+                                var custCode = cust.TryGetProperty("Customer", out var cc)
+                                    ? cc.GetString() : null;
+                                var fullName = cust.TryGetProperty("CustomerFullName", out var cfn)
+                                    ? cfn.GetString() : null;
+                                var thaiName = ExtractThaiName(fullName);
+
+                                if (!string.IsNullOrWhiteSpace(custCode))
+                                {
+                                    customerThaiDict[custCode!] =
+                                        !string.IsNullOrWhiteSpace(thaiName)
+                                            ? thaiName
+                                            : (fullName ?? custCode!);
+                                    Console.WriteLine($"[DEBUG] SAP Customer fallback: {custCode} = {customerThaiDict[custCode!]}");
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[ERROR] Customer SAP fallback: {ex.Message}");
+                        }
+                    }
+                }
+                // ── 6.6 Customer English Name จาก Mapping_Soldtos ────────────────
+                var customerEnDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                if (soldToParties.Any())
+                {
+                    try
+                    {
+                        var enFromSoldTo = await _context.Mapping_Soldtos
+                            .AsNoTracking()
+                            .Where(x => x.Customer != null &&          // ✅ เช็ค null ก่อน
+                                        x.FullName != null &&
+                                        x.FullName.Trim() != "" &&
+                                        soldToParties.Contains(x.Customer.Trim()))
+                            .Select(x => new
+                            {
+                                Customer = x.Customer!.Trim(),
+                                x.FullName
+                            })
+                            .Distinct()
+                            .ToListAsync();
+
+                        Console.WriteLine($"[DEBUG] enFromSoldTo count={enFromSoldTo.Count}");
+                        foreach (var e in enFromSoldTo.Take(5))
+                            Console.WriteLine($"[DEBUG] EN: {e.Customer} = {e.FullName}");
+
+                        foreach (var e in enFromSoldTo)
+                            if (!customerEnDict.ContainsKey(e.Customer))
+                                customerEnDict[e.Customer] = e.FullName!;
+
+                        // ✅ ยังขาด → SAP
+                        var stillMissing = soldToParties
+                            .Where(c => !customerEnDict.ContainsKey(c))
+                            .ToList();
+
+                        Console.WriteLine($"[DEBUG] stillMissing EN: {string.Join(", ", stillMissing)}");
+
+                        if (stillMissing.Any())
+                        {
+                            var sapCustJson = await _sapService.GetCustomersByCodesAsync(stillMissing);
+                            var sapCustDoc = JsonDocument.Parse(sapCustJson);
+                            var sapCustResults = sapCustDoc.RootElement
+                                .GetProperty("d").GetProperty("results")
+                                .EnumerateArray();
+
+                            foreach (var cust in sapCustResults)
+                            {
+                                var custCode = cust.TryGetProperty("Customer", out var cc)
+                                    ? cc.GetString() : null;
+                                var fullName = cust.TryGetProperty("CustomerFullName", out var cfn)
+                                    ? cfn.GetString() : null;
+
+                                if (!string.IsNullOrWhiteSpace(custCode) &&
+                                    !string.IsNullOrWhiteSpace(fullName))
+                                {
+                                    customerEnDict[custCode!] = fullName!;
+                                    Console.WriteLine($"[DEBUG] EN from SAP: {custCode} = {fullName}");
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ERROR] customerEnDict: {ex.Message}");
+                    }
+                }
                 // ── 7. Material Master จาก SAP API_PRODUCT_SRV ───────────────────
                 // Fields: NetWeight, GrossWeight, WeightUnit, YY1_MM_TRANSPORTCLASS_PRD (LICENSE)
                 var productMasterDict = new Dictionary<string,
@@ -2609,7 +2878,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     }
                 }
 
-                // ── 8. Ship To จาก Mapping_Shiptos (same as SalesOrderFull) ──────
+                // ── 8. Ship To จาก Mapping_Shiptos ──────────────────────────────
                 var shipToDict = new Dictionary<string,
                     (string? FullName, string? Address)>(StringComparer.OrdinalIgnoreCase);
 
@@ -2638,97 +2907,234 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     }
                 }
 
+                // ── 8.5 หา deliveryDocsForShipTo ก่อน ──────────────────────────
+                var missingSoForShipTo = refSoNumbers
+                    .Where(so => !shipToDict.ContainsKey(so))
+                    .ToList();
+
+                var deliveryDocsForShipTo = sapItems  // ✅ ประกาศตรงนี้
+                    .Where(x =>
+                    {
+                        var refSo = x.TryGetProperty("ReferenceSDDocument", out var r)
+                            ? r.GetString() : null;
+                        return !string.IsNullOrWhiteSpace(refSo) &&
+                               missingSoForShipTo.Contains(refSo);
+                    })
+                    .Select(x => x.TryGetProperty("DeliveryDocument", out var d)
+                        ? d.GetString() : null)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x!)
+                    .Distinct()
+                    .ToList();
+
+                Console.WriteLine($"[DEBUG] Missing ShipTo SO: {string.Join(", ", missingSoForShipTo)}");
+
+                if (deliveryDocsForShipTo.Any())
+                {
+                    try
+                    {
+                        var headerJson = await _sapService
+                            .GetOutboundDeliveryHeadersAsync(deliveryDocsForShipTo);
+                        var headerDoc = JsonDocument.Parse(headerJson);
+                        var headerResults = headerDoc.RootElement
+                            .GetProperty("d").GetProperty("results")
+                            .EnumerateArray();
+
+                        foreach (var h in headerResults)
+                        {
+                            var docNo = h.TryGetProperty("DeliveryDocument", out var dn)
+                                ? dn.GetString() : null;
+                            var shipToParty = h.TryGetProperty("ShipToParty", out var sh)
+                                ? sh.GetString() : null;
+
+                            var matchedRefSo = sapItems
+                                .Where(x => x.TryGetProperty("DeliveryDocument", out var dd2) &&
+                                            dd2.GetString() == docNo)
+                                .Select(x => x.TryGetProperty("ReferenceSDDocument", out var r2)
+                                    ? r2.GetString() : null)
+                                .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+
+                            if (!string.IsNullOrWhiteSpace(matchedRefSo) &&
+                                !string.IsNullOrWhiteSpace(shipToParty))
+                            {
+                                // ✅ ดึงชื่ออังกฤษจาก Mapping_Shipto.Customer
+                                var mappingShipTo = await _context.Mapping_Shiptos
+                                    .AsNoTracking()
+                                    .Where(x => x.Customer != null &&
+                                                x.Customer.Trim() == shipToParty.Trim())
+                                    .Select(x => new { x.FullName, x.Address })
+                                    .FirstOrDefaultAsync();
+
+                                shipToDict[matchedRefSo!] = (
+                                    FullName: mappingShipTo?.FullName ?? shipToParty,
+                                    Address: mappingShipTo?.Address
+                                );
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ERROR] ShipTo fallback: {ex.Message}");
+                    }
+                }
+
+                // ── 8.6 Resolve ShipTo code → FullName ──────────────────────────
+                var keys = shipToDict.Keys.ToList();
+                foreach (var key in keys)
+                {
+                    var val = shipToDict[key];
+                    if (!string.IsNullOrWhiteSpace(val.FullName) &&
+                        val.FullName!.All(char.IsDigit))
+                    {
+                        try
+                        {
+                            var custJson = await _sapService.GetCustomersByCodesAsync(
+                                new List<string> { val.FullName! });
+                            var custDoc = JsonDocument.Parse(custJson);
+                            var custResults = custDoc.RootElement
+                                .GetProperty("d").GetProperty("results")
+                                .EnumerateArray();
+
+                            foreach (var c in custResults)
+                            {
+                                var fullName = c.TryGetProperty("CustomerFullName", out var cfn)
+                                    ? cfn.GetString() : null;
+                                if (!string.IsNullOrWhiteSpace(fullName))
+                                    shipToDict[key] = (FullName: fullName, Address: val.Address);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[ERROR] ShipTo resolve: {ex.Message}");
+                        }
+                    }
+                }
+
+                // ── 8.7 Resolve ShipTo Address ──────────────────────────────────
+                var keys2 = shipToDict.Keys.ToList();
+                foreach (var key in keys2)
+                {
+                    var val = shipToDict[key];
+                    if (string.IsNullOrWhiteSpace(val.Address) &&
+                        !string.IsNullOrWhiteSpace(val.FullName))
+                    {
+                        soDict.TryGetValue(key, out var soldToCode);
+                        if (!string.IsNullOrWhiteSpace(soldToCode))
+                        {
+                            try
+                            {
+                                var addrData = await _context.Mapping_Shiptos
+                                    .AsNoTracking()
+                                    .Where(x => x.Customer != null &&
+                                                x.Customer.Trim() == soldToCode!.Trim() &&
+                                                x.Address != null)
+                                    .Select(x => new { x.FullName, x.Address })
+                                    .FirstOrDefaultAsync();
+
+                                if (addrData != null)
+                                    shipToDict[key] = (FullName: val.FullName, Address: addrData.Address);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[ERROR] ShipTo Address: {ex.Message}");
+                            }
+                        }
+                    }
+                }
                 // ── 9. Map SAP items → DTO ────────────────────────────────────────
                 var items = sapItems
-                     .Where(item =>
-                     {
-                         var qtyStr = item.TryGetProperty("ActualDeliveryQuantity", out var qp)
-                             ? qp.GetString() : "0";
-                         return decimal.TryParse(qtyStr,
-                             System.Globalization.NumberStyles.Any,
-                             System.Globalization.CultureInfo.InvariantCulture,
-                             out var qv) && qv > 0;
-                     })
-                    .Select(item =>
-                {
-                    var material = item.TryGetProperty("Material", out var mat) ? mat.GetString() : null;
-                    var refSo = item.TryGetProperty("ReferenceSDDocument", out var ref1) ? ref1.GetString() : null;
-                    var dateRaw = item.TryGetProperty("ProductAvailabilityDate", out var dr) ? dr.GetString() : null;
-                    var deliveryDate = ParseSapDate(dateRaw);
+      .Where(item =>
+      {
+          var qtyStr = item.TryGetProperty("ActualDeliveryQuantity", out var qp)
+              ? qp.GetString() : "0";
+          return decimal.TryParse(qtyStr,
+              System.Globalization.NumberStyles.Any,
+              System.Globalization.CultureInfo.InvariantCulture,
+              out var qv) && qv > 0;
+      })
+     .Select(item =>
+     {
+         var material = item.TryGetProperty("Material", out var mat) ? mat.GetString() : null;
+         var refSo = item.TryGetProperty("ReferenceSDDocument", out var ref1) ? ref1.GetString() : null;
+         var dateRaw = item.TryGetProperty("ProductAvailabilityDate", out var dr) ? dr.GetString() : null;
+         var deliveryDate = ParseSapDate(dateRaw);
 
-                    // 2. Sold-to
-                    soDict.TryGetValue(refSo ?? "", out var soldTo);
+         // ── 2. Sold-to ──────────────────────────────────────────────────
+         soDict.TryGetValue(refSo ?? "", out var soldTo);
+         customerThaiDict.TryGetValue(soldTo ?? "", out var thaiName);
 
-                    // 6. Quantity
-                    var qtyStr = item.TryGetProperty("ActualDeliveryQuantity", out var qp)
-                        ? qp.GetString() : null;
-                    decimal? qty = decimal.TryParse(qtyStr,
-                        System.Globalization.NumberStyles.Any,
-                        System.Globalization.CultureInfo.InvariantCulture, out var qv)
-                        ? qv : null;
+         // ✅ Fallback 1: จาก Header lookup
+         if (string.IsNullOrWhiteSpace(soldTo))
+         {
+             var deliveryDoc = item.TryGetProperty("DeliveryDocument", out var ddd)
+                 ? ddd.GetString() : null;
+             if (!string.IsNullOrWhiteSpace(deliveryDoc) &&
+                 deliveryHeaderDict.TryGetValue(deliveryDoc!, out var hdr))
+             {
+                 soldTo = hdr.SoldToParty;
+             }
+         }
+         // 6. Quantity
+         var qtyStr = item.TryGetProperty("ActualDeliveryQuantity", out var qp)
+            ? qp.GetString() : null;
+         decimal? qty = decimal.TryParse(qtyStr,
+            System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var qv)
+            ? qv : null;
 
-                    // Material Master fields
-                    productMasterDict.TryGetValue(material ?? "", out var prod);
-                    var netWeight = prod.NetWeight;
-                    var grossWeight = prod.GrossWeight;
+         // Material Master fields
+         productMasterDict.TryGetValue(material ?? "", out var prod);
+         var netWeight = prod.NetWeight;
+         var grossWeight = prod.GrossWeight;
 
-                    // 13. Total Gross Weight = Qty * GrossWeight
-                    decimal? totalGross = (qty.HasValue && grossWeight.HasValue)
-                        ? qty.Value * grossWeight.Value
-                        : null;
+         // 13. Total Gross Weight = Qty * GrossWeight
+         decimal? totalGross = (qty.HasValue && grossWeight.HasValue)
+            ? qty.Value * grossWeight.Value
+            : null;
 
-                    // 8. Ship To
-                    shipToDict.TryGetValue(refSo ?? "", out var shipTo);
+         // ── 8. Ship To: ลองจาก shipToDict ก่อน ถ้าไม่มี fallback จาก SAP field โดยตรง ──
+         shipToDict.TryGetValue(refSo ?? "", out var shipTo);
+         if (string.IsNullOrWhiteSpace(shipTo.FullName))
+         {
+             var shipToParty = item.TryGetProperty("ShipToParty", out var shp) ? shp.GetString() : null;
+             if (!string.IsNullOrWhiteSpace(shipToParty))
+                 shipTo = (FullName: shipToParty, Address: null);
+         }
 
-                    // 3. Customer Thai Name
-                    customerThaiDict.TryGetValue(soldTo ?? "", out var thaiName);
-
-                    return new OutboundDeliveryReportItemDto
-                    {
-                        // 1. Date
-                        DeliveryDate = deliveryDate,
-                        // 2. Sold-to
-                        SoldToParty = soldTo,
-                        // 3. Customer Name Thai
-                        CustomerNameThai = thaiName,
-                        // 4. Material Description
-                        MaterialDescription = item.TryGetProperty("DeliveryDocumentItemText", out var desc)
-                                                  ? desc.GetString() : null,
-                        // 5. Batch No.
-                        BatchNo = item.TryGetProperty("Batch", out var b)
-                                                  ? b.GetString() : null,
-                        // 6. Quantity
-                        Quantity = qty,
-                        // 7. Pack (Unit)
-                        Unit = item.TryGetProperty("DeliveryQuantityUnit", out var u)
-                                                  ? u.GetString() : null,
-                        // 8. Ship To
-                        ShipToName = shipTo.FullName,
-                        ShipToAddress = shipTo.Address,
-                        // 9. LICENSE
-                        License = prod.License,
-                        // 10. Class No.
-                        ClassNo = prod.ClassNo,
-                        // 11. Net Weight
-                        StorageClassCode = prod.StorageClassCode,
-                        StorageClassDescription = _sapService.GetStorageClassDescription(prod.StorageClassCode),
-                        NetWeight = netWeight,
-                        GrossWeight = grossWeight,
-                        // 13. Total Gross Weight
-                        TotalGrossWeight = totalGross,
-                        // 14. Route Name (Thai customer name — same field)
-                        RouteNameThai = thaiName,
-                        // 15. Month
-                        Month = deliveryDate?.Month,
-                        // 16. Year
-                        Year = deliveryDate?.Year,
-                        // extras
-                        DeliveryDocument = item.TryGetProperty("DeliveryDocument", out var dd)
-                                                  ? dd.GetString() : null,
-                        Material = material,
-                        ReferenceSODocument = refSo
-                    };
-                }).ToList();
+         // 3. Customer Thai Name
+         customerThaiDict.TryGetValue(soldTo ?? "", out var customerThaiName);
+         customerEnDict.TryGetValue(soldTo ?? "", out var customerEnName); // ✅ เพิ่ม
+         return new OutboundDeliveryReportItemDto
+         {
+             DeliveryDate = deliveryDate,
+             SoldToParty = soldTo,
+             CustomerNameThai = thaiName,
+             CustomerNameEn = customerEnName,
+             MaterialDescription = item.TryGetProperty("DeliveryDocumentItemText", out var desc)
+                                      ? desc.GetString() : null,
+             BatchNo = item.TryGetProperty("Batch", out var b)
+                                      ? b.GetString() : null,
+             Quantity = qty,
+             Unit = item.TryGetProperty("DeliveryQuantityUnit", out var u)
+                                      ? u.GetString() : null,
+             ShipToName = shipTo.FullName,
+             ShipToAddress = shipTo.Address,
+             License = prod.License,
+             ClassNo = prod.ClassNo,
+             StorageClassCode = prod.StorageClassCode,
+             StorageClassDescription = _sapService.GetStorageClassDescription(prod.StorageClassCode),
+             NetWeight = netWeight,
+             GrossWeight = grossWeight,
+             TotalGrossWeight = totalGross,
+             RouteNameThai = thaiName,
+             Month = deliveryDate?.Month,
+             Year = deliveryDate?.Year,
+             DeliveryDocument = item.TryGetProperty("DeliveryDocument", out var dd)
+                                      ? dd.GetString() : null,
+             Material = material,
+             ReferenceSODocument = refSo
+         };
+     }).ToList();
 
                 // ── 10. Post-map filters ──────────────────────────────────────────
                 if (!string.IsNullOrWhiteSpace(request.CustomerName))

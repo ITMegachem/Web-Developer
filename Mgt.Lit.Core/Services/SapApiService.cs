@@ -328,6 +328,35 @@ GetSalesOrderItemsAsync(List<string> salesOrders)
 
         return result;
     }
+    public async Task<string> GetOutboundDeliveryHeadersAsync(List<string> deliveryDocuments)
+    {
+        var baseUrl = _configuration["SapConfig:OutboundDelivery:BaseUrl"];
+        var authHeader = _configuration["SapConfig:OutboundDelivery:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        // สร้าง filter จาก delivery doc numbers
+        var filterParts = deliveryDocuments
+            .Select(d => $"DeliveryDocument eq '{d}'");
+        var filter = string.Join(" or ", filterParts);
+
+        var url = $"{baseUrl!.TrimEnd('/')}/A_OutbDeliveryHeader" +
+                  $"?$format=json" +
+                  $"&$select=DeliveryDocument,SoldToParty,ShipToParty" +
+                  $"&$filter={filter}";
+
+        Console.WriteLine($"[DEBUG] DeliveryHeader URL: {url}");
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"SAP DeliveryHeader Error: {result}");
+
+        return result;
+    }
     public async Task<string> GetOutboundDeliveryItemsByFilterAsync(
      DateTime? dateFrom = null,
      DateTime? dateTo = null,
@@ -410,6 +439,33 @@ GetSalesOrderItemsAsync(List<string> salesOrders)
             .TryGetProperty("ProductDescription", out var desc)
             ? desc.GetString()
             : null;
+    }
+    public async Task<string> GetSalesOrderSoldToAsync(List<string> salesOrders)
+    {
+        var baseUrl = _configuration["SapConfig:SalesOrder:BaseUrl"];
+        var authHeader = _configuration["SapConfig:SalesOrder:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        var filterParts = salesOrders.Select(so => $"SalesOrder eq '{so}'");
+        var filter = string.Join(" or ", filterParts);
+
+        var url = $"{baseUrl!.TrimEnd('/')}/A_SalesOrder" +
+                  $"?$format=json" +
+                  $"&$select=SalesOrder,SoldToParty" +
+                  $"&$filter={filter}";
+
+        Console.WriteLine($"[DEBUG] SAP SO SoldTo URL: {url}");
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"SAP SO Error: {result}");
+
+        return result;
     }
     public async Task<string> GetProductMasterAsync(IEnumerable<string> materialCodes)
     {
