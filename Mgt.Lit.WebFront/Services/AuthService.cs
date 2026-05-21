@@ -155,4 +155,52 @@ public class AuthService
         }
         catch { }
     }
+    public async Task<string?> GetMicrosoftLoginUrlAsync()
+    {
+        var response = await _http.GetFromJsonAsync<MicrosoftLoginUrlResponse>
+            ("api/member/microsoft-login-url");
+        return response?.Url;
+    }
+
+    public class MicrosoftLoginUrlResponse
+    {
+        public string Url { get; set; } = "";
+    }
+    public async Task<LoginResponseDto?> MicrosoftCallbackAsync(string code)
+    {
+        var response = await _http.PostAsJsonAsync(
+            "api/member/microsoft-callback",
+            new { Code = code });
+
+        var raw = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode) return null;
+
+        // ✅ CaseInsensitive แก้ปัญหา token vs Token
+        var result = System.Text.Json.JsonSerializer.Deserialize<LoginResponseDto>(
+            raw,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+        if (result is null || string.IsNullOrWhiteSpace(result.Token))
+            return null;
+
+        _authState.Token = result.Token;
+        await _storage.SetAsync("authToken", result.Token);
+        await _storage.SetAsync("UserID", result.UserID);
+        await _storage.SetAsync("fullName", result.FullName ?? string.Empty);
+        await _storage.SetAsync("username", result.Username ?? string.Empty);
+        await _storage.SetAsync("userRole", result.UserRole ?? string.Empty);
+        await _storage.SetAsync("division", result.Division ?? string.Empty);
+        await _storage.SetAsync("primaryCompanyID", result.PrimaryCompanyID);
+        await _storage.SetAsync("primaryCompanyCode", result.PrimaryCompanyCode ?? string.Empty);
+        await _storage.SetAsync("companies", result.Companies);
+        await _storage.SetAsync("permission", result.Permission);
+
+        await _authState.InitializeAsync(force: true);
+        return result;
+    }
+
 }

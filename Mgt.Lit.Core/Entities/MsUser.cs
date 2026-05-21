@@ -18,6 +18,7 @@ namespace Mgt.Lit.Core.Entities
         public bool IsActive { get; set; }
         public string? Division { get; set; }
         public string? TokenVersion { get; set; }
+        public string? Email { get; set; }
     }
     [Table("Ms_Company")]
     public class MsCompany

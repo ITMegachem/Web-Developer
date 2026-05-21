@@ -87,6 +87,7 @@ builder.Services
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
 builder.Services.AddScoped<ActivityLogFilter>();
+builder.Services.AddHttpClient();
 // =======================
 // CORS
 // =======================

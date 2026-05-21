@@ -156,7 +156,9 @@
                                     @item.DocumentDate.ToString("dd-MM-yyyy")
                                 </td>
                                 <td class="text-center align-middle">@item.ElementType</td>
-                                <td class="text-center align-middle">@item.DocumentNo</td>
+                                <td class="text-center align-middle">
+                                    <span class="highlight-text">@item.DocumentNo</span>
+                                </td>
                                 <td class="text-center align-middle">@item.ReceiptReqmtQty.ToString("N0")</td>
                                 <td class="text-center align-middle">@item.AvailableQty.ToString("N0")</td>
                                 <td class="text-center align-middle">
@@ -228,30 +230,6 @@
             </table>
         </div>
     </div>
-
-        @* --- Pagination (ลูกศรหนาแบบในรูป) --- *@
-        @if (hasSearched && stockData?.Detail != null && stockData.Detail.Any())
-        {
-            <div class="table-footer-pagination">
-                <div class="text-muted small">
-                    Results: @stockData.Detail.Count items
-                </div>
-
-                <div class="pagination-controls d-flex align-items-center gap-3">
-                    <button class="pill-nav-btn">
-                        <i class="bi bi-chevron-left"></i>
-                    </button>
-
-                    <div class="page-indicator">
-                        <span class="fw-bold text-success">1</span> / 1
-                    </div>
-
-                    <button class="pill-nav-btn">
-                        <i class="bi bi-chevron-right"></i>
-                    </button>
-                </div>
-            </div>
-        }
 
 
     @* --- ปุ่ม Export --- *@
@@ -707,7 +685,7 @@
 
         ws.Columns().AdjustToContents();
 
-        // ── Download ──────────────────────────────────────────────────────────
+       
         // ── Download ───────────────────────────────────────────────────────────
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
@@ -734,3 +712,46 @@
         }
     }
 }
+<style>
+    /* ตัวใหญ่ขึ้น */
+    .modern-table tbody td {
+        font-size: 1rem;
+        line-height: 1.8;
+        padding: 12px 10px;
+    }
+
+    /* สลับสีแถว ช่วยลดลายตา */
+    .modern-table tbody tr:nth-child(odd) {
+        background-color: #f9fafb;
+    }
+
+    .modern-table tbody tr:hover {
+        background-color: #e8f5e9;
+    }
+
+    /* เลขติดลบแดง */
+    .modern-table tbody td.negative {
+        color: #dc3545;
+        font-weight: 600;
+    }
+
+   
+    /* ✅ เน้นเฉพาะคอลัมน์ MRP Element Data */
+    .modern-table tbody td.col-element-data {
+        font-weight: 700;
+        font-size: 1.05rem;
+        color: #1a1a1a;
+        letter-spacing: 0.3px;
+        background-color: #fff8e1; /* ✅ เหลืองอ่อน highlight */
+        border-left: 3px solid #ffc107; /* ✅ เส้นซ้ายเหลืองเข้ม */
+    }
+    /* ✅ highlight เฉพาะตัวอักษร */
+    .highlight-text {
+        background-color: #fff8e1;
+        border-radius: 4px;
+        padding: 2px 8px;
+        font-weight: 700;
+        font-size: 1.05rem;
+        color: #1a1a1a;
+    }
+</style>

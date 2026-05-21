@@ -71,7 +71,7 @@ public sealed class StockService
     CancellationToken cancellationToken = default)
     {
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-            throw new UnauthorizedAccessException("Session expired. Please login again.");
+         throw new UnauthorizedAccessException("Session expired. Please login again.");
 
         response.EnsureSuccessStatusCode();
 

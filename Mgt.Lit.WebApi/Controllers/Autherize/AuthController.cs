@@ -25,13 +25,15 @@ namespace Mgt.Lit.WebApi.Controllers
         private readonly IConfiguration _config;
         private readonly AppDbContext _context;
         private readonly IActivityLogService _activityLogService;
+        private readonly HttpClient _httpClient;
 
-        public AuthController(IUserRepository userRepo, IConfiguration config, AppDbContext context, IActivityLogService activityLogService)
+        public AuthController(IUserRepository userRepo, IConfiguration config, AppDbContext context, IActivityLogService activityLogService, IHttpClientFactory httpClientFactory)
         {
             _userRepo = userRepo;
             _config = config;
             _context = context;
             _activityLogService = activityLogService;
+            _httpClient = httpClientFactory.CreateClient();
         }
 
         [HttpPost("login")]
@@ -499,5 +501,198 @@ namespace Mgt.Lit.WebApi.Controllers
                 }
             });
         }
+        [HttpGet("microsoft-login-url")]
+        public IActionResult GetMicrosoftLoginUrl()
+        {
+            var tenantId = _config["AzureAd:TenantId"];
+            var clientId = _config["AzureAd:ClientId"];
+            var redirectUri = _config["AzureAd:RedirectUri"];
+
+            // ✅ เช็ค null ก่อน
+            if (string.IsNullOrEmpty(tenantId) ||
+                string.IsNullOrEmpty(clientId) ||
+                string.IsNullOrEmpty(redirectUri))
+            {
+                return BadRequest(new { message = "AzureAd config is missing" });
+            }
+
+            var url = $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/authorize" +
+                      $"?client_id={clientId}" +
+                      $"&response_type=code" +
+                      $"&redirect_uri={Uri.EscapeDataString(redirectUri)}" +
+                      $"&scope=openid%20profile%20email%20User.Read" +
+                      $"&response_mode=query";
+
+            return Ok(new { url });
+        }
+        [HttpPost("microsoft-callback")]
+        public async Task<IActionResult> MicrosoftCallback([FromBody] MicrosoftCallbackDto dto)
+        {
+            // แลก code เป็น token
+            var tokenResponse = await ExchangeCodeForToken(dto.Code);
+
+            // ดึงข้อมูล User จาก Microsoft Graph
+            var msUser = await GetMicrosoftUserInfo(tokenResponse.AccessToken);
+
+            // หา User ในระบบจาก Email
+            var email = msUser.Mail ?? msUser.UserPrincipalName;
+            var user = await _context.MsUsers
+                .FirstOrDefaultAsync(u => u.Email == email);
+
+            if (user == null)
+                return Unauthorized(new { message = "ไม่พบ User นี้ในระบบ" });
+
+            // ดึง Companies + Permission เหมือน Login ปกติ
+            var companies = await (
+                from uc in _context.MsUserCompanies
+                join c in _context.MsCompanies on uc.CompanyID equals c.CompanyID
+                where uc.UserID == user.UserID
+                orderby uc.IsPrimary descending
+                select new UserCompanyDto
+                {
+                    CompanyID = uc.CompanyID,
+                    CompanyCode = c.CompanyCode,
+                    CompanyName = c.CompanyName,
+                    IsPrimary = uc.IsPrimary
+                }
+            ).ToListAsync();
+
+            var primary = companies.FirstOrDefault(x => x.IsPrimary)
+                          ?? companies.FirstOrDefault();
+
+            View_UserPermission? permission = null;
+            if (primary?.CompanyID != null)
+            {
+                permission = await _context.View_UserPermissions
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x =>
+                        x.UserID == user.UserID &&
+                        x.CompanyID == primary.CompanyID);
+            }
+
+            var accessToken = JwtHelper.GenerateToken(
+                user, _config,
+                primaryCompanyId: primary?.CompanyID,
+                primaryCompanyCode: primary?.CompanyCode,
+                allCompanies: companies,
+                permission: permission == null ? null : new UserPermissionDto
+                {
+                    Page1Access = permission.Page1Access,
+                    Page2Access = permission.Page2Access,
+                    Page3Access = permission.Page3Access,
+                    Page4Access = permission.Page4Access,
+                    DataScope = permission.DataScope,
+                    CanViewVendor = permission.CanViewVendor,
+                    CanViewCost = permission.CanViewCost,
+                    CanViewCustomer = permission.CanViewCustomer
+                });
+
+            return Ok(new
+            {
+                Token = accessToken,
+                UserID = user.UserID,         // ✅ เพิ่ม
+                Username = user.Username,
+                FullName = user.FullName,
+                UserRole = user.UserRole,       // ✅ เพิ่ม
+                Division = user.Division,       // ✅ เพิ่ม
+                PrimaryCompanyID = primary?.CompanyID,
+                PrimaryCompanyCode = primary?.CompanyCode,
+                Companies = companies,
+                Permission = permission == null ? null : new
+                {
+                    permission.UserID,
+                    permission.CompanyID,
+                    permission.Department,
+                    permission.UserRole,
+                    permission.RoleKey,
+                    permission.Tier,
+                    permission.Page1Access,
+                    permission.Page2Access,
+                    permission.Page3Access,
+                    permission.Page4Access,
+                    permission.DataScope,
+                    permission.CanViewVendor,
+                    permission.CanViewCost,
+                    permission.CanViewCustomer
+                }
+            });
+        }
+
+        // ========== Private Helpers ==========
+
+        private async Task<MicrosoftTokenResponse> ExchangeCodeForToken(string code)
+        {
+            var tenantId = _config["AzureAd:TenantId"];
+            var clientId = _config["AzureAd:ClientId"];
+            var clientSecret = _config["AzureAd:ClientSecret"];
+            var redirectUri = _config["AzureAd:RedirectUri"];
+
+            var body = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["code"] = code,
+                ["client_id"] = clientId!,
+                ["client_secret"] = clientSecret!,
+                ["redirect_uri"] = redirectUri!,
+                ["scope"] = "openid profile email User.Read"
+            });
+
+            var response = await _httpClient.PostAsync(
+                $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token", body);
+
+            // ✅ อ่าน response เป็น string ก่อน
+            var rawJson = await response.Content.ReadAsStringAsync();
+            Console.WriteLine("MS Token Response: " + rawJson); // ดู Output window
+
+            var json = System.Text.Json.JsonDocument.Parse(rawJson).RootElement;
+
+            // ✅ เช็คว่ามี error หรือเปล่า
+            if (json.TryGetProperty("error", out var error))
+            {
+                var errorDesc = json.TryGetProperty("error_description", out var desc)
+                                ? desc.GetString() : error.GetString();
+                throw new Exception($"Microsoft Auth Error: {errorDesc}");
+            }
+
+            // ✅ ดึง access_token อย่างปลอดภัย
+            if (!json.TryGetProperty("access_token", out var accessTokenProp))
+                throw new Exception("access_token not found in response");
+
+            return new MicrosoftTokenResponse
+            {
+                AccessToken = accessTokenProp.GetString() ?? ""
+            };
+        }
+        private async Task<MicrosoftUserInfo> GetMicrosoftUserInfo(string accessToken)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                "https://graph.microsoft.com/v1.0/me");
+            request.Headers.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+
+            var response = await _httpClient.SendAsync(request);
+            return await response.Content.ReadFromJsonAsync<MicrosoftUserInfo>()
+                   ?? new MicrosoftUserInfo();
+        }
+
+        // ========== DTOs (ภายใน Controller) ==========
+
+        public class MicrosoftCallbackDto
+        {
+            public string Code { get; set; } = "";
+        }
+
+        public class MicrosoftTokenResponse
+        {
+            public string AccessToken { get; set; } = "";
+        }
+
+        public class MicrosoftUserInfo
+        {
+            public string? Mail { get; set; }
+            public string? DisplayName { get; set; }
+            public string? UserPrincipalName { get; set; }
+        }
+
     }
 }

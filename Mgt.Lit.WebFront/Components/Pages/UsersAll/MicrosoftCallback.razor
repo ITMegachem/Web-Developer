@@ -1,0 +1,89 @@
+﻿@page "/auth/microsoft-callback"
+@using Mgt.Lit.WebFront.Components.Layout
+@using Mgt.Lit.WebFront.Services
+@using Mgt.Lit.WebFront.Services.Member
+@using System.IdentityModel.Tokens.Jwt
+@layout MainLayout
+@inject NavigationManager Nav
+@inject AuthService Auth
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject IJSRuntime JS
+
+<div class="init-loader">
+    <div class="init-ring"></div>
+</div>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div style="color:red; padding:20px;">❌ @_error</div>
+}
+
+@code {
+    string? _error;
+    bool _handled = false;
+
+    // ✅ ย้ายมา OnAfterRenderAsync แทน OnInitializedAsync
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _handled) return;
+        _handled = true;
+
+        var uri = new Uri(Nav.Uri);
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        var code = query["code"];
+
+        if (string.IsNullOrEmpty(code))
+        {
+            Nav.NavigateTo("/?error=no_code", forceLoad: true);
+            return;
+        }
+
+        try
+        {
+            var result = await Auth.MicrosoftCallbackAsync(code);
+
+            if (result == null)
+            {
+                Nav.NavigateTo("/?error=ms_auth_failed", forceLoad: true);
+                return;
+            }
+
+            var handler = new JwtSecurityTokenHandler();
+            var jwt = handler.ReadJwtToken(result.Token);
+            var claims = jwt.Claims.ToList();
+
+            claims.Add(new System.Security.Claims.Claim("FullName", result.FullName ?? ""));
+            claims.Add(new System.Security.Claims.Claim("CompanyID", result.PrimaryCompanyID?.ToString() ?? "0"));
+            claims.Add(new System.Security.Claims.Claim("CompanyCode", result.PrimaryCompanyCode ?? ""));
+
+            foreach (var c in result.Companies ?? new())
+            {
+                claims.Add(new System.Security.Claims.Claim("Company", c.CompanyCode ?? ""));
+                claims.Add(new System.Security.Claims.Claim("CompanyIDAllowed", c.CompanyID.ToString()));
+            }
+
+            if (result.Permission is not null)
+            {
+                claims.Add(new System.Security.Claims.Claim("RoleKey", result.Permission.RoleKey ?? ""));
+                claims.Add(new System.Security.Claims.Claim("Tier", result.Permission.Tier ?? ""));
+                claims.Add(new System.Security.Claims.Claim("Page1Access", result.Permission.Page1Access.ToString()));
+                claims.Add(new System.Security.Claims.Claim("Page2Access", result.Permission.Page2Access.ToString()));
+                claims.Add(new System.Security.Claims.Claim("Page3Access", result.Permission.Page3Access.ToString()));
+                claims.Add(new System.Security.Claims.Claim("DataScope", result.Permission.DataScope ?? ""));
+                claims.Add(new System.Security.Claims.Claim("CanViewVendor", result.Permission.CanViewVendor.ToString()));
+                claims.Add(new System.Security.Claims.Claim("CanViewCost", result.Permission.CanViewCost.ToString()));
+            }
+
+            AuthState.Token = result.Token;
+            AuthState.User = new System.Security.Claims.ClaimsPrincipal(
+                new System.Security.Claims.ClaimsIdentity(claims, "jwt"));
+
+            Nav.NavigateTo("/Main", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+}
