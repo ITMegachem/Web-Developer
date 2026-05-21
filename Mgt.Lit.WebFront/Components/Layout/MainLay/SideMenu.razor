@@ -167,7 +167,15 @@
                                             </NavLink>
                                         </li>
                                     }
-                                    
+                                    @if (CanPage6)
+                                    {
+                                        <li>
+                                            <NavLink href="/SalesReport" class="sub-pill-link">
+                                                <img src="/images/inventory-alt.png" class="sub-icon-img" />
+                                                <span>@T("SalesReport")</span>
+                                            </NavLink>
+                                        </li>
+                                    }
                                 </ul>
                             </div>
                         }
@@ -214,7 +222,13 @@
                                         @T("OutboundDeliveries")
                                     </NavLink>
                                 }
-                               
+                                @if (CanPage6)
+                                {
+                                    <NavLink href="/SalesReport" class="flyout-item">
+                                        <span class="flyout-dot"></span>
+                                        @T("SalesReport")
+                                    </NavLink>
+                                }
                             </div>
                         }
 
@@ -298,6 +312,7 @@
     private bool CanPage2 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 2);
     private bool CanPage3 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 3);
     private bool CanPage4 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 4);
+    private bool CanPage6 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 1);
     private bool IsCsrDept =>
     string.Equals(Department, "csr", StringComparison.OrdinalIgnoreCase);
 
@@ -306,7 +321,7 @@
 
     private bool CanPage5 =>
         IsAdmin || IsCsrDept || IsWarehouseDept;
-    private bool HasAnyManagementPage => CanPage1 || CanPage2 || CanPage3 || CanPage4 || CanPage5;
+    private bool HasAnyManagementPage => CanPage1 || CanPage2 || CanPage3 || CanPage4 || CanPage5 || CanPage6;
 
     // ── lifecycle ─────────────────────────────────────────────────────────────
 

@@ -208,7 +208,34 @@ public sealed class StockService
         using var response = await _http.SendAsync(req, cancellationToken);
         return await ReadResponseAsync<OutboundDeliveryResponse>(response, cancellationToken);
     }
+    // ── SoldTo Lookup ─────────────────────────────────────────────────────────
+    public sealed class SoldToLookup
+    {
+        public string? Code { get; set; }
+        public string? Name { get; set; }
+    }
 
+    public async Task<List<SoldToLookup>?> SearchSoldToAsync(
+        string keyword,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticated();
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"api/MGT_SalesOrder/SoldToLookup?keyword={Uri.EscapeDataString(keyword)}");
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", _auth.Token);
+
+        if (!string.IsNullOrWhiteSpace(_pageContext.Menu))
+            request.Headers.TryAddWithoutValidation("X-Menu", _pageContext.Menu);
+        if (!string.IsNullOrWhiteSpace(_pageContext.Page))
+            request.Headers.TryAddWithoutValidation("X-Page", _pageContext.Page);
+
+        using var response = await _http.SendAsync(request, cancellationToken);
+        return await ReadResponseAsync<List<SoldToLookup>>(response, cancellationToken);
+    }
     private sealed class StockRequirementRequest
     {
         [JsonPropertyName("Plant")]
@@ -269,7 +296,103 @@ public sealed class StockService
         [JsonPropertyName("PageSize")]
         public int PageSize { get; set; }
     }
+    // ── Request DTO ──────────────────────────────────────────────────────────
+    public sealed class SalesReportRequest
+    {
+        [JsonPropertyName("page")]
+        public int Page { get; set; } = 1;
 
+        [JsonPropertyName("pageSize")]
+        public int PageSize { get; set; } = 100;
+
+        [JsonPropertyName("billingDateFrom")]
+        public DateTime? BillingDateFrom { get; set; }
+
+        [JsonPropertyName("billingDateTo")]
+        public DateTime? BillingDateTo { get; set; }
+
+        [JsonPropertyName("soldToParty")]
+        public string? SoldToParty { get; set; }
+
+        [JsonPropertyName("material")]
+        public string? Material { get; set; }
+
+        [JsonPropertyName("salesGroup")]
+        public string? SalesGroup { get; set; }
+
+        [JsonPropertyName("productGroup")]
+        public string? ProductGroup { get; set; }
+        [JsonPropertyName("deliveryDateFrom")]
+        public DateTime? DeliveryDateFrom { get; set; }  // ✅ เพิ่ม
+
+        [JsonPropertyName("deliveryDateTo")]
+        public DateTime? DeliveryDateTo { get; set; }  // ✅ เพิ่ม
+    }
+
+    // ── Response DTO ─────────────────────────────────────────────────────────
+    public sealed class SalesReportDto
+    {
+        public string? BillingDocument { get; set; }
+        public DateTime? BillingDocumentDate { get; set; }
+        public DateTime? DeliveryDate { get; set; }
+        public string? SoldToParty { get; set; }
+        public string? CustomerFullName { get; set; }
+        public string? TransactionCurrency { get; set; }
+        public string? ReferenceSDDocument { get; set; }
+        public string? SalesGroup { get; set; }
+        public string? Material { get; set; }
+        public string? MaterialName { get; set; }
+        public string? MaterialGroup { get; set; }
+        public string? SalesEmployeeBP { get; set; }
+        public string? SoldToName { get; set; }
+        public string? SoldToAddress { get; set; }
+        public decimal? NetAmount { get; set; }
+        public decimal? CostAmount { get; set; }
+        public decimal? GrossProfit { get; set; }
+        public double? Quantity { get; set; }
+        public string? Unit { get; set; }
+        // จาก View_ProductLastPrice
+        public double? LastPricePerPack { get; set; }
+        public double? LastPrice_PerKG { get; set; }
+        public double? CostPerPack { get; set; }
+        public double? CostPerKG { get; set; }
+        public DateTime? LastSaleDate { get; set; }
+    }
+
+    public sealed class SalesReportResponse
+    {
+        public int TotalCount { get; set; }
+        public int Page { get; set; }
+        public int PageSize { get; set; }
+        public List<SalesReportDto> Items { get; set; } = new();
+    }
+
+    // ── Method ───────────────────────────────────────────────────────────────
+    public async Task<SalesReportResponse?> GetSalesReportAsync(
+        SalesReportRequest? request = null,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticated();
+
+        var body = request ?? new SalesReportRequest();
+
+        using var req = new HttpRequestMessage(HttpMethod.Post,
+            "api/MGT_SalesOrder/SalesReport")
+        {
+            Content = JsonContent.Create(body)
+        };
+
+        req.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", _auth.Token);
+
+        if (!string.IsNullOrWhiteSpace(_pageContext.Menu))
+            req.Headers.TryAddWithoutValidation("X-Menu", _pageContext.Menu);
+        if (!string.IsNullOrWhiteSpace(_pageContext.Page))
+            req.Headers.TryAddWithoutValidation("X-Page", _pageContext.Page);
+
+        using var response = await _http.SendAsync(req, cancellationToken);
+        return await ReadResponseAsync<SalesReportResponse>(response, cancellationToken);
+    }
     private sealed class MaterialConsumptionRequest
     {
         [JsonPropertyName("Material")]

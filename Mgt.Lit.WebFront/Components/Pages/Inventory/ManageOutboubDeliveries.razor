@@ -522,7 +522,7 @@
     "Batch No.", "Quant.", "Pack", "Ship To", "License", "Class No.",
     "Net Weight", "GW", "Total GW", "Name in Thai",
     // ✅ ต่อท้ายของเดิม
-    "Ship To Address", "Storage Class Description",
+     "Storage Class Description",
     "Month", "Year", "Delivery Document", "Reference SO"
 };
 
@@ -545,7 +545,7 @@
                 ws.Cell(row, col++).Value = r.BatchNo ?? "";                               // Batch No.
                 ws.Cell(row, col++).Value = (double)(r.Quantity ?? 0);                     // Quant.
                 ws.Cell(row, col++).Value = r.Unit ?? "";                                  // Pack
-                ws.Cell(row, col++).Value = r.ShipToName ?? "";                            // Ship To
+                //ws.Cell(row, col++).Value = r.ShipToName ?? "";                            // Ship To
                 ws.Cell(row, col++).Value = r.License ?? "";                               // License
                 ws.Cell(row, col++).Value = r.StorageClassCode ?? "";                      // Class No.
                 ws.Cell(row, col++).Value = (double)(r.NetWeight ?? 0);                    // Net Weight

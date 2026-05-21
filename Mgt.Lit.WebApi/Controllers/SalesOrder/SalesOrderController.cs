@@ -3301,6 +3301,197 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 return BadRequest(new { message = ex.Message });
             }
         }
+        [Authorize]
+        [HttpPost("SalesReport")]
+        public async Task<IActionResult> GetSalesReport([FromBody] SalesReportRequestDto request)
+        {
+            var permission = await GetCurrentPermissionAsync();
+            if (permission == null)
+                return Unauthorized();
+
+            if (!permission.Page1Access)
+                return Forbid();
+
+            // ── Base Query จาก MGT_Sale ──────────────────────────────────────────
+            var query = _context.MGT_Sale
+                .AsNoTracking()
+                .Where(x => x.BillingDocument != null);
+
+            // ── Filters ──────────────────────────────────────────────────────────
+            if (request.BillingDateFrom.HasValue)
+                query = query.Where(x => x.BillingDocumentDate >= request.BillingDateFrom.Value.Date);
+
+            if (request.BillingDateTo.HasValue)
+                query = query.Where(x => x.BillingDocumentDate < request.BillingDateTo.Value.Date.AddDays(1));
+            if (request.DeliveryDateFrom.HasValue)
+                query = query.Where(x => x.DeliveryDate >= request.DeliveryDateFrom.Value.Date);
+
+            if (request.DeliveryDateTo.HasValue)
+                query = query.Where(x => x.DeliveryDate < request.DeliveryDateTo.Value.Date.AddDays(1));
+            if (!string.IsNullOrWhiteSpace(request.SoldToParty))
+            {
+                var kw = $"%{request.SoldToParty.Trim()}%";
+                query = query.Where(x =>
+                    EF.Functions.Like(x.SoldToParty, kw) ||
+                    EF.Functions.Like(x.CustomerFullName, kw));
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Material))
+            {
+                var kw = $"%{request.Material.Trim()}%";
+                query = query.Where(x =>
+                    EF.Functions.Like(x.Material, kw) ||
+                    EF.Functions.Like(x.MaterialName, kw));
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.SalesGroup))
+                query = query.Where(x => x.SalesGroup == request.SalesGroup.Trim());
+
+            if (!string.IsNullOrWhiteSpace(request.ProductGroup))
+                query = query.Where(x => x.ProductGroup == request.ProductGroup.Trim());
+
+            // ── Apply Permission ─────────────────────────────────────────────────
+            query = ApplySalesReportPermission(query, permission);
+
+            // ── Count ────────────────────────────────────────────────────────────
+            var totalCount = await query.CountAsync();
+
+            // ── Fetch Sales Data ─────────────────────────────────────────────────
+            var salesItems = await query
+                .OrderByDescending(x => x.BillingDocumentDate)
+                .ThenBy(x => x.BillingDocument)
+                .ThenBy(x => x.Material)
+                .Skip((request.Page - 1) * request.PageSize)
+                .Take(request.PageSize)
+                .Select(x => new
+                {
+                    x.BillingDocument,
+                    x.BillingDocumentDate,
+                    x.DeliveryDate,
+                    x.SoldToParty,
+                    x.CustomerFullName,
+                    x.TransactionCurrency,
+                    x.ReferenceSDDocument,
+                    x.SalesGroup,
+                    x.Material,
+                    x.MaterialName,
+                    x.ProductGroup,
+                    x.SalesEmployeeBP,
+                    SoldToName = x.SoldtoName,
+                    SoldToAddress = x.SoldtoAdress,
+                    x.NetAmount,
+                    x.CostAmount,
+                    x.GrossProfit,
+                    x.Quantity,
+                    x.Unit
+                })
+                .ToListAsync();
+
+            // ── JOIN LastPrice จาก View_ProductLastPrice (in-memory) ─────────────
+            // ดึง combination CustomerCode + Material ที่ต้องการ
+            var customerMaterialPairs = salesItems
+                .Select(x => new { CustomerCode = x.SoldToParty, x.Material })
+                .Where(x => !string.IsNullOrWhiteSpace(x.CustomerCode) &&
+                            !string.IsNullOrWhiteSpace(x.Material))
+                .Distinct()
+                .ToList();
+
+            var customerCodes = customerMaterialPairs
+                .Select(x => x.CustomerCode!).Distinct().ToList();
+
+            var materialCodes = customerMaterialPairs
+                .Select(x => x.Material!).Distinct().ToList();
+
+            // ดึง Price lookup
+            var priceLookup = await _context.View_ProductLastPrice
+                .AsNoTracking()
+                .Where(x => customerCodes.Contains(x.CustomerCode) &&
+                            materialCodes.Contains(x.Material))
+                .Select(x => new
+                {
+                    x.CustomerCode,
+                    x.Material,
+                    x.LastSaleDate,
+                    x.LastPricePerPack,
+                    x.LastPrice_PerKG,
+                    x.CostPerPack,
+                    x.CostPerKG
+                })
+                .ToListAsync();
+
+            // สร้าง Dictionary key = "CustomerCode|Material"
+            var priceDict = priceLookup
+                .GroupBy(x => $"{x.CustomerCode}|{x.Material}")
+                .ToDictionary(g => g.Key, g => g.First());
+
+            // ── Map Response ─────────────────────────────────────────────────────
+            var items = salesItems.Select(x =>
+            {
+                var key = $"{x.SoldToParty}|{x.Material}";
+                priceDict.TryGetValue(key, out var price);
+
+                return new SalesReportResponseDto
+                {
+                    BillingDocument = x.BillingDocument,
+                    BillingDocumentDate = x.BillingDocumentDate,
+                    DeliveryDate = x.DeliveryDate,
+                    SoldToParty = x.SoldToParty,
+                    CustomerFullName = x.CustomerFullName,
+                    TransactionCurrency = x.TransactionCurrency,
+                    ReferenceSDDocument = x.ReferenceSDDocument,
+                    SalesGroup = x.SalesGroup,
+                    Material = x.Material,
+                    MaterialName = x.MaterialName,
+                    MaterialGroup = x.ProductGroup,
+                    SalesEmployeeBP = x.SalesEmployeeBP,
+                    SoldToName = x.SoldToName,
+                    SoldToAddress = x.SoldToAddress,
+                    NetAmount = (double?)(permission.CanViewCost ? x.NetAmount : null),
+                    CostAmount = (double?)(permission.CanViewCost ? x.CostAmount : null),
+                    GrossProfit = (double?)(permission.CanViewCost ? x.GrossProfit : null),
+                    Quantity = x.Quantity,
+                    Unit = x.Unit,
+                    // ── จาก View_ProductLastPrice ──
+                    LastSaleDate = price?.LastSaleDate,
+                    LastPricePerPack = price?.LastPricePerPack,
+                    LastPrice_PerKG = price?.LastPrice_PerKG,
+                    CostPerPack = permission.CanViewCost ? price?.CostPerPack : null,
+                    CostPerKG = permission.CanViewCost ? price?.CostPerKG : null,
+                };
+            }).ToList();
+
+            return Ok(new
+            {
+                totalCount,
+                page = request.Page,
+                pageSize = request.PageSize,
+                items
+            });
+        }
+        
+        private IQueryable<MGT_Sale> ApplySalesReportPermission(
+            IQueryable<MGT_Sale> query,
+            View_UserPermission permission)
+        {
+            var scope = ResolveScope(permission);
+            var salesOrg = NormalizeKey(permission.SalesOrganizationCode);
+
+            // กรอง SalesOrganization (ยกเว้น CrossCompany)
+            if (scope != DataScopes.CrossCompany && !string.IsNullOrWhiteSpace(salesOrg))
+                query = query.Where(x => x.SalesOrganization == salesOrg);
+
+            return scope switch
+            {
+                DataScopes.CrossCompany => query,
+                DataScopes.Company => query,
+                DataScopes.Division => query.Where(x =>
+                    x.SalesGroup != null &&
+                    x.SalesGroup.Trim().ToUpper() == NormalizeKey(permission.Division)),
+                _ => query.Where(x =>
+                    x.SalesEmployeeBP != null &&
+                    x.SalesEmployeeBP.Trim().ToUpper() == NormalizeKey(permission.Username))
+            };
+        }
 
     }
 

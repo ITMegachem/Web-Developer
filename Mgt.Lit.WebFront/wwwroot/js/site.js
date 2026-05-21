@@ -109,3 +109,10 @@ export function initDocumentDatePicker(dotnetRef) {
 export function initDeliveryDatePicker(dotnetRef) {
     createLitepicker("deliveryDateRange", dotnetRef, "OnDeliveryDateRangeChanged");
 }
+export function initBillingDatePicker(dotnetRef) {
+    createLitepicker("documentDateRange", dotnetRef, "OnDocumentDateRangeChanged");
+}
+
+export function initDeliveryDatePicker2(dotnetRef) {
+    createLitepicker("deliveryDateRange2", dotnetRef, "OnDeliveryDateRangeChanged2");
+}

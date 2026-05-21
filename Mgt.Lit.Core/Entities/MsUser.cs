@@ -67,7 +67,8 @@ namespace Mgt.Lit.Core.Entities
         public string Menu { get; set; }
         public string Page { get; set; }
         public string Action { get; set; }
-
+        public string? Department { get; set; }
+        public double? SessionDurationMinutes { get; set; }
         public int? ExecutionTimeMs { get; set; }
         public string IpAddress { get; set; }
         public int? StatusCode { get; set; }

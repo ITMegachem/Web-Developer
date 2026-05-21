@@ -14,6 +14,8 @@ namespace Mgt.Lit.Core.Data
         public DbSet<MsUser> MsUsers { get; set; }
         public DbSet<MsCompany> MsCompanies { get; set; }
         public DbSet<MsUserCompany> MsUserCompanies { get; set; }
+        public DbSet<MGT_Sale> MGT_Sale { get; set; }
+        public DbSet<View_ProductLastPrice> View_ProductLastPrice { get; set; }
 
         // 📊 View สำหรับรายงานการขาย
         public DbSet<View_MGT_GLC_ALL_Sales> View_MGT_GLC_ALL_Sales { get; set; }
@@ -98,6 +100,26 @@ namespace Mgt.Lit.Core.Data
             {
                 entity.HasKey(x => x.CustomerCode);  // ✅ Primary Key
                 entity.ToTable("Ms_BusinessPartnerCustomerThaiName");
+            });
+            modelBuilder.Entity<MGT_Sale>(entity =>
+            {
+                entity.HasNoKey();
+                entity.ToTable("MGT_Sale");
+
+                // ✅ ใช้ decimal(18,5) ให้ตรงกับ column จริงใน SQL
+                entity.Property(e => e.NetAmount).HasColumnType("decimal(18,5)");
+                entity.Property(e => e.CostAmount).HasColumnType("decimal(18,5)");
+                entity.Property(e => e.GrossProfit).HasColumnType("decimal(18,5)");
+               
+                entity.Property(e => e.SoldtoName).HasColumnName("Soldto-name");
+                entity.Property(e => e.SoldtoAdress).HasColumnName("Soldto-adress");
+            });
+
+            modelBuilder.Entity<View_ProductLastPrice>(entity =>
+            {
+                entity.HasNoKey();
+                entity.ToView("View_ProductLastPrice");
+                
             });
         }
 

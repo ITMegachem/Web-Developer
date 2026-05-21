@@ -68,4 +68,5 @@ namespace Mgt.Lit.Core.Helpers
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
     }
+
 }

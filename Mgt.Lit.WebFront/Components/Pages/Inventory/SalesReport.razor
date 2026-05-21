@@ -1,0 +1,644 @@
+﻿@namespace Mgt.Lit.WebFront.Pages
+@page "/SalesReport"
+@layout AppLayout
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+@using ClosedXML.Excel
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@using Mgt.Lit.WebFront.Services
+@using Mgt.Lit.WebFront.Services.Member
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject NavigationManager Nav
+@inject Mgt.Lit.WebFront.Services.UiState UiState
+@inject StockService stockService
+@inject DownloadLogService DownloadLogSvc
+@inject PageContext PageContext
+
+<div class="so-page-wrapper">
+
+    <!-- HEADER -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-2">
+        <h2 class="page-title">Sales Report</h2>
+        <div class="date-badge">@DateTime.Now.ToString("dd MMM yyyy")</div>
+    </div>
+
+    <!-- FILTER CARD -->
+    <div class="filter-card-modern shadow-sm mb-4">
+        <div class="row g-3 align-items-end">
+
+            <!-- Row 1: Date filters -->
+            <div class="col-12 col-md-6 col-lg-3">
+                <label class="modern-label">Billing Date</label>
+                <input id="documentDateRange"
+                       class="form-control modern-input"
+                       placeholder="Select date range"
+                       autocomplete="off" readonly />
+            </div>
+
+            <div class="col-12 col-md-6 col-lg-3">
+                <label class="modern-label">Delivery Date</label>
+                <input id="deliveryDateRange2"
+                       class="form-control modern-input"
+                       placeholder="Select date range"
+                       autocomplete="off" readonly />
+            </div>
+
+            <div class="col-6 col-md-4 col-lg-3" style="position:relative">
+                <label class="modern-label">Customer Name</label>
+                <input class="form-control modern-input"
+                       value="@customerDisplayText"
+                       @oninput="OnCustomerInput"
+                       placeholder="Code or Name..."
+                       autocomplete="off" />
+
+                @if (customerSuggestions.Any())
+                {
+                    <div style="position:absolute; top:100%; left:0; right:0; z-index:999;
+                        background:white; border:1px solid #ddd; border-radius:8px;
+                        box-shadow:0 4px 12px rgba(0,0,0,0.1); max-height:220px;
+                        overflow-y:auto;">
+                        @foreach (var s in customerSuggestions)
+                        {
+                            <div style="padding:8px 12px; cursor:pointer; font-size:13px;
+                                border-bottom:1px solid #f0f0f0;"
+                                 @onmousedown="() => SelectCustomer(s.Code, s.Name)"
+                                 onmouseover="this.style.background='#f0faf0'"
+                                 onmouseout="this.style.background='white'">
+                                <span class="fw-bold" style="color:#2e7d32">@s.Code</span>
+                                <span class="text-muted ms-2" style="font-size:12px">@s.Name</span>
+                            </div>
+                        }
+                        <div style="padding:6px 12px; cursor:pointer; font-size:12px;
+                            color:#999; text-align:center;"
+                             @onmousedown="ClearCustomerSuggestions">
+                            ✕ Close
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="col-6 col-md-4 col-lg-3">
+                <label class="modern-label">Material Name</label>
+                <input class="form-control modern-input"
+                       @bind="filters.Material"
+                       @bind:event="oninput"
+                       placeholder="Code or Name..." />
+            </div>
+
+            
+
+            <div class="col-12 col-lg-2 ms-auto">
+                <button class="btn btn-search-pill w-100"
+                        disabled="@isLoading"
+                        @onclick="RunSearch">
+                    @if (isLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm"></span>
+                    }
+                    else
+                    {
+                        <span><i class="bi bi-search me-1"></i> Run</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TABLE CARD -->
+    <div class="table-card-container shadow-sm">
+
+        <div class="d-flex justify-content-between align-items-center px-3 pt-2 pb-1">
+            <span class="text-muted small">@totalItems record(s) found</span>
+            @if (allItems.Any())
+            {
+                <button class="btn btn-sm btn-success rounded-pill px-3"
+                        disabled="@isLoading"
+                        @onclick="ExportData">
+                    <i class="bi bi-download me-1"></i> Export Excel
+                </button>
+            }
+        </div>
+
+        <div class="table-responsive flex-grow-1">
+            <table class="table modern-table mb-0" style="font-size: 13px;">
+                <thead>
+                    <tr style="font-size: 13px; white-space: nowrap;">
+                        <th class="text-center">No.</th>
+                        <th>Billing Doc</th>
+                        <th>Billing Date</th>
+                        <th class="text-center">Sold-to</th>
+                        <th>Customer Name</th>
+                        <th>Material</th>
+                        <th>Material Name</th>
+                        <th class="text-center">Material Group</th>
+                        <th class="text-center">Quantity</th>
+                        <th class="text-center">Unit</th>
+                        <th class="text-end">Net Amount</th>
+                        <th class="text-end">Cost Amount</th>
+                        <th class="text-end">GrossProfit</th>
+                        <th class="text-end">Price/KG</th>
+                        <th>Sales</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (pagedItems.Any())
+                    {
+                        int rowNum = (filters.Page - 1) * filters.PageSize + 1;
+                        @foreach (var r in pagedItems)
+                        {
+                            <tr style="font-size:13px;">
+                                <td class="text-center text-muted">@rowNum</td>
+
+                                <td style="font-family:monospace; white-space:nowrap">
+                                    @r.BillingDocument
+                                </td>
+
+                                <td style="white-space:nowrap">
+                                    @r.BillingDocumentDate?.ToString("dd/MM/yyyy")
+                                </td>
+
+                                <td class="numeric-green text-center" style="white-space:nowrap">
+                                    @r.SoldToParty
+                                </td>
+
+                                <td style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
+                                    title="@r.CustomerFullName">
+                                    @r.CustomerFullName
+                                </td>
+
+                                <td style="font-family:monospace; white-space:nowrap; font-size:11px">
+                                    @r.Material
+                                </td>
+
+                                <td style="max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
+                                    title="@r.MaterialName">
+                                    @r.MaterialName
+                                </td>
+
+                                <td class="text-center">
+                                    <span class="badge bg-secondary" style="font-size:10px">
+                                        @r.MaterialGroup
+                                    </span>
+                                </td>
+
+                                <td class="text-center fw-bold" style="white-space:nowrap">
+                                    @r.Quantity?.ToString("N0")
+                                </td>
+
+                                <td class="text-center text-muted" style="white-space:nowrap">
+                                    @r.Unit
+                                </td>
+
+                                <td class="text-end" style="white-space:nowrap">
+                                    @if (r.NetAmount.HasValue)
+                                    {
+                                        <span style="color:#0a58ca">@r.NetAmount.Value.ToString("N0")</span>
+                                    }
+                                    else
+                                    {
+
+                                        <span class="text-muted">-</span>
+                                    }
+                                </td>
+
+                                <td class="text-end" style="white-space:nowrap">
+                                    @if (r.CostAmount.HasValue)
+                                    {
+                                        @r.CostAmount.Value.ToString("N0")
+                                    }
+                                    else
+                                    {
+
+                                        <span class="text-muted">-</span>
+                                    }
+                                </td>
+
+                                <td class="text-end" style="white-space:nowrap">
+                                    @if (r.GrossProfit.HasValue)
+                                    {
+                                        var gp = r.GrossProfit.Value;
+                                        <span style="color:@(gp >= 0 ? "green" : "red"); font-weight:600">
+                                            @gp.ToString("N0")
+                                        </span>
+                                    }
+                                    else
+                                    {
+
+                                        <span class="text-muted">-</span>
+                                    }
+                                </td>
+
+                                <td class="text-end fw-bold" style="color:#0a58ca; white-space:nowrap">
+                                    @r.LastPrice_PerKG?.ToString("N2")
+                                </td>
+
+                                <td style="max-width:120px; overflow:hidden; text-overflow:ellipsis;
+                                    white-space:nowrap; font-size:11px"
+                                    title="@r.SalesEmployeeBP">
+                                    @r.SalesEmployeeBP
+                                </td>
+                            </tr>
+                            rowNum++;
+                        }
+                    }
+                    else if (!isLoading)
+                    {
+                        <tr>
+                            <td colspan="15" class="text-center py-5 text-muted">
+                                <i class="bi bi-inbox fs-3 d-block mb-2"></i>
+                                No data found
+                            </td>
+                        </tr>
+                    }
+                    else
+                    {
+                        <tr>
+                            <td colspan="15" class="text-center py-5">
+                                <span class="spinner-border spinner-border-sm me-2"></span> Loading...
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <!-- PAGINATION -->
+        <div class="table-footer-pagination">
+            <div class="text-muted small">Page @filters.Page of @totalPages</div>
+            <div class="pagination-controls d-flex align-items-center gap-3">
+                <button class="pill-nav-btn"
+                        disabled="@(filters.Page <= 1 || isLoading)"
+                        @onclick="PrevPage">
+                    <i class="bi bi-chevron-left"></i>
+                </button>
+                <button class="pill-nav-btn"
+                        disabled="@(filters.Page >= totalPages || isLoading)"
+                        @onclick="NextPage">
+                    <i class="bi bi-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+
+    // ── Filter model ──────────────────────────────────────────────────────────
+    private SalesReportFilter filters = new() { Page = 1, PageSize = 15 };
+    private List<CustomerSuggestion> customerSuggestions = new();
+    private CancellationTokenSource? _customerCts;
+    private string customerDisplayText = "";
+    public class SalesReportFilter
+    {
+        public DateTime? BillingDateFrom { get; set; }
+        public DateTime? BillingDateTo { get; set; }
+        public DateTime? DeliveryDateFrom { get; set; }  // ✅ เพิ่ม
+        public DateTime? DeliveryDateTo { get; set; }  // ✅ เพิ่ม
+        public string? SoldToParty { get; set; }
+        public string? Material { get; set; }
+        public string? SalesGroup { get; set; }
+        public string? ProductGroup { get; set; }
+        public int Page { get; set; } = 1;
+        public int PageSize { get; set; } = 15;
+    }
+    public class CustomerSuggestion
+    {
+        public string? Code { get; set; }
+        public string? Name { get; set; }
+    }
+
+    private async Task OnCustomerInput(ChangeEventArgs e)
+    {
+        var keyword = e.Value?.ToString() ?? "";
+        customerDisplayText = keyword;     // ✅ sync display text
+        filters.SoldToParty = keyword;     // ✅ sync filter value
+
+        filters.SoldToParty = keyword;
+
+        // ✅ Cancel request เดิม
+        _customerCts?.Cancel();
+        _customerCts?.Dispose();
+        _customerCts = new CancellationTokenSource();
+
+        // เก็บ token ของ request นี้ไว้
+        var token = _customerCts.Token;
+
+        customerSuggestions.Clear();
+
+        if (keyword.Length < 2)
+        {
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        try
+        {
+            // debounce 300ms
+            await Task.Delay(300, token);
+
+            // ✅ ถ้า cancel แล้ว ไม่ต้องเรียก API
+            if (token.IsCancellationRequested) return;
+
+            // ✅ ส่ง CancellationToken.None ไปที่ HTTP request
+            // ไม่ใช้ token เดิม เพราะถ้า user พิมพ์ต่อจะ cancel HTTP ที่กำลัง run
+            var results = await stockService.SearchSoldToAsync(
+                keyword, CancellationToken.None);
+
+            // ✅ เช็คอีกครั้งหลัง await ว่า keyword ยังตรงกันอยู่ไหม
+            if (token.IsCancellationRequested) return;
+
+            customerSuggestions = results?
+                .Select(x => new CustomerSuggestion
+                {
+                    Code = x.Code,
+                    Name = x.Name
+                }).ToList() ?? new();
+        }
+        catch (TaskCanceledException)
+        {
+            // ✅ debounce cancel — ปกติ ไม่ต้องทำอะไร
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] Customer lookup: {ex.Message}");
+            customerSuggestions.Clear();
+        }
+
+        if (!token.IsCancellationRequested)
+            await InvokeAsync(StateHasChanged);
+    }
+
+    private void SelectCustomer(string? code, string? name)
+    {
+        filters.SoldToParty = code ?? "";  // ✅ ส่ง code ไป filter API
+        customerDisplayText = $"{code} - {name}";  // ✅ แสดงทั้ง code และชื่อ
+        customerSuggestions.Clear();
+    }
+
+    private void ClearCustomerSuggestions()
+    {
+        customerSuggestions.Clear();
+    }
+    // ── State ─────────────────────────────────────────────────────────────────
+    private List<StockService.SalesReportDto> allItems = new();
+    private List<StockService.SalesReportDto> pagedItems = new();
+    private int totalItems;
+    private int totalPages = 1;
+    private bool isLoading;
+    private bool _isDisposed;
+    private IJSObjectReference? _jsModule;
+    private DotNetObjectReference<SalesReport>? _dotNetRef;
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _isDisposed) return;
+
+        try
+        {
+            PageContext.Menu = "Sales";
+            PageContext.Page = "SalesReport";
+
+            await AuthState.InitializeAsync();
+
+            if (string.IsNullOrWhiteSpace(AuthState.Token))
+            {
+                Nav.NavigateTo("/", replace: true);
+                return;
+            }
+
+            await UiState.InitAsync();
+
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>(
+                "import", $"./js/site.js?v={DateTime.Now.Ticks}");
+            _dotNetRef = DotNetObjectReference.Create(this);
+
+            // ✅ ใช้ initDocumentDatePicker แทน แล้วเปลี่ยน elementId
+            // เพราะ site.js ยังไม่มี initBillingDatePicker
+            await _jsModule.InvokeVoidAsync(
+                "initDocumentDatePicker", _dotNetRef);  // ← ใช้อันที่มีอยู่แล้ว
+            await _jsModule.InvokeVoidAsync("initDeliveryDatePicker2", _dotNetRef);
+
+            if (!_isDisposed) await InvokeAsync(StateHasChanged);
+        }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+    }
+
+   
+    [JSInvokable]
+    public async Task OnDeliveryDateRangeChanged2(string? from, string? to)
+    {
+        filters.DeliveryDateFrom = !string.IsNullOrEmpty(from) ? DateTime.Parse(from) : null;
+        filters.DeliveryDateTo = !string.IsNullOrEmpty(to) ? DateTime.Parse(to) : null;
+
+        if (string.IsNullOrEmpty(from) && string.IsNullOrEmpty(to))
+        {
+            filters.Page = 1;
+            allItems.Clear();
+            await LoadDataAsync();
+            return;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // ✅ เปลี่ยนชื่อให้ตรงกับที่ createLitepicker เรียก
+    [JSInvokable]
+    public async Task OnDocumentDateRangeChanged(string? from, string? to)
+    {
+        filters.BillingDateFrom = !string.IsNullOrEmpty(from) ? DateTime.Parse(from) : null;
+        filters.BillingDateTo = !string.IsNullOrEmpty(to) ? DateTime.Parse(to) : null;
+
+        if (string.IsNullOrEmpty(from) && string.IsNullOrEmpty(to))
+        {
+            filters.Page = 1;
+            allItems.Clear();
+            await LoadDataAsync();
+            return;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+        _dotNetRef?.Dispose();
+    }
+
+    // ── Search ────────────────────────────────────────────────────────────────
+    private async Task RunSearch()
+    {
+        filters.Page = 1;
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        try
+        {
+            isLoading = true;
+            if (!_isDisposed) await InvokeAsync(StateHasChanged);
+
+            if (filters.BillingDateFrom == null &&
+    filters.BillingDateTo == null &&
+    filters.DeliveryDateFrom == null &&
+    filters.DeliveryDateTo == null)
+            {
+                allItems = new();
+                pagedItems = new();
+                totalItems = 0;
+                totalPages = 1;
+                return;
+            }
+
+            var request = new StockService.SalesReportRequest
+            {
+                BillingDateFrom = filters.BillingDateFrom,
+                BillingDateTo = filters.BillingDateTo,
+                DeliveryDateFrom = filters.DeliveryDateFrom,  // ✅ เพิ่ม
+                DeliveryDateTo = filters.DeliveryDateTo,    // ✅ เพิ่ม
+                SoldToParty = filters.SoldToParty,
+                Material = filters.Material,
+                SalesGroup = filters.SalesGroup,
+                ProductGroup = filters.ProductGroup,
+                Page = 1,
+                PageSize = 9999
+            };
+
+            var result = await stockService.GetSalesReportAsync(request);
+
+            allItems = result?.Items ?? new();
+            totalItems = allItems.Count;
+            totalPages = Math.Max(1, (int)Math.Ceiling((double)totalItems / filters.PageSize));
+            if (filters.Page > totalPages) filters.Page = totalPages;
+
+            ApplyPaging();
+        }
+        catch (UnauthorizedAccessException) { Nav.NavigateTo("/", replace: true); }
+        finally
+        {
+            isLoading = false;
+            if (!_isDisposed) await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // ── Pagination ────────────────────────────────────────────────────────────
+    private void ApplyPaging()
+    {
+        pagedItems = allItems
+            .Skip((filters.Page - 1) * filters.PageSize)
+            .Take(filters.PageSize)
+            .ToList();
+    }
+
+    private Task PrevPage()
+    {
+        if (filters.Page > 1) { filters.Page--; ApplyPaging(); }
+        return Task.CompletedTask;
+    }
+
+    private Task NextPage()
+    {
+        if (filters.Page < totalPages) { filters.Page++; ApplyPaging(); }
+        return Task.CompletedTask;
+    }
+
+    // ── Export ────────────────────────────────────────────────────────────────
+    private async Task ExportData()
+    {
+        if (!allItems.Any()) return;
+
+        try
+        {
+            isLoading = true;
+            if (!_isDisposed) await InvokeAsync(StateHasChanged);
+
+            var username = AuthState.Permission?.Username;
+            var fileName = $"SalesReport_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await DownloadLogSvc.LogDownloadAsync(username, fileName);
+
+            _jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("SalesReport");
+
+            var headers = new[]
+            {
+                "Billing Doc", "Billing Date", "Delivery Date",
+                "Sold-to", "Customer Name", "Currency",
+                "Ref SD Doc", "Sales Group", "Material", "Material Name",
+                "Material Group", "Sales Employee",
+                "Sold-to Name", "Sold-to Address",
+                "Net Amount", "Cost Amount", "Gross Profit",
+                "Quantity", "Unit",
+                "Last Sale Date", "Last Price/Pack", "Last Price/KG",
+                "Cost/Pack", "Cost/KG"
+            };
+
+            for (int i = 0; i < headers.Length; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+
+            var headerRow = ws.Row(1);
+            headerRow.Style.Font.Bold = true;
+            headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+
+            int row = 2;
+            foreach (var r in allItems)
+            {
+                int col = 1;
+                ws.Cell(row, col++).Value = r.BillingDocument ?? "";
+                ws.Cell(row, col++).Value = r.BillingDocumentDate?.ToString("dd/MM/yyyy") ?? "";
+                ws.Cell(row, col++).Value = r.DeliveryDate?.ToString("dd/MM/yyyy") ?? "";
+                ws.Cell(row, col++).Value = r.SoldToParty ?? "";
+                ws.Cell(row, col++).Value = r.CustomerFullName ?? "";
+                ws.Cell(row, col++).Value = r.TransactionCurrency ?? "";
+                ws.Cell(row, col++).Value = r.ReferenceSDDocument ?? "";
+                ws.Cell(row, col++).Value = r.SalesGroup ?? "";
+                ws.Cell(row, col++).Value = r.Material ?? "";
+                ws.Cell(row, col++).Value = r.MaterialName ?? "";
+                ws.Cell(row, col++).Value = r.MaterialGroup ?? "";
+                ws.Cell(row, col++).Value = r.SalesEmployeeBP ?? "";
+                ws.Cell(row, col++).Value = r.SoldToName ?? "";
+                ws.Cell(row, col++).Value = r.SoldToAddress ?? "";
+                ws.Cell(row, col++).Value = (double)(r.NetAmount ?? 0);
+                ws.Cell(row, col++).Value = (double)(r.CostAmount ?? 0);
+                ws.Cell(row, col++).Value = (double)(r.GrossProfit ?? 0);
+                ws.Cell(row, col++).Value = r.Quantity ?? 0;
+                ws.Cell(row, col++).Value = r.Unit ?? "";
+                ws.Cell(row, col++).Value = r.LastSaleDate?.ToString("dd/MM/yyyy") ?? "";
+                ws.Cell(row, col++).Value = r.LastPricePerPack ?? 0;
+                ws.Cell(row, col++).Value = r.LastPrice_PerKG ?? 0;
+                ws.Cell(row, col++).Value = r.CostPerPack ?? 0;
+                ws.Cell(row, col++).Value = r.CostPerKG ?? 0;
+                row++;
+            }
+
+            ws.Columns().AdjustToContents();
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+
+            if (_jsModule is not null && !_isDisposed)
+            {
+                try
+                {
+                    await _jsModule.InvokeVoidAsync(
+                        "downloadFileFromBytes", fileName,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        base64);
+                }
+                catch (JSDisconnectedException) { }
+                catch (TaskCanceledException) { }
+            }
+        }
+        catch (UnauthorizedAccessException) { Nav.NavigateTo("/", replace: true); }
+        finally
+        {
+            isLoading = false;
+            if (!_isDisposed) await InvokeAsync(StateHasChanged);
+        }
+    }
+}

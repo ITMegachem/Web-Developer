@@ -65,5 +65,49 @@ namespace Mgt.Lit.Core.DTOs
         public decimal? QuantityKG { get; set; }
         public decimal? NetWeight { get; set; }
     }
-    
+    // ── Request ──────────────────────────────────────────────────────────
+    public class SalesReportRequestDto
+    {
+        public int Page { get; set; } = 1;
+        public int PageSize { get; set; } = 50;
+        public DateTime? BillingDateFrom { get; set; }
+        public DateTime? BillingDateTo { get; set; }
+        public string? SoldToParty { get; set; }
+        public string? Material { get; set; }
+        public string? SalesGroup { get; set; }
+        public string? ProductGroup { get; set; }
+        public DateTime? DeliveryDateFrom { get; set; }  // ✅ เพิ่ม
+        public DateTime? DeliveryDateTo { get; set; }  // ✅ เพิ่ม
+    }
+
+    // ── Response ─────────────────────────────────────────────────────────
+    public class SalesReportResponseDto
+    {
+        // จาก MGT_Sale
+        public string? BillingDocument { get; set; }
+        public DateTime? BillingDocumentDate { get; set; }
+        public DateTime? DeliveryDate { get; set; }
+        public string? SoldToParty { get; set; }
+        public string? CustomerFullName { get; set; }
+        public string? TransactionCurrency { get; set; }
+        public string? ReferenceSDDocument { get; set; }
+        public string? SalesGroup { get; set; }
+        public string? Material { get; set; }
+        public string? MaterialName { get; set; }
+        public string? MaterialGroup { get; set; }
+        public string? SalesEmployeeBP { get; set; }
+        public string? SoldToName { get; set; }
+        public string? SoldToAddress { get; set; }
+        public double? NetAmount { get; set; }
+        public double? CostAmount { get; set; }
+        public double? GrossProfit { get; set; }
+        public double? Quantity { get; set; }
+        public string? Unit { get; set; }
+        // จาก View_ProductLastPrice
+        public DateTime? LastSaleDate { get; set; }
+        public double? LastPricePerPack { get; set; }
+        public double? LastPrice_PerKG { get; set; }
+        public double? CostPerPack { get; set; }
+        public double? CostPerKG { get; set; }
+    }
 }
