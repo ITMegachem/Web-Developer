@@ -31,8 +31,11 @@ namespace Mgt.Lit.Core.DTOs
         public string? BatchNo { get; set; }               // 5. Batch No.
         public decimal? Quantity { get; set; }             // 6. Quant.
         public string? Unit { get; set; }                  // 7. Pack (unit)
-        public string? ShipToName { get; set; }            // 8. Ship To Name
-        public string? ShipToAddress { get; set; }         // 8. Ship To Address
+                                                           // ✅ แยก 2 field
+        public string? ShipToName { get; set; }
+        public string? ShipToAddress { get; set; }  // merged (เดิม)
+        public string? ShipToAddressSap { get; set; }  // จาก SAP A_BusinessPartnerAddress
+        public string? ShipToAddressDb { get; set; }  // จาก DB Mapping_Shiptos
         public string? License { get; set; }               // 9. LICENSE (YY1_MM_TRANSPORTCLASS_PRD)
         public string? ClassNo { get; set; }               // 10. Class No.
         public decimal? NetWeight { get; set; }            // 11. Net Weight

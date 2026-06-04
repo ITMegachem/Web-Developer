@@ -1,13 +1,9 @@
 ﻿using Mgt.Lit.WebFront.Auth;
 using Mgt.Lit.WebFront.Models.SalesOrder;
 using Mgt.Lit.WebFront.Services.Member;
-using Mgt.Lit.WebFront.Services.Models;
-using System.Net;
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using static Mgt.Lit.WebFront.Pages.ManageOutboubDeliveries;
 
 public sealed class StockService
 {
@@ -297,7 +293,7 @@ public sealed class StockService
         public int PageSize { get; set; }
     }
     // ── Request DTO ──────────────────────────────────────────────────────────
-    public sealed class SalesReportRequest
+    public sealed class ComprehensiveReportRequest
     {
         [JsonPropertyName("page")]
         public int Page { get; set; } = 1;
@@ -327,10 +323,11 @@ public sealed class StockService
 
         [JsonPropertyName("deliveryDateTo")]
         public DateTime? DeliveryDateTo { get; set; }  // ✅ เพิ่ม
+        public string? CustomerGroup { get; set; }
     }
 
     // ── Response DTO ─────────────────────────────────────────────────────────
-    public sealed class SalesReportDto
+    public sealed class ComprehensiveReportDto
     {
         public string? BillingDocument { get; set; }
         public DateTime? BillingDocumentDate { get; set; }
@@ -356,28 +353,32 @@ public sealed class StockService
         public double? LastPrice_PerKG { get; set; }
         public double? CostPerPack { get; set; }
         public double? CostPerKG { get; set; }
+        public string? CustomerGroup { get; set; }
         public DateTime? LastSaleDate { get; set; }
+
+        public string? MaterialGroup1Description { get; set; }  // ✅ เพิ่ม
+        public double? GrossMarginPct { get; set; }  // ✅ เพิ่ม
     }
 
-    public sealed class SalesReportResponse
+    public sealed class ComprehensiveReportResponse
     {
         public int TotalCount { get; set; }
         public int Page { get; set; }
         public int PageSize { get; set; }
-        public List<SalesReportDto> Items { get; set; } = new();
+        public List<ComprehensiveReportDto> Items { get; set; } = new();
     }
 
     // ── Method ───────────────────────────────────────────────────────────────
-    public async Task<SalesReportResponse?> GetSalesReportAsync(
-        SalesReportRequest? request = null,
+    public async Task<ComprehensiveReportResponse?> GetSalesReportAsync(
+        ComprehensiveReportRequest? request = null,
         CancellationToken cancellationToken = default)
     {
         EnsureAuthenticated();
 
-        var body = request ?? new SalesReportRequest();
+        var body = request ?? new ComprehensiveReportRequest();
 
         using var req = new HttpRequestMessage(HttpMethod.Post,
-            "api/MGT_SalesOrder/SalesReport")
+            "api/MGT_SalesOrder/ComprehensiveReport")
         {
             Content = JsonContent.Create(body)
         };
@@ -391,7 +392,7 @@ public sealed class StockService
             req.Headers.TryAddWithoutValidation("X-Page", _pageContext.Page);
 
         using var response = await _http.SendAsync(req, cancellationToken);
-        return await ReadResponseAsync<SalesReportResponse>(response, cancellationToken);
+        return await ReadResponseAsync<ComprehensiveReportResponse>(response, cancellationToken);
     }
     private sealed class MaterialConsumptionRequest
     {
@@ -426,5 +427,98 @@ public sealed class StockService
     {
         return await SearchMaterialForStockMovement(keyword, cancellationToken)
                ?? new List<MaterialLookup>();
+    }
+    // ✅ เพิ่มใน StockService.cs
+    public sealed class OutboundDeliveryResponse
+    {
+        [JsonPropertyName("totalCount")]
+        public int TotalCount { get; set; }
+
+        [JsonPropertyName("page")]
+        public int Page { get; set; }
+
+        [JsonPropertyName("pageSize")]
+        public int PageSize { get; set; }
+
+        [JsonPropertyName("items")]
+        public List<OutboundDeliveryItem> Items { get; set; } = new();
+    }
+
+    public sealed class OutboundDeliveryItem
+    {
+        [JsonPropertyName("deliveryDate")]
+        public DateTime? DeliveryDate { get; set; }
+
+        [JsonPropertyName("soldToParty")]
+        public string? SoldToParty { get; set; }
+
+        [JsonPropertyName("customerNameThai")]
+        public string? CustomerNameThai { get; set; }
+
+        [JsonPropertyName("customerNameEn")]
+        public string? CustomerNameEn { get; set; }
+
+        [JsonPropertyName("materialDescription")]
+        public string? MaterialDescription { get; set; }
+
+        [JsonPropertyName("batchNo")]
+        public string? BatchNo { get; set; }
+
+        [JsonPropertyName("quantity")]
+        public decimal? Quantity { get; set; }
+
+        [JsonPropertyName("unit")]
+        public string? Unit { get; set; }
+
+        [JsonPropertyName("shipToName")]
+        public string? ShipToName { get; set; }
+
+        [JsonPropertyName("shipToAddress")]
+        public string? ShipToAddress { get; set; }
+
+        [JsonPropertyName("shipToAddressSap")]  // ✅ SAP
+        public string? ShipToAddressSap { get; set; }
+
+        [JsonPropertyName("shipToAddressDb")]   // ✅ DB
+        public string? ShipToAddressDb { get; set; }
+
+        [JsonPropertyName("license")]
+        public string? License { get; set; }
+
+        [JsonPropertyName("classNo")]
+        public string? ClassNo { get; set; }
+
+        [JsonPropertyName("netWeight")]
+        public decimal? NetWeight { get; set; }
+
+        [JsonPropertyName("grossWeight")]
+        public decimal? GrossWeight { get; set; }
+
+        [JsonPropertyName("totalGrossWeight")]
+        public decimal? TotalGrossWeight { get; set; }
+
+        [JsonPropertyName("routeNameThai")]
+        public string? RouteNameThai { get; set; }
+
+        [JsonPropertyName("month")]
+        public int? Month { get; set; }
+
+        [JsonPropertyName("year")]
+        public int? Year { get; set; }
+
+        [JsonPropertyName("deliveryDocument")]
+        public string? DeliveryDocument { get; set; }
+
+        [JsonPropertyName("material")]
+        public string? Material { get; set; }
+
+        [JsonPropertyName("referenceSODocument")]
+        public string? ReferenceSODocument { get; set; }
+
+        [JsonPropertyName("storageClassCode")]
+        public string? StorageClassCode { get; set; }
+
+        [JsonPropertyName("storageClassDescription")]
+        public string? StorageClassDescription { get; set; }
     }
 }

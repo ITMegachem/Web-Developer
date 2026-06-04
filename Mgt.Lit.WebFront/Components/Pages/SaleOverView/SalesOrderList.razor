@@ -737,7 +737,7 @@
                 ws.Cell(row, 11).Value = r.MaterialDescription;
                 ws.Cell(row, 12).Value = r.OrderQuantity.HasValue ? r.OrderQuantity.Value.ToString("N0") : "-";
                 ws.Cell(row, 13).Value = string.IsNullOrEmpty(r.RequestedQuantityUnit) ? "-" : r.RequestedQuantityUnit;
-                ws.Cell(row, 14).Value = r.SalesEmployee;
+                ws.Cell(row, 14).Value = r.SalesEmployee ?? r.SalesEmployeeID;
                 row++;
             }
 

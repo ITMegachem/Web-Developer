@@ -12,7 +12,7 @@ public class View_MGT_GLC_ALL_Sales
     public DateTime? DeliveryDate { get; set; }
     [Column("Soldto-MappingAddress")]
     public string? SoldtoMappingAddress { get; set; }
-
+    
     [Column("Shipto-MappingAddress")]
     public string? ShiptoMappingAddress { get; set; }
     public string? SoldToParty { get; set; }

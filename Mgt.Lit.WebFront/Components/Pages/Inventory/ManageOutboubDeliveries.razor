@@ -104,7 +104,7 @@
             <table class="table modern-table mb-0">
                 <thead>
                     <tr>
-                        <th style="font-size:110%;font-weight:800">#</th>
+                        
                         <th style="font-size:110%;font-weight:800">Date</th>
                         <th style="font-size:110%;font-weight:800">Sold-to</th>
                         <th style="font-size:110%;font-weight:800">Customer Name</th>
@@ -130,7 +130,7 @@
                         @foreach (var r in pagedItems)
                         {
                             <tr>
-                                <td class="text-muted" style="font-size:12px">@rowNum</td>
+                                
                                 <td style="white-space:nowrap">@r.DeliveryDate?.ToString("dd/MM/yyyy")</td>
                                 <td class="numeric-green">@r.SoldToParty</td>
                                 <td>@r.CustomerNameEn</td>
@@ -140,7 +140,7 @@
                                 </td>
                                 <td class="text-center fw-bold">@r.Quantity?.ToString("N0")</td>
                                 <td class="text-center text-muted">@r.Unit</td>
-                                <td style="font-size:12px">@r.ShipToName</td>
+                                <td style="font-size:12px">@r.ShipToAddressDb</td>
                                 <td class="text-center">
                                     <span class="badge bg-warning text-dark" style="font-size:11px">@r.License</span>
                                 </td>
@@ -260,7 +260,9 @@
         public decimal? Quantity { get; set; }      // ✅ nullable
         public string? Unit { get; set; }
         public string? ShipToName { get; set; }
-        public string? ShipToAddress { get; set; }
+        public string? ShipToAddress { get; set; }  // merged
+        public string? ShipToAddressSap { get; set; }  // ✅ เพิ่ม
+        public string? ShipToAddressDb { get; set; }  // ✅ เพิ่ม
         public string? License { get; set; }
         public string? ClassNo { get; set; }
         public decimal? NetWeight { get; set; }     // ✅ nullable
@@ -274,14 +276,6 @@
         public string? ReferenceSODocument { get; set; }
         public string? StorageClassCode { get; set; }
         public string? StorageClassDescription { get; set; }
-    }
-
-    public class OutboundDeliveryResponse
-    {
-        public int TotalCount { get; set; }
-        public int Page { get; set; }
-        public int PageSize { get; set; }
-        public List<OutboundDeliveryDto> Items { get; set; } = new();
     }
 
     // ─── State ────────────────────────────────────────────────────────────────
@@ -423,6 +417,8 @@
         Unit = r.Unit,
         ShipToName = r.ShipToName,
         ShipToAddress = r.ShipToAddress,
+        ShipToAddressSap = r.ShipToAddressSap,  // ✅ เพิ่ม
+        ShipToAddressDb = r.ShipToAddressDb,   // ✅ เพิ่ม
         License = r.License,
         ClassNo = r.ClassNo,
         NetWeight = r.NetWeight,
@@ -519,10 +515,10 @@
 {
     // ✅ ตามภาพก่อน
     "Date", "Sold-to Party", "Customer Name", "Material Description",
-    "Batch No.", "Quant.", "Pack", "Ship To", "License", "Class No.",
-    "Net Weight", "GW", "Total GW", "Name in Thai",
+    "Batch No.", "Quant.", "Pack",  "Ship To Address (DB)","Ship To Address (SAP)", "License", "Class No.",
+    "Net Weight", "GW","Total GW",  "Name in Thai",
     // ✅ ต่อท้ายของเดิม
-     "Storage Class Description",
+    "Storage Class Description",
     "Month", "Year", "Delivery Document", "Reference SO"
 };
 
@@ -545,6 +541,8 @@
                 ws.Cell(row, col++).Value = r.BatchNo ?? "";                               // Batch No.
                 ws.Cell(row, col++).Value = (double)(r.Quantity ?? 0);                     // Quant.
                 ws.Cell(row, col++).Value = r.Unit ?? "";                                  // Pack
+                ws.Cell(row, col++).Value = r.ShipToAddressDb ?? "";   // DB
+                ws.Cell(row, col++).Value = r.ShipToAddressSap ?? "";  // SAP
                 //ws.Cell(row, col++).Value = r.ShipToName ?? "";                            // Ship To
                 ws.Cell(row, col++).Value = r.License ?? "";                               // License
                 ws.Cell(row, col++).Value = r.StorageClassCode ?? "";                      // Class No.
@@ -553,7 +551,7 @@
                 ws.Cell(row, col++).Value = (double)((r.Quantity ?? 0) * (r.GrossWeight ?? 0)); // Total GW
                 ws.Cell(row, col++).Value = r.CustomerNameThai ?? "";                      // Name in Thai
                                                                                            // ต่อท้าย
-                ws.Cell(row, col++).Value = r.ShipToAddress ?? "";                         // Ship To Address
+                //ws.Cell(row, col++).Value = r.ShipToAddress ?? "";                         // Ship To Address
                 ws.Cell(row, col++).Value = r.StorageClassDescription ?? "";               // Storage Class Description
                 ws.Cell(row, col++).Value = r.Month ?? 0;                                  // Month
                 ws.Cell(row, col++).Value = r.Year ?? 0;                                   // Year
@@ -592,8 +590,8 @@
             if (!_isDisposed) await InvokeAsync(StateHasChanged);
         }
     }
-    // ✅ แทนที่ method เดิมทั้งก้อน
-    private async Task<OutboundDeliveryResponse?> FetchOutboundDeliveriesAsync()
+    // ✅ ระบุ type ให้ชัดเจน
+    private async Task<StockService.OutboundDeliveryResponse?> FetchOutboundDeliveriesAsync()
     {
         return await stockService.GetOutboundDeliveriesAsync();
     }

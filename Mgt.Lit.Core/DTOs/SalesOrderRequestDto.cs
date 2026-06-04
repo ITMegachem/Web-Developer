@@ -33,7 +33,7 @@ namespace Mgt.Lit.Core.DTOs
         public string Material { get; set; }
         public string MaterialName { get; set; }
 
-        public string SalesEmployee { get; set; }
+        public string SalesEmployeeID { get; set; }
     }
     // Request
     public class NofReportRequestDto
@@ -61,12 +61,12 @@ namespace Mgt.Lit.Core.DTOs
         public decimal? NetAmount { get; set; }
         public decimal? CostAmount { get; set; }
         public decimal? GrossProfit { get; set; }
-        public string? SalesEmployee { get; set; }
+        public string? SalesEmployeeID { get; set; }
         public decimal? QuantityKG { get; set; }
         public decimal? NetWeight { get; set; }
     }
     // ── Request ──────────────────────────────────────────────────────────
-    public class SalesReportRequestDto
+    public class ComprehensiveReportRequestDto
     {
         public int Page { get; set; } = 1;
         public int PageSize { get; set; } = 50;
@@ -78,10 +78,11 @@ namespace Mgt.Lit.Core.DTOs
         public string? ProductGroup { get; set; }
         public DateTime? DeliveryDateFrom { get; set; }  // ✅ เพิ่ม
         public DateTime? DeliveryDateTo { get; set; }  // ✅ เพิ่ม
+        public string? CustomerGroup { get; set; }
     }
 
     // ── Response ─────────────────────────────────────────────────────────
-    public class SalesReportResponseDto
+    public class ComprehensiveReportResponseDto
     {
         // จาก MGT_Sale
         public string? BillingDocument { get; set; }
@@ -109,5 +110,8 @@ namespace Mgt.Lit.Core.DTOs
         public double? LastPrice_PerKG { get; set; }
         public double? CostPerPack { get; set; }
         public double? CostPerKG { get; set; }
+        public string? CustomerGroup { get; set; }
+        public string? MaterialGroup1Description { get; set; }  // จาก Ms_MaterialGroup1
+        public double? GrossMarginPct { get; set; }  // GP% = GrossProfit/NetAmount*100
     }
 }

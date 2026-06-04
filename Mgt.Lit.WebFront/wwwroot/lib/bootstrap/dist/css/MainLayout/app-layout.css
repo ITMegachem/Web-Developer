@@ -442,6 +442,9 @@
 .page-inner {
     padding: 24px 32px;
     zoom: 0.9;
+    height: calc(100vh / 0.9); /* ✅ ชดเชย zoom */
+    display: flex;
+    flex-direction: column;
 }
 
 

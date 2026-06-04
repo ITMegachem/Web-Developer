@@ -30,5 +30,40 @@ namespace Mgt.Lit.Core.Entities
         public decimal? GrossProfit { get; set; }
         public double? Quantity { get; set; }
         public string? Unit { get; set; }
+
+        // ✅ เพิ่มใหม่
+        public string? MaterialGroup1 { get; set; }
+
+        [Column("Material Group Name")]
+        public string? MaterialGroupName { get; set; }
+
+        public string? MaterialGroup2 { get; set; }
+
+        [Column("Industry Code")]
+        public string? IndustryCode { get; set; }
+
+        [Column("Industry Name")]
+        public string? IndustryName { get; set; }
+
+        [Column("Affiliate Customer Code")]
+        public string? AffiliateCustomerCode { get; set; }
+
+        [Column("Affiliate Customer Name")]
+        public string? AffiliateCustomerName { get; set; }
+
+        [Column("Customer Area Code")]
+        public string? CustomerAreaCode { get; set; }
+
+        [Column("Customer Area Name")]
+        public string? CustomerAreaName { get; set; }
+
+        [Column("Customer Type Code")]
+        public string? CustomerTypeCode { get; set; }
+
+        [Column("Customer Type Name")]
+        public string? CustomerTypeName { get; set; }
+
+        public string? DivisionName { get; set; }
+        
     }
 }

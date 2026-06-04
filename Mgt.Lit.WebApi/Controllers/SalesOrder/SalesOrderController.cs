@@ -13,6 +13,7 @@ using System.Runtime;
 using System.Security.Claims;
 using System.Text.Json;
 using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
+using static SapService;
 
 namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 {
@@ -78,7 +79,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
         ShipToMappingAddress = x.ShipToMappingAddress,
         Material = x.Material,
         MaterialName = x.MaterialName,
-        SalesEmployee = x.SalesEmployee
+        SalesEmployeeID = x.SalesEmployeeID
     })
     .ToListAsync();
 
@@ -171,7 +172,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     x.ShipToMappingAddress,
                     x.Material,
                     x.MaterialName,
-                    x.SalesEmployee
+                    x.SalesEmployeeID
                 })
                 .ToListAsync();
 
@@ -1095,7 +1096,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     NetAmount = x.NetAmount,
                     CostAmount = x.CostAmount,
                     GrossProfit = x.GrossProfit,
-                    SalesEmployee = x.SalesEmployeeID,
+                    SalesEmployeeID = x.SalesEmployeeID,
                     NetWeight = netWeight,
                     QuantityKG = (x.Quantity.HasValue && netWeight.HasValue)
                         ? x.Quantity.Value * netWeight.Value
@@ -1602,6 +1603,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     .ToListAsync();
 
                 // Step 4: ดึง SalesEmployee + PurchaseOrderByCustomer
+                
                 var z2Partners = await _context.View_Sales_with_Op_SalesOrder
                     .AsNoTracking()
                     .Where(x => x.PartnerFunction == "Z2" && soNumbers.Contains(x.SalesOrder!))
@@ -1623,7 +1625,15 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     .Where(x => z2Usernames.Contains(x.Username))
                     .Select(x => new { x.Username, x.FullName })
                     .ToListAsync();
+                // ✅ เพิ่มหลัง Step 4
+                Console.WriteLine($"[Z2] count={z2Partners.Count}");
+                foreach (var z in z2Partners)
+                    Console.WriteLine($"[Z2] SO={z.SalesOrder} Customer='{z.Customer}'");
 
+                Console.WriteLine($"[USERS] z2Usernames={string.Join(",", z2Usernames)}");
+                Console.WriteLine($"[USERS] found={users.Count}");
+                foreach (var u in users)
+                    Console.WriteLine($"[USERS] Username='{u.Username}' FullName='{u.FullName}'");
                 // Step 5: ดึง MaterialName
                 // Step 5b: ย้ายขึ้นมาก่อน เพื่อให้ได้ sapItemList
                 var sapItemList = await _sapService.GetSalesOrderItemsAsync(soNumbers);
@@ -2067,7 +2077,7 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 : Enumerable.Empty<string>();
         }
         private IQueryable<SalesOrderResponseDto> BuildDistinctSalesOrderQuery(
-    IQueryable<View_MGT_GLC_ALL_Sales> query)
+     IQueryable<View_MGT_GLC_ALL_Sales> query)
         {
             return query
                 .GroupBy(x => new
@@ -2077,12 +2087,11 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     x.SalesDocument,
                     x.SoldToParty,
                     x.SoldToName,
-                    x.SoldtoMappingAddress,
+                    x.SoldtoMappingAddress,   // ✅ ชื่อตรงกับ Entity
                     x.ShiptoCode,
                     x.ShipToName,
-                    x.ShiptoMappingAddress,
+                    x.ShiptoMappingAddress,   // ✅ ชื่อตรงกับ Entity
                     x.Material
-
                 })
                 .Select(g => new SalesOrderResponseDto
                 {
@@ -2096,17 +2105,14 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     ShipToName = g.Key.ShipToName ?? "-",
                     ShipToMappingAddress = g.Key.ShiptoMappingAddress ?? "-",
                     Material = g.Key.Material ?? "-",
-
-
-                    // ไม่เอา MaterialName เป็น key แต่เก็บมาแสดง 1 ค่า
                     MaterialName = g.Max(x => x.MaterialName) ?? "-",
                     DeliveryDate = g.Max(x => x.DeliveryDate),
-                    // ไม่เอา SalesEmployee เป็น key
-                    // ถ้าซ้ำกันจริง ๆ ส่วนมากค่านี้จะเหมือนกันอยู่แล้ว
-                    SalesEmployee = g.Max(x => x.SalesEmployeeID) ?? "-"
+
+                    // ✅ แก้จาก x.SalesEmployee → x.SalesEmployeeID
+                    SalesEmployeeID = g.Max(x => x.SalesEmployeeID) ?? "-"
                 });
         }
-       
+
         // ✅ สำหรับ StockMovement — Division ดูได้หมดเหมือน StockofMaterial
         private async Task<HashSet<string>?> GetAllowedMaterialsForMovementAsync(View_UserPermission permission)
         {
@@ -2572,7 +2578,6 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                         Console.WriteLine($"[DEBUG] Missing SO in DB: {string.Join(", ", missingSoNumbers)}");
 
                         // ✅ Fallback ดึง SO ที่หาไม่เจอจาก SAP โดยตรง
-                        // ✅ Fallback ดึง SO ที่หาไม่เจอจาก SAP โดยตรง
                         if (missingSoNumbers.Any())
                         {
                             try
@@ -2878,167 +2883,211 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     }
                 }
 
-                // ── 8. Ship To จาก Mapping_Shiptos ──────────────────────────────
+                // ── 8. Ship To ────────────────────────────────────────────────────────
                 var shipToDict = new Dictionary<string,
-                    (string? FullName, string? Address)>(StringComparer.OrdinalIgnoreCase);
+      (string? FullName, string? AddressDb, string? AddressSap, string? AddressMerged)>(
+      StringComparer.OrdinalIgnoreCase);
 
                 if (refSoNumbers.Any())
                 {
                     try
                     {
-                        var shipToList = await _context.Mapping_Shiptos
-                            .AsNoTracking()
-                            .Where(x => x.SalesOrder != null &&
-                                        refSoNumbers.Contains(x.SalesOrder) &&
-                                        x.PartnerFunctionInternalCode == "WE")
-                            .Select(x => new { x.SalesOrder, x.FullName, x.Address })
-                            .ToListAsync();
+                        // ── 8.1 ดึง DeliveryDoc → ShipToParty จาก SAP Header ─────────
+                        var deliveryDocs = sapItems
+                            .Select(x => x.TryGetProperty("DeliveryDocument", out var d)
+                                ? d.GetString() : null)
+                            .Where(x => !string.IsNullOrWhiteSpace(x))
+                            .Select(x => x!)
+                            .Distinct()
+                            .ToList();
 
-                        shipToDict = shipToList
-                            .GroupBy(x => x.SalesOrder!)
-                            .ToDictionary(
-                                g => g.Key,
-                                g => (g.First().FullName, g.First().Address),
-                                StringComparer.OrdinalIgnoreCase);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[ERROR] shipToDict: {ex.Message}");
-                    }
-                }
+                        var docToShipToCode = new Dictionary<string, string>(
+                            StringComparer.OrdinalIgnoreCase);
 
-                // ── 8.5 หา deliveryDocsForShipTo ก่อน ──────────────────────────
-                var missingSoForShipTo = refSoNumbers
-                    .Where(so => !shipToDict.ContainsKey(so))
-                    .ToList();
-
-                var deliveryDocsForShipTo = sapItems  // ✅ ประกาศตรงนี้
-                    .Where(x =>
-                    {
-                        var refSo = x.TryGetProperty("ReferenceSDDocument", out var r)
-                            ? r.GetString() : null;
-                        return !string.IsNullOrWhiteSpace(refSo) &&
-                               missingSoForShipTo.Contains(refSo);
-                    })
-                    .Select(x => x.TryGetProperty("DeliveryDocument", out var d)
-                        ? d.GetString() : null)
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .Select(x => x!)
-                    .Distinct()
-                    .ToList();
-
-                Console.WriteLine($"[DEBUG] Missing ShipTo SO: {string.Join(", ", missingSoForShipTo)}");
-
-                if (deliveryDocsForShipTo.Any())
-                {
-                    try
-                    {
-                        var headerJson = await _sapService
-                            .GetOutboundDeliveryHeadersAsync(deliveryDocsForShipTo);
-                        var headerDoc = JsonDocument.Parse(headerJson);
-                        var headerResults = headerDoc.RootElement
-                            .GetProperty("d").GetProperty("results")
-                            .EnumerateArray();
-
-                        foreach (var h in headerResults)
-                        {
-                            var docNo = h.TryGetProperty("DeliveryDocument", out var dn)
-                                ? dn.GetString() : null;
-                            var shipToParty = h.TryGetProperty("ShipToParty", out var sh)
-                                ? sh.GetString() : null;
-
-                            var matchedRefSo = sapItems
-                                .Where(x => x.TryGetProperty("DeliveryDocument", out var dd2) &&
-                                            dd2.GetString() == docNo)
-                                .Select(x => x.TryGetProperty("ReferenceSDDocument", out var r2)
-                                    ? r2.GetString() : null)
-                                .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
-
-                            if (!string.IsNullOrWhiteSpace(matchedRefSo) &&
-                                !string.IsNullOrWhiteSpace(shipToParty))
-                            {
-                                // ✅ ดึงชื่ออังกฤษจาก Mapping_Shipto.Customer
-                                var mappingShipTo = await _context.Mapping_Shiptos
-                                    .AsNoTracking()
-                                    .Where(x => x.Customer != null &&
-                                                x.Customer.Trim() == shipToParty.Trim())
-                                    .Select(x => new { x.FullName, x.Address })
-                                    .FirstOrDefaultAsync();
-
-                                shipToDict[matchedRefSo!] = (
-                                    FullName: mappingShipTo?.FullName ?? shipToParty,
-                                    Address: mappingShipTo?.Address
-                                );
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[ERROR] ShipTo fallback: {ex.Message}");
-                    }
-                }
-
-                // ── 8.6 Resolve ShipTo code → FullName ──────────────────────────
-                var keys = shipToDict.Keys.ToList();
-                foreach (var key in keys)
-                {
-                    var val = shipToDict[key];
-                    if (!string.IsNullOrWhiteSpace(val.FullName) &&
-                        val.FullName!.All(char.IsDigit))
-                    {
-                        try
-                        {
-                            var custJson = await _sapService.GetCustomersByCodesAsync(
-                                new List<string> { val.FullName! });
-                            var custDoc = JsonDocument.Parse(custJson);
-                            var custResults = custDoc.RootElement
-                                .GetProperty("d").GetProperty("results")
-                                .EnumerateArray();
-
-                            foreach (var c in custResults)
-                            {
-                                var fullName = c.TryGetProperty("CustomerFullName", out var cfn)
-                                    ? cfn.GetString() : null;
-                                if (!string.IsNullOrWhiteSpace(fullName))
-                                    shipToDict[key] = (FullName: fullName, Address: val.Address);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"[ERROR] ShipTo resolve: {ex.Message}");
-                        }
-                    }
-                }
-
-                // ── 8.7 Resolve ShipTo Address ──────────────────────────────────
-                var keys2 = shipToDict.Keys.ToList();
-                foreach (var key in keys2)
-                {
-                    var val = shipToDict[key];
-                    if (string.IsNullOrWhiteSpace(val.Address) &&
-                        !string.IsNullOrWhiteSpace(val.FullName))
-                    {
-                        soDict.TryGetValue(key, out var soldToCode);
-                        if (!string.IsNullOrWhiteSpace(soldToCode))
+                        if (deliveryDocs.Any())
                         {
                             try
                             {
-                                var addrData = await _context.Mapping_Shiptos
-                                    .AsNoTracking()
-                                    .Where(x => x.Customer != null &&
-                                                x.Customer.Trim() == soldToCode!.Trim() &&
-                                                x.Address != null)
-                                    .Select(x => new { x.FullName, x.Address })
-                                    .FirstOrDefaultAsync();
-
-                                if (addrData != null)
-                                    shipToDict[key] = (FullName: val.FullName, Address: addrData.Address);
+                                var headerJson = await _sapService
+                                    .GetOutboundDeliveryHeadersAsync(deliveryDocs);
+                                var headerDoc = JsonDocument.Parse(headerJson);
+                                foreach (var h in headerDoc.RootElement
+                                    .GetProperty("d").GetProperty("results").EnumerateArray())
+                                {
+                                    var docNo = h.TryGetProperty("DeliveryDocument", out var dn)
+                                        ? dn.GetString() : null;
+                                    var shipToParty = h.TryGetProperty("ShipToParty", out var sh)
+                                        ? sh.GetString() : null;
+                                    if (!string.IsNullOrWhiteSpace(docNo) &&
+                                        !string.IsNullOrWhiteSpace(shipToParty))
+                                        docToShipToCode[docNo!] = shipToParty!;
+                                }
                             }
                             catch (Exception ex)
                             {
-                                Console.WriteLine($"[ERROR] ShipTo Address: {ex.Message}");
+                                Console.WriteLine($"[ERROR] DeliveryHeader: {ex.Message}");
                             }
                         }
+
+                        // ── 8.2 Map: RefSO → ShipToParty code ────────────────────────
+                        var soToShipToCode = new Dictionary<string, string>(
+                            StringComparer.OrdinalIgnoreCase);
+
+                        foreach (var item in sapItems)
+                        {
+                            var refSo = item.TryGetProperty("ReferenceSDDocument", out var r)
+                                ? r.GetString() : null;
+                            var docNo = item.TryGetProperty("DeliveryDocument", out var d)
+                                ? d.GetString() : null;
+                            if (string.IsNullOrWhiteSpace(refSo) ||
+                                string.IsNullOrWhiteSpace(docNo)) continue;
+
+                            if (docToShipToCode.TryGetValue(docNo!, out var code))
+                                soToShipToCode.TryAdd(refSo!, code);
+                        }
+
+                        // ── 8.3 ShipTo codes ทั้งหมด ──────────────────────────────────
+                        var shipToCodes = soToShipToCode.Values.Distinct().ToList();
+
+                        // ── 8.4 DB: Mapping_Shiptos WHERE Customer IN (codes) ─────────
+                        var dbByCode = new Dictionary<string,
+                            (string? FullName, string? Address)>(StringComparer.OrdinalIgnoreCase);
+
+                        if (shipToCodes.Any())
+                        {
+                            var dbRows = await _context.Mapping_Shiptos
+                                .AsNoTracking()
+                                .Where(x => x.Customer != null &&
+                                            shipToCodes.Contains(x.Customer.Trim()))
+                                .Select(x => new { x.Customer, x.FullName, x.Address })
+                                .ToListAsync();
+
+                            dbByCode = dbRows
+                                .GroupBy(x => x.Customer!.Trim())
+                                .ToDictionary(
+                                    g => g.Key,
+                                    g => (g.First().FullName, g.First().Address),
+                                    StringComparer.OrdinalIgnoreCase);
+                        }
+
+                        // ── 8.5 SAP: A_BusinessPartnerAddress fallback ────────────────
+                        var sapByCode = new Dictionary<string, SapAddressResult>(
+                            StringComparer.OrdinalIgnoreCase);
+
+                        if (shipToCodes.Any())
+                        {
+                            try
+                            {
+                                sapByCode = await _sapService
+                                    .GetShipToAddressesBatchAsync(shipToCodes); // ✅ ส่งทุก code
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[ERROR] SAP ShipTo: {ex.Message}");
+                            }
+                        }
+
+                        // ── 8.6 Build shipToDict: เก็บทั้ง SAP และ DB แยกกัน ─────────────
+                        // เปลี่ยน tuple เป็น 4 field
+
+
+                        static bool HasHouseNumber(string? address)
+                        {
+                            if (string.IsNullOrWhiteSpace(address)) return false;
+                            var trimmed = address.TrimStart();
+                            return trimmed.Length > 0 && char.IsDigit(trimmed[0]);
+                        }
+
+                        foreach (var so in refSoNumbers)
+                        {
+                            if (!soToShipToCode.TryGetValue(so, out var code)) continue;
+
+                            dbByCode.TryGetValue(code, out var db);
+                            sapByCode.TryGetValue(code, out var sap);
+
+                            var fullName = !string.IsNullOrWhiteSpace(db.FullName) ? db.FullName : null;
+
+                            // ── SAP address ────────────────────────────────────────────────
+                            string? addressSap = null;
+                            if (sap != null)
+                            {
+                                var sapParts = new[]
+                                {
+            sap.HouseNumber,
+            sap.HouseNumberSupplement,
+            sap.StreetSuffix,
+            sap.StreetName,
+            sap.StreetPrefix,
+            sap.District,
+            sap.CityName,
+            sap.PostalCode,
+            sap.Country
+        }.Where(x => !string.IsNullOrWhiteSpace(x));
+                                addressSap = string.Join(" ", sapParts);
+                                if (string.IsNullOrWhiteSpace(addressSap)) addressSap = null;
+                            }
+
+                            // ── DB address ─────────────────────────────────────────────────
+                            string? addressDb = string.IsNullOrWhiteSpace(db.Address) ? null : db.Address;
+
+                            // ── Merged address: เอาดีที่สุดจากทั้งคู่ ─────────────────────
+                            string? addressMerged = null;
+
+                            if (!string.IsNullOrWhiteSpace(addressDb))
+                            {
+                                if (HasHouseNumber(addressDb))
+                                {
+                                    addressMerged = addressDb;
+                                }
+                                else if (sap != null)
+                                {
+                                    var sapHouseNo = new[]
+                                    {
+                sap.HouseNumber,
+                sap.HouseNumberSupplement,
+                sap.StreetSuffix
+            }.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x) && HasHouseNumber(x));
+
+                                    addressMerged = sapHouseNo != null
+                                        ? $"{sapHouseNo} {addressDb}".Trim()
+                                        : addressDb;
+                                }
+                                else
+                                {
+                                    addressMerged = addressDb;
+                                }
+                            }
+                            else
+                            {
+                                addressMerged = addressSap;
+                            }
+
+                            shipToDict[so] = (fullName, addressDb, addressSap, addressMerged);
+                        }
+                        // ── 8.7 Fallback: SO ที่หา ShipTo code ไม่เจอ → ดึงจาก DB ด้วย SalesOrder ──
+                        var stillMissingSo = refSoNumbers
+     .Where(so => !shipToDict.ContainsKey(so))
+     .ToList();
+
+                        if (stillMissingSo.Any())
+                        {
+                            var dbBySo = await _context.Mapping_Shiptos
+                                .AsNoTracking()
+                                .Where(x => x.SalesOrder != null &&
+                                            stillMissingSo.Contains(x.SalesOrder) &&
+                                            x.PartnerFunctionInternalCode == "WE")
+                                .Select(x => new { x.SalesOrder, x.FullName, x.Address })
+                                .ToListAsync();
+
+                            foreach (var row in dbBySo)
+                                if (!string.IsNullOrWhiteSpace(row.SalesOrder))
+                                    shipToDict.TryAdd(row.SalesOrder!,
+                                        (row.FullName, row.Address, null, row.Address));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ERROR] shipToDict main: {ex.Message}");
                     }
                 }
                 // ── 9. Map SAP items → DTO ────────────────────────────────────────
@@ -3098,7 +3147,8 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
          {
              var shipToParty = item.TryGetProperty("ShipToParty", out var shp) ? shp.GetString() : null;
              if (!string.IsNullOrWhiteSpace(shipToParty))
-                 shipTo = (FullName: shipToParty, Address: null);
+                 shipTo = (FullName: shipToParty, AddressDb: null,
+                           AddressSap: null, AddressMerged: null);
          }
 
          // 3. Customer Thai Name
@@ -3118,7 +3168,10 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
              Unit = item.TryGetProperty("DeliveryQuantityUnit", out var u)
                                       ? u.GetString() : null,
              ShipToName = shipTo.FullName,
-             ShipToAddress = shipTo.Address,
+             ShipToAddress = shipTo.AddressMerged,  // merged (ใช้แสดงหลัก)
+             ShipToAddressSap = shipTo.AddressSap,     // ✅ จาก SAP
+             ShipToAddressDb = shipTo.AddressDb,      // ✅ จาก DB
+            
              License = prod.License,
              ClassNo = prod.ClassNo,
              StorageClassCode = prod.StorageClassCode,
@@ -3302,8 +3355,8 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             }
         }
         [Authorize]
-        [HttpPost("SalesReport")]
-        public async Task<IActionResult> GetSalesReport([FromBody] SalesReportRequestDto request)
+        [HttpPost("ComprehensiveReport")]
+        public async Task<IActionResult> GetComprehensiveReport([FromBody] ComprehensiveReportRequestDto request)
         {
             var permission = await GetCurrentPermissionAsync();
             if (permission == null)
@@ -3347,8 +3400,17 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             if (!string.IsNullOrWhiteSpace(request.SalesGroup))
                 query = query.Where(x => x.SalesGroup == request.SalesGroup.Trim());
 
-            if (!string.IsNullOrWhiteSpace(request.ProductGroup))
-                query = query.Where(x => x.ProductGroup == request.ProductGroup.Trim());
+            if (!string.IsNullOrWhiteSpace(request.CustomerGroup))
+            {
+                var customerGroup = request.CustomerGroup.Trim();
+
+                query =
+                    from sale in query
+                    join cg in _context.Ms_CustomerGroups
+                        on sale.IndustryName equals cg.CustomerGroup
+                    where cg.CustomerGroup == customerGroup
+                    select sale;
+            }
 
             // ── Apply Permission ─────────────────────────────────────────────────
             query = ApplySalesReportPermission(query, permission);
@@ -3383,7 +3445,12 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     x.CostAmount,
                     x.GrossProfit,
                     x.Quantity,
-                    x.Unit
+                    x.Unit,
+                    x.MaterialGroup1,    // ✅ เพิ่ม เช่น "003"
+                    x.MaterialGroupName, // ✅ เพิ่ม เช่น "Construction"
+                    x.MaterialGroup2,    // ✅ เพิ่ม
+                    CustomerGroup = x.IndustryName // ✅ เพิ่ม
+
                 })
                 .ToListAsync();
 
@@ -3423,14 +3490,39 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
             var priceDict = priceLookup
                 .GroupBy(x => $"{x.CustomerCode}|{x.Material}")
                 .ToDictionary(g => g.Key, g => g.First());
+            // ── ดึง MaterialGroup1 Description ──────────────────────────────────────
+            var productGroups = salesItems
+                .Where(x => !string.IsNullOrWhiteSpace(x.ProductGroup))
+                .Select(x => x.ProductGroup!)
+                .Distinct()
+                .ToList();
 
+            var materialGroup1Dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            if (productGroups.Any())
+            {
+                var mg1List = await _context.Ms_MaterialGroup1
+                    .AsNoTracking()
+                    .Where(x => productGroups.Contains(x.MaterialGroup))
+                    .Select(x => new { x.MaterialGroup, x.Description })
+                    .ToListAsync();
+
+                materialGroup1Dict = mg1List
+                    .GroupBy(x => x.MaterialGroup)
+                    .ToDictionary(g => g.Key, g => g.First().Description ?? "");
+            }
             // ── Map Response ─────────────────────────────────────────────────────
             var items = salesItems.Select(x =>
             {
                 var key = $"{x.SoldToParty}|{x.Material}";
                 priceDict.TryGetValue(key, out var price);
 
-                return new SalesReportResponseDto
+                double? grossMarginPct = null;
+                if (x.NetAmount.HasValue && x.NetAmount.Value != 0 && x.GrossProfit.HasValue)
+                    grossMarginPct = Math.Round(
+                        (double)x.GrossProfit.Value / (double)x.NetAmount.Value * 100, 2);
+
+                return new ComprehensiveReportResponseDto
                 {
                     BillingDocument = x.BillingDocument,
                     BillingDocumentDate = x.BillingDocumentDate,
@@ -3457,6 +3549,9 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                     LastPrice_PerKG = price?.LastPrice_PerKG,
                     CostPerPack = permission.CanViewCost ? price?.CostPerPack : null,
                     CostPerKG = permission.CanViewCost ? price?.CostPerKG : null,
+                    CustomerGroup = x.CustomerGroup,
+                    MaterialGroup1Description = x.MaterialGroupName, // "Construction", "Ink" etc.
+                    GrossMarginPct = permission.CanViewCost ? grossMarginPct : null,
                 };
             }).ToList();
 
@@ -3468,30 +3563,102 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 items
             });
         }
-        
+
         private IQueryable<MGT_Sale> ApplySalesReportPermission(
-            IQueryable<MGT_Sale> query,
-            View_UserPermission permission)
+     IQueryable<MGT_Sale> query,
+     View_UserPermission permission)
         {
             var scope = ResolveScope(permission);
             var salesOrg = NormalizeKey(permission.SalesOrganizationCode);
 
-            // กรอง SalesOrganization (ยกเว้น CrossCompany)
+            // ── กรอง SalesOrganization (ยกเว้น CrossCompany) ────────────────────
             if (scope != DataScopes.CrossCompany && !string.IsNullOrWhiteSpace(salesOrg))
                 query = query.Where(x => x.SalesOrganization == salesOrg);
 
             return scope switch
             {
+                // ✅ Admin — เห็นทุกอย่าง
                 DataScopes.CrossCompany => query,
+
+                // ✅ Manager — เห็นทั้ง Company (filter SalesOrg แล้วข้างบน)
                 DataScopes.Company => query,
-                DataScopes.Division => query.Where(x =>
-                    x.SalesGroup != null &&
-                    x.SalesGroup.Trim().ToUpper() == NormalizeKey(permission.Division)),
-                _ => query.Where(x =>
-                    x.SalesEmployeeBP != null &&
-                    x.SalesEmployeeBP.Trim().ToUpper() == NormalizeKey(permission.Username))
+
+                // ✅ Leader/Division — เห็นแค่ BU ของตัวเอง
+                DataScopes.Division => ApplyDivisionScopeForSale(query, permission),
+
+                // ✅ User — เห็นแค่ของตัวเอง
+                _ => ApplyOwnScopeForSale(query, permission)
             };
         }
+
+        // ── Division scope สำหรับ MGT_Sale ──────────────────────────────────────
+        private IQueryable<MGT_Sale> ApplyDivisionScopeForSale(
+            IQueryable<MGT_Sale> query,
+            View_UserPermission permission)
+        {
+            var salesOrg = NormalizeKey(permission.SalesOrganizationCode);
+            var division = NormalizeKey(permission.Division);
+
+            if (string.IsNullOrWhiteSpace(division))
+                return query.Where(x => false);
+
+            // MGT (1000) — filter ด้วย SalesGroup
+            if (salesOrg == "1000")
+            {
+                return query.Where(x =>
+                    x.SalesGroup != null &&
+                    x.SalesGroup.Trim().ToUpper() == division);
+            }
+
+            // GLC (2000) — filter ด้วย SalesEmployeeBP ผ่าน View_UserPermissions
+            if (salesOrg == "2000")
+            {
+                var allowedDivisions = GetGlcLeaderDivisions(division);
+
+                var allowedEmployees = _context.View_UserPermissions
+                    .AsNoTracking()
+                    .Where(p =>
+                        p.CompanyID == permission.CompanyID &&
+                        p.FullName != null &&
+                        p.Division != null &&
+                        p.SalesOrganizationCode != null &&
+                        p.SalesOrganizationCode.Trim().ToUpper() == salesOrg &&
+                        allowedDivisions.Contains(p.Division.Trim().ToUpper()))
+                    .Select(p => p.FullName!.Trim().ToUpper())
+                    .Distinct();
+
+                return query.Where(x =>
+                    x.SalesEmployeeBP != null &&
+                    allowedEmployees.Contains(x.SalesEmployeeBP.Trim().ToUpper()));
+            }
+
+            return query.Where(x => false);
+        }
+
+        // ── Own scope สำหรับ MGT_Sale ────────────────────────────────────────────
+        private IQueryable<MGT_Sale> ApplyOwnScopeForSale(
+            IQueryable<MGT_Sale> query,
+            View_UserPermission permission)
+        {
+            var fullName = NormalizeKey(permission.FullName);
+            var username = NormalizeKey(permission.Username);
+
+            if (!string.IsNullOrWhiteSpace(fullName))
+            {
+                return query.Where(x =>
+                    x.SalesEmployeeBP != null &&
+                    x.SalesEmployeeBP.Trim().ToUpper() == fullName);
+            }
+
+            if (!string.IsNullOrWhiteSpace(username))
+            {
+                return query.Where(x =>
+                    x.SalesEmployeeBP != null &&
+                    x.SalesEmployeeBP.Trim().ToUpper() == username);
+            }
+
+            return query.Where(x => false);
+        }                          
 
     }
 

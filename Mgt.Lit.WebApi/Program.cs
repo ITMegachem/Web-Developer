@@ -57,6 +57,11 @@ builder.Services
         {
             OnTokenValidated = async context =>
             {
+                // ✅ ข้าม TokenVersion check สำหรับ API role (เช่น Zoho)
+                var role = context.Principal?.FindFirst(ClaimTypes.Role)?.Value;
+                if (role == "api")
+                    return;
+
                 var cache = context.HttpContext.RequestServices
                     .GetRequiredService<IMemoryCache>();
 
@@ -81,7 +86,6 @@ builder.Services
                 if (cachedVersion != tokenVersion)
                     context.Fail("Session invalidated.");
             }
-        
         };
     });
 builder.Services.AddAuthorization();

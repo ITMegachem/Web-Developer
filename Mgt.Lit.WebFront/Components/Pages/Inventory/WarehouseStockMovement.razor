@@ -18,43 +18,37 @@
 @inject Mgt.Lit.WebFront.Auth.AuthState AuthState
  
 <div class="so-page-wrapper">
-    @* --- Header Section (ชื่อหน้าและวันที่ขวาสุด) --- *@
-    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-2">
+
+    @* --- Header --- *@
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
         <h2 class="page-title">MD04 - 02 Monitor Stock / Requirements List</h2>
         <div class="date-badge">@DateTime.Now.ToString("dd MMM yyyy")</div>
     </div>
 
-    @* --- ส่วน Filter (UI เขียวพาสเทล ขอบมน) --- *@
-    <div class="filter-card-modern shadow-sm mb-4">
-        <div class="row g-3 align-items-end">
+    @* --- Filter card --- *@
+    <div class="filter-card-modern shadow-sm">
+        <div class="row g-2 align-items-end">
             <div class="col-12 col-md-4">
                 <label class="modern-label">Material</label>
-
                 <div class="autocomplete-wrapper">
-
                     <input class="form-control modern-input"
                            value="@materialSearch"
                            @oninput="OnMaterialSearch"
                            @onfocus="OnMaterialFocus"
                            @onblur="OnMaterialBlur"
                            placeholder="Choose Material..." />
-
                     @if (materialResults.Any() && showMaterialDropdown)
                     {
                         <div class="autocomplete-dropdown-card">
                             @foreach (var item in materialResults)
                             {
-                                <div class="autocomplete-row"
-                                     @onclick="() => SelectMaterial(item)">
-
+                                <div class="autocomplete-row" @onclick="() => SelectMaterial(item)">
                                     <div class="code">@item.Code</div>
                                     <div class="name">@item.Name</div>
-
                                 </div>
                             }
                         </div>
                     }
-
                 </div>
             </div>
             <div class="col-12 col-md-4">
@@ -71,31 +65,26 @@
                     }
                 </div>
             </div>
-            @* --- ปุ่ม Toggle Vendor / Customer --- *@
-            @* ✅ แสดงปุ่มถ้า CanView นั้นๆ เป็น true ไม่จำกัดเฉพาะ Manager *@
             <div class="col-12 col-md-auto d-flex align-items-end gap-2 mt-2 mt-md-0">
                 @if (CanViewVendor)
                 {
                     <button class="btn btn-sm @(showVendor ? "btn-success" : "btn-outline-secondary") rounded-pill px-3"
                             @onclick="() => showVendor = !showVendor">
-                        <i class="bi @(showVendor ? "bi-eye-fill" : "bi-eye-slash-fill") me-1"></i>
-                        @("Vendor")
+                        <i class="bi @(showVendor ? "bi-eye-fill" : "bi-eye-slash-fill") me-1"></i>Vendor
                     </button>
                 }
                 @if (CanViewCustomer)
                 {
                     <button class="btn btn-sm @(showCustomer ? "btn-success" : "btn-outline-secondary") rounded-pill px-3"
                             @onclick="() => showCustomer = !showCustomer">
-                        <i class="bi @(showCustomer ? "bi-eye-fill" : "bi-eye-slash-fill") me-1"></i>
-                        @("Customer")
+                        <i class="bi @(showCustomer ? "bi-eye-fill" : "bi-eye-slash-fill") me-1"></i>Customer
                     </button>
                 }
             </div>
             <div class="col-12 col-md-4 col-lg-2 ms-auto">
-                <button class="btn btn-search-pill w-100"
+                <button class="btn btn-search-pill btn-sm w-100"
                         disabled="@string.IsNullOrWhiteSpace(materialSearch)"
                         @onclick="OnSearch">
-
                     @if (isLoading)
                     {
                         <span class="spinner-border spinner-border-sm"></span>
@@ -106,147 +95,148 @@
                     }
                 </button>
             </div>
-            
         </div>
-    </div>
+    </div>  @* ✅ ปิด filter-card ที่นี่ *@
 
-    @* --- ส่วนตารางข้อมูล (สไตล์เดียวกับ Sales Orders) --- *@
+    @* --- Table --- *@
     <div class="table-card-container shadow-sm">
-        <div class="table-responsive flex-grow-1">
-            <table class="table modern-table mb-0 fixed-table">
-                <thead class="table-light">
-                    @{
-                        var colCount = 8 + (ShowVendorCol ? 1 : 0) + (ShowCustomerCol ? 1 : 0);
-                    }
-
-                    <tr class="table-header-modern">
-                        <th class="text-center">Date</th>
-                        <th class="text-center">MRP<br />Element Type</th>
-                        <th class="text-center">MRP<br />Element Data</th>
-                        <th class="text-center">Receipt /<br />Reqmt</th>
-                        <th class="text-center">Available<br />Qty</th>
-                        <th class="text-center">Additional<br />Info IN</th>
-                        @if (ShowVendorCol)
-                        {
-                            <th class="text-center">Vendor Code /<br />Vendor Name</th>
-                        }
-                        <th class="text-center">Additional<br />Info Out</th>
-                        @if (ShowCustomerCol)
-                        {
-                            <th class="text-center">Customer Code /<br />Customer Name</th>
-                        }
-                        <th class="text-center">Material<br />Group</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @if (!hasSearched)
-                    {
-                        <tr>
-                            <td colspan="@colCount" class="text-center text-muted py-4">
-                                <p style="font-size: 100% !important;">กรุณากรอกข้อมูลและค้นหา</p>
-                            </td>
-                        </tr>
-                    }
-                    else if (stockData?.Detail != null && stockData.Detail.Any())
-                    {
-                        @foreach (var item in stockData.Detail)
-                        {
-                            <tr>
-                                <td class="text-center align-middle text-nowrap">
-                                    @item.DocumentDate.ToString("dd-MM-yyyy")
-                                </td>
-                                <td class="text-center align-middle">@item.ElementType</td>
-                                <td class="text-center align-middle">
-                                    <span class="highlight-text">@item.DocumentNo</span>
-                                </td>
-                                <td class="text-center align-middle">@item.ReceiptReqmtQty.ToString("N0")</td>
-                                <td class="text-center align-middle">@item.AvailableQty.ToString("N0")</td>
-                                <td class="text-center align-middle">
-                                    @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoIn))
-                                    {
-                                        var lines = item.AdditionalInfoIn.Split('\n');
-        
-                                        @* ✅ ETA ก่อน ETD *@
-                                        var eta = lines.FirstOrDefault(l => l.Trim().StartsWith("ETA"));
-                                        var etd = lines.FirstOrDefault(l => l.Trim().StartsWith("ETD"));
-                                        var others = lines.Where(l =>
-                                            !l.Trim().StartsWith("ETA") &&
-                                            !l.Trim().StartsWith("ETD") &&
-                                            !string.IsNullOrWhiteSpace(l));
-
-                                        @if (!string.IsNullOrWhiteSpace(eta))
-                                        {
-                                            <div>@eta.Trim()</div>
-                                        }
-                                        @if (!string.IsNullOrWhiteSpace(etd))
-                                        {
-                                            <div>@etd.Trim()</div>
-                                        }
-                                        @foreach (var line in others)
-                                        {
-                                            <div>@line.Trim()</div>
-                                        }
-                                    }
-                                </td>
-                                @if (ShowVendorCol)
-                                {
-                                    <td class="align-middle">
-                                        <div class="fw-bold">@item.VendorCode</div>
-                                        <div class="text-muted small">@item.VendorName</div>
-                                    </td>
-                                }
-                                <td class="text-center align-middle">
-                                    @if (!string.IsNullOrWhiteSpace(item.IndustryName))
-                                    {
-                                        <div><b>@item.IndustryName</b></div>
-                                    }
-                                    @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoOut))
-                                    {
-                                        <div>@item.AdditionalInfoOut</div>
-                                    }
-                                </td>
-                                @if (ShowCustomerCol)
-                                {
-                                    <td class="align-middle">
-                                        <div class="fw-bold">@item.CustomerCode</div>
-                                        <div class="text-muted small">@item.CustomerName</div>
-                                    </td>
-                                }
-                                <td class="align-middle text-center">
-                                    <div class="text-muted small">@item.MaterialGroupDescription</div>
-                                </td>
-                            </tr>
-                        }
-                    }
-                    else if (!isLoading)
-                    {
-                        <tr>
-                            <td colspan="@colCount" class="text-center text-muted py-4">
-                                ไม่พบข้อมูล
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+        <div class="d-flex justify-content-between align-items-center px-3 pt-2 pb-1">
+            <span class="text-muted small">
+                @((stockData?.Detail?.Count ?? 0)) record(s) found
+            </span>
+            @if (CanExportConsumption)
+            {
+                <button class="btn btn-sm btn-outline-success rounded-pill px-3"
+                        disabled="@string.IsNullOrWhiteSpace(selectedMaterial)"
+                        @onclick="ExportConsumption">
+                    <i class="bi bi-graph-down me-1"></i> Export Consumption
+                </button>
+            }
         </div>
-    </div>
+        <table class="table modern-table mb-0">
+            <thead>
+                @{
+                    var colCount = 8 + (ShowVendorCol ? 1 : 0) + (ShowCustomerCol ? 1 : 0);
+                }
+                <tr class="table-header-modern">
+                    <th class="text-center">Date</th>
+                    <th class="text-center">MRP<br />Element Type</th>
+                    <th class="text-center">MRP<br />Element Data</th>
+                    <th class="text-center">Receipt /<br />Reqmt</th>
+                    <th class="text-center">Available<br />Qty</th>
+                    <th class="text-center">Additional<br />Info Out</th>
 
+                    @if (ShowCustomerCol)
+                    {
+                        <th class="text-center">Customer Code /<br />Customer Name</th>
+                    }
+                    <th class="text-center">Additional<br />Info IN</th>
+                    @if (ShowVendorCol)
+                    {
+                        <th class="text-center">Vendor Code /<br />Vendor Name</th>
+                    }
+                    <th class="text-center">Material<br />Group</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (!hasSearched)
+                {
+                    <tr>
+                        <td colspan="@colCount" class="text-center text-muted py-4">
+                            กรุณากรอกข้อมูลและค้นหา
+                        </td>
+                    </tr>
+                }
+                else if (stockData?.Detail != null && stockData.Detail.Any())
+                {
+                    @foreach (var item in stockData.Detail)
+                    {
+                        <tr>
+                            <td class="text-center align-middle text-nowrap">
+                                @item.DocumentDate.ToString("dd-MM-yyyy")
+                            </td>
+                            <td class="text-center align-middle">@item.ElementType</td>
+                            <td class="text-center align-middle">
+                                <span class="highlight-text">@item.DocumentNo</span>
+                            </td>
+                            <td class="text-center align-middle">@item.ReceiptReqmtQty.ToString("N0")</td>
+                            <td class="text-center align-middle"
+                                style="@(item.AvailableQty < 0 ? "color:#dc3545; font-weight:700;" : "")">
+                                @item.AvailableQty.ToString("N0")
+                            </td>
+                            <td class="text-center align-middle">
+                                @if (!string.IsNullOrWhiteSpace(item.IndustryName))
+                                {
+                                    <div><b>@item.IndustryName</b></div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoOut))
+                                {
+                                    <div>@item.AdditionalInfoOut</div>
+                                }
+                            </td>
+                           
+                            
+                           
+                            @if (ShowCustomerCol)
+                            {
+                                <td class="align-middle">
+                                    <div class="fw-bold">@item.CustomerCode</div>
+                                    <div class="text-muted small">@item.CustomerName</div>
+                                </td>
+                            }
+                            <td class="text-center align-middle">
+                                @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoIn))
+                                {
+                                    var lines = item.AdditionalInfoIn.Split('\n');
+                                    var eta = lines.FirstOrDefault(l => l.Trim().StartsWith("ETA"));
+                                    var etd = lines.FirstOrDefault(l => l.Trim().StartsWith("ETD"));
+                                    var others = lines.Where(l =>
+                                        !l.Trim().StartsWith("ETA") &&
+                                        !l.Trim().StartsWith("ETD") &&
+                                        !string.IsNullOrWhiteSpace(l));
+                                    @if (!string.IsNullOrWhiteSpace(eta))
+                                    {
+                                        <div>@eta.Trim()</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(etd))
+                                    {
+                                        <div>@etd.Trim()</div>
+                                    }
+                                    @foreach (var line in others)
+                                    {
+                                        <div>@line.Trim()</div>
+                                    }
+                                }
+                            </td>
+                            @if (ShowVendorCol)
+                            {
+                                <td class="align-middle">
+                                    <div class="fw-bold">@item.VendorCode</div>
+                                    <div class="text-muted small">@item.VendorName</div>
+                                </td>
+                            }
+                            <td class="align-middle text-center">
+                                <div class="text-muted small">@item.MaterialGroupDescription</div>
+                            </td>
+                        </tr>
+                    }
+                }
+                else if (!isLoading)
+                {
+                    <tr>
+                        <td colspan="@colCount" class="text-center text-muted py-4">
+                            ไม่พบข้อมูล
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>  @* ✅ ปิด table-card-container *@
 
-    @* --- ปุ่ม Export --- *@
-    <div class="d-flex justify-content-end mt-4 gap-3">
+  
+    
 
-        @if (CanExportConsumption)
-        {
-            <button class="btn btn-export-pill shadow-sm"
-                    disabled="@string.IsNullOrWhiteSpace(selectedMaterial)"
-                    @onclick="ExportConsumption">
-                <i class="bi bi-graph-down me-2"></i> Export Consumption
-            </button>
-        }
-
-        
-    </div>
-</div>
+</div>  @* ✅ ปิด so-page-wrapper *@
 @code {
     private IJSObjectReference? _jsModule;
     private StockRequirementResponse stockData;
@@ -265,6 +255,7 @@
     private string selectedMaterialName = "";
     private bool showVendor = true;
     private bool showCustomer = true;
+   
 
     private bool ShowVendorCol => CanViewVendor && showVendor;
     private bool ShowCustomerCol => CanViewCustomer && showCustomer;
@@ -713,45 +704,96 @@
     }
 }
 <style>
-    /* ตัวใหญ่ขึ้น */
-    .modern-table tbody td {
-        font-size: 1rem;
-        line-height: 1.8;
-        padding: 12px 10px;
+    /* ── Sticky Layout ───────────────────────────────────────────── */
+    .so-page-wrapper {
+        display: flex;
+        flex-direction: column;
+        height: calc((100vh - 48px) / 0.9); /* ✅ หัก padding top+bottom ของ page-inner แล้วหาร zoom */
+        overflow: hidden;
+        gap: 8px;
     }
 
-    /* สลับสีแถว ช่วยลดลายตา */
-    .modern-table tbody tr:nth-child(odd) {
-        background-color: #f9fafb;
+        .so-page-wrapper > .d-flex:first-child,
+        .so-page-wrapper > .filter-card-modern {
+            flex-shrink: 0;
+        }
+
+        .so-page-wrapper > .d-flex:last-child {
+            flex-shrink: 0;
+        }
+    /* ── Table container scroll ──────────────────────────────────── */
+    .table-card-container {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: auto;
+        min-height: 0;
+        border-radius: 12px;
+        margin-bottom: 0; /* ✅ ไม่ให้มี margin ล่าง */
     }
 
-    .modern-table tbody tr:hover {
-        background-color: #e8f5e9;
+    /* ── Sticky thead ────────────────────────────────────────────── */
+    .modern-table {
+        border-collapse: separate;
+        border-spacing: 0;
+        width: 100%;
     }
 
-    /* เลขติดลบแดง */
-    .modern-table tbody td.negative {
+        /* ── Sticky thead ────────────────────────────────────────────── */
+        .modern-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            background-color: #f0f4f0 !important;
+            border-bottom: 2px solid #c8e6c9;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.08);
+            padding: 8px 10px;
+            font-size: 0.82rem;
+            white-space: nowrap;
+            font-weight: 600;
+            color: #2e7d32;
+        }
+
+        /* ── Table body ──────────────────────────────────────────────── */
+        .modern-table tbody td {
+            font-size: 0.95rem;
+            line-height: 1.4;
+            padding: 7px 10px;
+            border-bottom: 1px solid #f0f0f0;
+            vertical-align: middle;
+        }
+
+        .modern-table tbody tr:nth-child(odd) {
+            background-color: #fafafa;
+        }
+
+        .modern-table tbody tr:hover {
+            background-color: #e8f5e9;
+            transition: background 0.15s;
+        }
+
+    /* ── Filter card ─────────────────────────────────────────────── */
+    .filter-card-modern {
+        padding: 12px 16px !important;
+        margin-bottom: 0 !important; /* ✅ ลบ mb ออก ใช้ gap แทน */
+    }
+
+    .modern-label {
+        font-size: 0.8rem;
+        margin-bottom: 2px;
+    }
+
+    .modern-input {
+        height: 34px !important;
+        font-size: 0.9rem;
+    }
+
+    .btn-search-pill {
+        padding: 4px 16px !important;
+        font-size: 0.9rem !important;
+    }
+
+    .negative {
         color: #dc3545;
         font-weight: 600;
-    }
-
-   
-    /* ✅ เน้นเฉพาะคอลัมน์ MRP Element Data */
-    .modern-table tbody td.col-element-data {
-        font-weight: 700;
-        font-size: 1.05rem;
-        color: #1a1a1a;
-        letter-spacing: 0.3px;
-        background-color: #fff8e1; /* ✅ เหลืองอ่อน highlight */
-        border-left: 3px solid #ffc107; /* ✅ เส้นซ้ายเหลืองเข้ม */
-    }
-    /* ✅ highlight เฉพาะตัวอักษร */
-    .highlight-text {
-        background-color: #fff8e1;
-        border-radius: 4px;
-        padding: 2px 8px;
-        font-weight: 700;
-        font-size: 1.05rem;
-        color: #1a1a1a;
     }
 </style>

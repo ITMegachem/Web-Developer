@@ -1,5 +1,5 @@
 ﻿@namespace Mgt.Lit.WebFront.Pages
-@page "/SalesReport"
+@page "/ComprehensiveReport"
 @layout AppLayout
 @rendermode InteractiveServer
 @inject IJSRuntime JS
@@ -18,7 +18,7 @@
 
     <!-- HEADER -->
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-2">
-        <h2 class="page-title">Sales Report</h2>
+        <h2 class="page-title">Comprehensive Report</h2>
         <div class="date-badge">@DateTime.Now.ToString("dd MMM yyyy")</div>
     </div>
 
@@ -111,11 +111,11 @@
             <span class="text-muted small">@totalItems record(s) found</span>
             @if (allItems.Any())
             {
-                <button class="btn btn-sm btn-success rounded-pill px-3"
+                @*<button class="btn btn-sm btn-success rounded-pill px-3"
                         disabled="@isLoading"
                         @onclick="ExportData">
                     <i class="bi bi-download me-1"></i> Export Excel
-                </button>
+                </button>*@
             }
         </div>
 
@@ -123,19 +123,19 @@
             <table class="table modern-table mb-0" style="font-size: 13px;">
                 <thead>
                     <tr style="font-size: 13px; white-space: nowrap;">
-                        <th class="text-center">No.</th>
+                        
                         <th>Billing Doc</th>
                         <th>Billing Date</th>
-                        <th class="text-center">Sold-to</th>
                         <th>Customer Name</th>
-                        <th>Material</th>
+                        <th class="text-center">Customer Group</th>
                         <th>Material Name</th>
-                        <th class="text-center">Material Group</th>
+                        <th class="text-center">Suppliers Group</th>
                         <th class="text-center">Quantity</th>
                         <th class="text-center">Unit</th>
                         <th class="text-end">Net Amount</th>
                         <th class="text-end">Cost Amount</th>
-                        <th class="text-end">GrossProfit</th>
+                        <th class="text-end">Gross Profit</th>
+                        <th class="text-end">GP %</th>
                         <th class="text-end">Price/KG</th>
                         <th>Sales</th>
                     </tr>
@@ -147,29 +147,24 @@
                         @foreach (var r in pagedItems)
                         {
                             <tr style="font-size:13px;">
-                                <td class="text-center text-muted">@rowNum</td>
+                                
 
                                 <td style="font-family:monospace; white-space:nowrap">
                                     @r.BillingDocument
                                 </td>
-
                                 <td style="white-space:nowrap">
                                     @r.BillingDocumentDate?.ToString("dd/MM/yyyy")
                                 </td>
-
-                                <td class="numeric-green text-center" style="white-space:nowrap">
-                                    @r.SoldToParty
-                                </td>
-
                                 <td style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
                                     title="@r.CustomerFullName">
                                     @r.CustomerFullName
                                 </td>
-
-                                <td style="font-family:monospace; white-space:nowrap; font-size:11px">
-                                    @r.Material
+                                <td class="text-center" style="font-size:14px; max-width:100px; overflow:hidden;
+                                    text-overflow:ellipsis; white-space:nowrap"
+                                    title="@r.CustomerGroup">
+                                    @r.CustomerGroup
                                 </td>
-
+                               
                                 <td style="max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
                                     title="@r.MaterialName">
                                     @r.MaterialName
@@ -180,6 +175,7 @@
                                         @r.MaterialGroup
                                     </span>
                                 </td>
+                                
 
                                 <td class="text-center fw-bold" style="white-space:nowrap">
                                     @r.Quantity?.ToString("N0")
@@ -227,7 +223,19 @@
                                         <span class="text-muted">-</span>
                                     }
                                 </td>
-
+                                <td class="text-end" style="white-space:nowrap">
+                                    @if (r.GrossMarginPct.HasValue)
+                                    {
+                                        var pct = r.GrossMarginPct.Value;
+                                        <span style="color:@(pct >= 0 ? "#2e7d32" : "#dc3545"); font-weight:600">
+                                            @pct.ToString("N1")%
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">-</span>
+                                    }
+                                </td>
                                 <td class="text-end fw-bold" style="color:#0a58ca; white-space:nowrap">
                                     @r.LastPrice_PerKG?.ToString("N2")
                                 </td>
@@ -300,6 +308,7 @@
         public string? ProductGroup { get; set; }
         public int Page { get; set; } = 1;
         public int PageSize { get; set; } = 15;
+        public string? CustomerGroup { get; set; } // ✅ เพิ่ม
     }
     public class CustomerSuggestion
     {
@@ -380,14 +389,14 @@
         customerSuggestions.Clear();
     }
     // ── State ─────────────────────────────────────────────────────────────────
-    private List<StockService.SalesReportDto> allItems = new();
-    private List<StockService.SalesReportDto> pagedItems = new();
+    private List<StockService.ComprehensiveReportDto> allItems = new();
+    private List<StockService.ComprehensiveReportDto> pagedItems = new();
     private int totalItems;
     private int totalPages = 1;
     private bool isLoading;
     private bool _isDisposed;
     private IJSObjectReference? _jsModule;
-    private DotNetObjectReference<SalesReport>? _dotNetRef;
+    private DotNetObjectReference<ComprehensiveReport>? _dotNetRef;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -397,7 +406,7 @@
         try
         {
             PageContext.Menu = "Sales";
-            PageContext.Page = "SalesReport";
+            PageContext.Page = "ComprehensiveReport";
 
             await AuthState.InitializeAsync();
 
@@ -493,7 +502,7 @@
                 return;
             }
 
-            var request = new StockService.SalesReportRequest
+            var request = new StockService.ComprehensiveReportRequest
             {
                 BillingDateFrom = filters.BillingDateFrom,
                 BillingDateTo = filters.BillingDateTo,
@@ -503,6 +512,7 @@
                 Material = filters.Material,
                 SalesGroup = filters.SalesGroup,
                 ProductGroup = filters.ProductGroup,
+                CustomerGroup = filters.CustomerGroup, // ✅ เพิ่ม
                 Page = 1,
                 PageSize = 9999
             };
@@ -556,22 +566,22 @@
             if (!_isDisposed) await InvokeAsync(StateHasChanged);
 
             var username = AuthState.Permission?.Username;
-            var fileName = $"SalesReport_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            var fileName = $"ComprehensiveReport_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
             await DownloadLogSvc.LogDownloadAsync(username, fileName);
 
             _jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
 
             using var wb = new XLWorkbook();
-            var ws = wb.Worksheets.Add("SalesReport");
+            var ws = wb.Worksheets.Add("ComprehensiveReport");
 
             var headers = new[]
             {
                 "Billing Doc", "Billing Date", "Delivery Date",
-                "Sold-to", "Customer Name", "Currency",
+                 "Customer Code","Customer Name", "Material Group","Currency",
                 "Ref SD Doc", "Sales Group", "Material", "Material Name",
-                "Material Group", "Sales Employee",
+                "Customer Group", "Sales Employee",
                 "Sold-to Name", "Sold-to Address",
-                "Net Amount", "Cost Amount", "Gross Profit",
+                "Net Amount", "Cost Amount", "Gross Profit","GP %",
                 "Quantity", "Unit",
                 "Last Sale Date", "Last Price/Pack", "Last Price/KG",
                 "Cost/Pack", "Cost/KG"
@@ -593,6 +603,7 @@
                 ws.Cell(row, col++).Value = r.DeliveryDate?.ToString("dd/MM/yyyy") ?? "";
                 ws.Cell(row, col++).Value = r.SoldToParty ?? "";
                 ws.Cell(row, col++).Value = r.CustomerFullName ?? "";
+                ws.Cell(row, col++).Value = r.CustomerGroup ?? "";
                 ws.Cell(row, col++).Value = r.TransactionCurrency ?? "";
                 ws.Cell(row, col++).Value = r.ReferenceSDDocument ?? "";
                 ws.Cell(row, col++).Value = r.SalesGroup ?? "";
@@ -605,6 +616,7 @@
                 ws.Cell(row, col++).Value = (double)(r.NetAmount ?? 0);
                 ws.Cell(row, col++).Value = (double)(r.CostAmount ?? 0);
                 ws.Cell(row, col++).Value = (double)(r.GrossProfit ?? 0);
+                ws.Cell(row, col++).Value = (double)(r.GrossMarginPct ?? 0);
                 ws.Cell(row, col++).Value = r.Quantity ?? 0;
                 ws.Cell(row, col++).Value = r.Unit ?? "";
                 ws.Cell(row, col++).Value = r.LastSaleDate?.ToString("dd/MM/yyyy") ?? "";

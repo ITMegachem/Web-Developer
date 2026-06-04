@@ -579,4 +579,98 @@ GetSalesOrderItemsAsync(List<string> salesOrders)
 
         return result;
     }
+
+    public async Task<Dictionary<string, SapAddressResult>> GetShipToAddressesBatchAsync(
+    List<string> customerIds)
+    {
+        var result = new Dictionary<string, SapAddressResult>(
+            StringComparer.OrdinalIgnoreCase);
+
+        if (!customerIds.Any()) return result;
+
+        var baseUrl = _configuration["SapConfig:BusinessPartner:BaseUrl"];
+        var authHeader = _configuration["SapConfig:BusinessPartner:AuthHeader"];
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        try
+        {
+            var bpFilter = string.Join(" or ",
+                customerIds.Select(c => $"BusinessPartner eq '{c.Trim()}'"));
+
+            var url = $"{baseUrl!.TrimEnd('/')}/A_BusinessPartnerAddress" +
+          $"?$filter={bpFilter}" +
+          $"&$select=BusinessPartner,HouseNumber,HouseNumberSupplementText," +
+          $"StreetName,StreetPrefixName,StreetSuffixName," +  // ✅ เพิ่ม StreetSuffixName
+          $"AdditionalStreetPrefixName,AdditionalStreetSuffixName," +
+          $"District,CityName,PostalCode,Region,Country" +
+          $"&$format=json";
+
+            var resp = await client.GetAsync(url);
+            if (!resp.IsSuccessStatusCode) return result;
+
+            var json = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            foreach (var item in json.RootElement
+                .GetProperty("d").GetProperty("results").EnumerateArray())
+            {
+                var bp = item.TryGetProperty("BusinessPartner", out var b)
+                    ? b.GetString() : null;
+                if (string.IsNullOrWhiteSpace(bp)) continue;
+
+                if (!result.ContainsKey(bp!))
+                    result[bp!] = new SapAddressResult
+                    {
+                        HouseNumber = item.TryGetProperty("HouseNumber", out var hn)
+                                        ? hn.GetString() : null,
+                        // ✅ เพิ่ม — บ้านเลขที่บางตัวอยู่ที่นี่
+                        HouseNumberSupplement = item.TryGetProperty("HouseNumberSupplementText", out var hns)
+                                        ? hns.GetString() : null,
+                        StreetName = item.TryGetProperty("StreetName", out var st)
+                                        ? st.GetString() : null,
+                        StreetPrefix = item.TryGetProperty("StreetPrefixName", out var sp)
+                                        ? sp.GetString() : null,
+                        StreetSuffix = item.TryGetProperty("StreetSuffixName", out var ss)
+                                        ? ss.GetString() : null,  // ✅ "1070 SOI SUANPLU"
+                        AdditionalStreetPrefix = item.TryGetProperty("AdditionalStreetPrefixName", out var asp)
+                                        ? asp.GetString() : null,
+                        AdditionalStreetSuffix = item.TryGetProperty("AdditionalStreetSuffixName", out var ass)
+                                        ? ass.GetString() : null,
+                        District = item.TryGetProperty("District", out var di)
+                                        ? di.GetString() : null,  // ✅ "TUNGMAHAMEK"
+                        CityName = item.TryGetProperty("CityName", out var ci)
+                                        ? ci.GetString() : null,
+                        PostalCode = item.TryGetProperty("PostalCode", out var po)
+                                        ? po.GetString() : null,
+                        Region = item.TryGetProperty("Region", out var re)
+                                        ? re.GetString() : null,
+                        Country = item.TryGetProperty("Country", out var co)
+                                        ? co.GetString() : null,
+                    };
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] GetShipToAddressesBatchAsync: {ex.Message}");
+        }
+
+        return result;
+    }
+
+    public class SapAddressResult
+    {
+        public string? HouseNumber { get; set; }
+        public string? HouseNumberSupplement { get; set; }
+        public string? StreetPrefix { get; set; }
+        public string? StreetName { get; set; }
+        public string? StreetSuffix { get; set; }  // ✅ "1070 SOI SUANPLU"
+        public string? AdditionalStreetPrefix { get; set; }
+        public string? AdditionalStreetSuffix { get; set; }
+        public string? District { get; set; }  // ✅ "TUNGMAHAMEK"
+        public string? CityName { get; set; }
+        public string? PostalCode { get; set; }
+        public string? Region { get; set; }
+        public string? Country { get; set; }
+    }
 }

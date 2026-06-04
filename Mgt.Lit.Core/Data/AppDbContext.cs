@@ -44,6 +44,7 @@ namespace Mgt.Lit.Core.Data
                 entity.Property(e => e.CostAmount).HasColumnType("decimal(18, 5)");
                 entity.Property(e => e.GrossProfit).HasColumnType("decimal(18, 5)");
                 entity.Property(e => e.Quantity).HasColumnType("decimal(18, 5)");
+
             });
             // ✨ แก้ไขส่วนจัดการ View Stock ให้รองรับตัวเลขขนาดใหญ่ขึ้นเพื่อแก้ปัญหา Overflow
             modelBuilder.Entity<View_MaterialStock_WeightKG>(entity =>
@@ -113,6 +114,17 @@ namespace Mgt.Lit.Core.Data
                
                 entity.Property(e => e.SoldtoName).HasColumnName("Soldto-name");
                 entity.Property(e => e.SoldtoAdress).HasColumnName("Soldto-adress");
+
+                // ✅ column ที่มีช่องว่าง
+                entity.Property(e => e.MaterialGroupName).HasColumnName("Material Group Name");
+                entity.Property(e => e.IndustryCode).HasColumnName("Industry Code");
+                entity.Property(e => e.IndustryName).HasColumnName("Industry Name");
+                entity.Property(e => e.AffiliateCustomerCode).HasColumnName("Affiliate Customer Code");
+                entity.Property(e => e.AffiliateCustomerName).HasColumnName("Affiliate Customer Name");
+                entity.Property(e => e.CustomerAreaCode).HasColumnName("Customer Area Code");
+                entity.Property(e => e.CustomerAreaName).HasColumnName("Customer Area Name");
+                entity.Property(e => e.CustomerTypeCode).HasColumnName("Customer Type Code");
+                entity.Property(e => e.CustomerTypeName).HasColumnName("Customer Type Name");
             });
 
             modelBuilder.Entity<View_ProductLastPrice>(entity =>
@@ -120,6 +132,11 @@ namespace Mgt.Lit.Core.Data
                 entity.HasNoKey();
                 entity.ToView("View_ProductLastPrice");
                 
+            });
+            modelBuilder.Entity<Ms_ProductUnitsOfMeasure>(entity =>
+            {
+                entity.HasKey(x => x.Id);
+                entity.ToTable("Ms_ProductUnitsOfMeasure");
             });
         }
 
@@ -137,5 +154,6 @@ namespace Mgt.Lit.Core.Data
         public DbSet<Ms_ProductDescription> Ms_ProductDescription { get; set; }
         public DbSet<Ms_BusinessPartnerCustomerThaiName> Ms_BusinessPartnerCustomerThaiName { get; set; }
 
+        public DbSet<Ms_ProductUnitsOfMeasure> Ms_ProductUnitsOfMeasure { get; set; }
     }
 }

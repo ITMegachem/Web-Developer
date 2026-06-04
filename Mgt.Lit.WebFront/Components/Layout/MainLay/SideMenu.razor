@@ -163,16 +163,17 @@
                                         <li>
                                             <NavLink href="/manage-outbound-deliveries" class="sub-pill-link">
                                                 <img src="/images/inventory-alt.png" class="sub-icon-img" />
-                                                <span>@T("OutboundDeliveries")</span>
+                                                <span>@T("VL06O OutboundDeliveries")</span>
                                             </NavLink>
                                         </li>
                                     }
+
                                     @if (CanPage6)
                                     {
                                         <li>
-                                            <NavLink href="/SalesReport" class="sub-pill-link">
+                                            <NavLink href="/ComprehensiveReport" class="sub-pill-link">
                                                 <img src="/images/inventory-alt.png" class="sub-icon-img" />
-                                                <span>@T("SalesReport")</span>
+                                                <span>@T("Comprehensive Report")</span>
                                             </NavLink>
                                         </li>
                                     }
@@ -219,14 +220,14 @@
                                 {
                                     <NavLink href="/manage-outbound-deliveries" class="flyout-item">
                                         <span class="flyout-dot"></span>
-                                        @T("OutboundDeliveries")
+                                        @T("VL06O OutboundDeliveries")
                                     </NavLink>
                                 }
                                 @if (CanPage6)
                                 {
-                                    <NavLink href="/SalesReport" class="flyout-item">
+                                    <NavLink href="/ComprehensiveReport" class="flyout-item">
                                         <span class="flyout-dot"></span>
-                                        @T("SalesReport")
+                                        @T("Comprehensive Report")
                                     </NavLink>
                                 }
                             </div>
@@ -312,15 +313,19 @@
     private bool CanPage2 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 2);
     private bool CanPage3 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 3);
     private bool CanPage4 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 4);
-    private bool CanPage6 => IsAdmin || PermissionHelper.HasPageAccess(AuthState.User, 1);
+    
     private bool IsCsrDept =>
     string.Equals(Department, "csr", StringComparison.OrdinalIgnoreCase);
 
     private bool IsWarehouseDept =>
         string.Equals(Department, "warehouse", StringComparison.OrdinalIgnoreCase);
 
+    private bool IsSalesDept =>
+        string.Equals(Department, "Sales", StringComparison.OrdinalIgnoreCase);
+
     private bool CanPage5 =>
-        IsAdmin || IsCsrDept || IsWarehouseDept;
+        IsAdmin || IsCsrDept || IsWarehouseDept || (IsPurchaseDept && IsManager);
+    private bool CanPage6 => IsAdmin || IsSalesDept;
     private bool HasAnyManagementPage => CanPage1 || CanPage2 || CanPage3 || CanPage4 || CanPage5 || CanPage6;
 
     // ── lifecycle ─────────────────────────────────────────────────────────────

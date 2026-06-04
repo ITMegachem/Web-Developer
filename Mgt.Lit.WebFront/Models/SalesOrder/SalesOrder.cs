@@ -4,25 +4,57 @@ namespace Mgt.Lit.WebFront.Models.SalesOrder
 {
     public sealed class SalesOrderDto
     {
+        [JsonPropertyName("billingDocument")]
         public string BillingDocument { get; set; } = string.Empty;
+
+        [JsonPropertyName("docDate")]
         public DateTime DocDate { get; set; }
+
+        [JsonPropertyName("deliveryDate")]
         public DateTime? DeliveryDate { get; set; }
+
+        [JsonPropertyName("salesOrderDocument")]
         public string SalesOrderDocument { get; set; } = string.Empty;
+
+        [JsonPropertyName("soldToParty")]
         public string SoldTo { get; set; } = string.Empty;
+
+        [JsonPropertyName("soldToName")]
         public string SoldToDescription { get; set; } = string.Empty;
-        public string ShipTo { get; set; } = string.Empty;
-        public string ShipToDescription { get; set; } = string.Empty;
-        public string MaterialCode { get; set; } = string.Empty;
-        public string MaterialDescription { get; set; } = string.Empty;
-        public string SalesEmployee { get; set; } = string.Empty;
+
+        [JsonPropertyName("soldToAddress")]
         public string SoldToMappingAddress { get; set; } = string.Empty;
+
+        [JsonPropertyName("shiptoCode")]
+        public string ShipTo { get; set; } = string.Empty;
+
+        [JsonPropertyName("shipToName")]
+        public string ShipToDescription { get; set; } = string.Empty;
+
+        [JsonPropertyName("shipToAddress")]
         public string ShipToMappingAddress { get; set; } = string.Empty;
 
-        public string? PurchaseOrderByCustomer { get; set; }
-        public decimal? OrderQuantity { get; set; }
-        public string? RequestedQuantityUnit { get; set; }
-    }
+        [JsonPropertyName("material")]
+        public string MaterialCode { get; set; } = string.Empty;
 
+        [JsonPropertyName("materialName")]
+        public string MaterialDescription { get; set; } = string.Empty;
+
+        [JsonPropertyName("salesEmployee")]      // ✅ ตรงกับ API
+        public string? SalesEmployee { get; set; }
+
+        [JsonPropertyName("purchaseOrderByCustomer")]
+        public string? PurchaseOrderByCustomer { get; set; }
+
+        [JsonPropertyName("orderQuantity")]
+        public decimal? OrderQuantity { get; set; }
+
+        [JsonPropertyName("requestedQuantityUnit")]
+        public string? RequestedQuantityUnit { get; set; }
+
+        // ✅ เก็บไว้ใช้กับ Export ที่ยังใช้ชื่อนี้
+        public string SalesEmployeeID => SalesEmployee ?? string.Empty;
+    }
     public sealed class SalesOrderFilter
     {
         public string? SalesOrganization { get; set; }
