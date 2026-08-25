@@ -1066,15 +1066,19 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
 
             if (materialCodes.Any())
             {
-                var weights = await _context.View_MaterialStock_WeightKG
-                    .AsNoTracking()
-                    .Where(x => x.Material != null && materialCodes.Contains(x.Material))
-                    .Select(x => new { x.Material, x.NetWeight })
-                    .ToListAsync();
+                var weights = await _context.Ms_Product
+    .AsNoTracking()
+    .Where(x => x.Product != null && materialCodes.Contains(x.Product))
+    .Select(x => new { x.Product, x.NetWeight })
+    .ToListAsync();
 
                 weightDict = weights
-                    .GroupBy(x => x.Material!)
-                    .ToDictionary(g => g.Key, g => g.First().NetWeight);
+                    .GroupBy(x => x.Product!)     // 1 product = 1 ค่า ไม่มีทางซ้ำ
+                    .ToDictionary(g => g.Key,
+                        g => decimal.TryParse(g.First().NetWeight,
+                             System.Globalization.NumberStyles.Any,
+                             System.Globalization.CultureInfo.InvariantCulture,
+                             out var w) ? (decimal?)w : null);
             }
 
             // ── Step 4: map ───────────────────────────────────────────────────────────

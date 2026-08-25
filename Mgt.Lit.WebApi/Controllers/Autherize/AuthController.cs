@@ -43,7 +43,12 @@ namespace Mgt.Lit.WebApi.Controllers
 
             var user = await _userRepo.LoginAsync(dto.Username, dto.Password);
             if (user == null)
+            {
+                await WriteLoginLogAsync("PASSWORD", false,
+                    username: dto.Username,
+                    failReason: "Invalid username or password");
                 return Unauthorized("Invalid username or password");
+            }
 
             user.TokenVersion = Guid.NewGuid().ToString();
             await _context.SaveChangesAsync();
@@ -98,11 +103,10 @@ namespace Mgt.Lit.WebApi.Controllers
 
             var refreshToken = Guid.NewGuid().ToString();
 
-            var oldTokens = _context.RefreshTokens
-                .Where(r => r.UserID == user.UserID && !r.IsRevoked);
-
-            foreach (var t in oldTokens)
-                t.IsRevoked = true;
+            var oldTokens = await _context.RefreshTokens
+     .Where(r => r.UserID == user.UserID && !r.IsRevoked)
+     .ToListAsync();
+            foreach (var t in oldTokens) t.IsRevoked = true;
 
             _context.RefreshTokens.Add(new Core.Entities.RefreshToken
             {
@@ -124,7 +128,11 @@ namespace Mgt.Lit.WebApi.Controllers
                 SameSite = SameSiteMode.Strict,
                 Expires = DateTime.UtcNow.AddDays(14)
             });
-
+            await WriteLoginLogAsync("PASSWORD", true,
+    username: user.Username,
+    email: user.Email,
+    userId: (int)user.UserID,
+    companyId: primary?.CompanyID);
             return Ok(new
             {
                 UserID = user.UserID, // ✅ เพิ่มบรรทัดนี้
@@ -528,96 +536,165 @@ namespace Mgt.Lit.WebApi.Controllers
         [HttpPost("microsoft-callback")]
         public async Task<IActionResult> MicrosoftCallback([FromBody] MicrosoftCallbackDto dto)
         {
-            // แลก code เป็น token
-            var tokenResponse = await ExchangeCodeForToken(dto.Code);
-
-            // ดึงข้อมูล User จาก Microsoft Graph
-            var msUser = await GetMicrosoftUserInfo(tokenResponse.AccessToken);
-
-            // หา User ในระบบจาก Email
-            var email = msUser.Mail ?? msUser.UserPrincipalName;
-            var user = await _context.MsUsers
-                .FirstOrDefaultAsync(u => u.Email == email);
-
-            if (user == null)
-                return Unauthorized(new { message = "ไม่พบ User นี้ในระบบ" });
-
-            // ดึง Companies + Permission เหมือน Login ปกติ
-            var companies = await (
-                from uc in _context.MsUserCompanies
-                join c in _context.MsCompanies on uc.CompanyID equals c.CompanyID
-                where uc.UserID == user.UserID
-                orderby uc.IsPrimary descending
-                select new UserCompanyDto
-                {
-                    CompanyID = uc.CompanyID,
-                    CompanyCode = c.CompanyCode,
-                    CompanyName = c.CompanyName,
-                    IsPrimary = uc.IsPrimary
-                }
-            ).ToListAsync();
-
-            var primary = companies.FirstOrDefault(x => x.IsPrimary)
-                          ?? companies.FirstOrDefault();
-
-            View_UserPermission? permission = null;
-            if (primary?.CompanyID != null)
+            try
             {
-                permission = await _context.View_UserPermissions
+                var tokenResponse = await ExchangeCodeForToken(dto.Code);
+                var msUser = await GetMicrosoftUserInfo(tokenResponse.AccessToken);
+
+                var email = (msUser.Mail ?? msUser.UserPrincipalName ?? "").Trim();
+                if (string.IsNullOrEmpty(email))
+                {
+                    await WriteLoginLogAsync("SSO", false,
+                        failReason: "Microsoft ไม่ส่งอีเมลกลับมา");
+                    return Unauthorized(new { message = "Microsoft ไม่ส่งอีเมลกลับมา" });
+                }
+
+                Console.WriteLine("MS SSO EMAIL: " + email);
+
+                var user = await _context.MsUsers.FirstOrDefaultAsync(u =>
+                    u.Email != null &&
+                    u.Email.Trim().ToLower() == email.ToLower() &&
+                    u.IsActive);
+
+                if (user == null)
+                {
+                    await WriteLoginLogAsync("SSO", false,
+                        email: email,
+                        failReason: "ไม่พบบัญชีในระบบ หรือถูกปิดการใช้งาน");
+                    return Unauthorized(new { message = $"ไม่พบบัญชี {email} ในระบบ หรือถูกปิดการใช้งาน" });
+                }
+
+                // ✅ ต้องเซ็ตก่อน GenerateToken
+                user.TokenVersion = Guid.NewGuid().ToString();
+
+                var companies = await (
+                    from uc in _context.MsUserCompanies
+                    join c in _context.MsCompanies on uc.CompanyID equals c.CompanyID
+                    where uc.UserID == user.UserID
+                    orderby uc.IsPrimary descending
+                    select new UserCompanyDto
+                    {
+                        CompanyID = uc.CompanyID,
+                        CompanyCode = c.CompanyCode,
+                        CompanyName = c.CompanyName,
+                        IsPrimary = uc.IsPrimary
+                    }
+                ).ToListAsync();
+
+                var primary = companies.FirstOrDefault(x => x.IsPrimary)
+                              ?? companies.FirstOrDefault();
+
+                if (primary == null)
+                {
+                    await WriteLoginLogAsync("SSO", false,
+                        username: user.Username,
+                        email: user.Email,
+                        userId: (int)user.UserID,
+                        failReason: "บัญชีนี้ยังไม่ได้ผูกกับบริษัทใด");
+                    return Unauthorized(new { message = "บัญชีนี้ยังไม่ได้ผูกกับบริษัทใด" });
+                }
+
+                View_UserPermission? permission = await _context.View_UserPermissions
                     .AsNoTracking()
                     .FirstOrDefaultAsync(x =>
                         x.UserID == user.UserID &&
                         x.CompanyID == primary.CompanyID);
-            }
 
-            var accessToken = JwtHelper.GenerateToken(
-                user, _config,
-                primaryCompanyId: primary?.CompanyID,
-                primaryCompanyCode: primary?.CompanyCode,
-                allCompanies: companies,
-                permission: permission == null ? null : new UserPermissionDto
+                var accessToken = JwtHelper.GenerateToken(
+                    user, _config,
+                    primaryCompanyId: primary.CompanyID,
+                    primaryCompanyCode: primary.CompanyCode,
+                    allCompanies: companies,
+                    permission: permission == null ? null : new UserPermissionDto
+                    {
+                        Page1Access = permission.Page1Access,
+                        Page2Access = permission.Page2Access,
+                        Page3Access = permission.Page3Access,
+                        Page4Access = permission.Page4Access,
+                        DataScope = permission.DataScope,
+                        CanViewVendor = permission.CanViewVendor,
+                        CanViewCost = permission.CanViewCost,
+                        Department = permission.Department,
+                        CanViewCustomer = permission.CanViewCustomer
+                    });
+
+                var refreshToken = Guid.NewGuid().ToString();
+
+                var oldTokens = await _context.RefreshTokens
+                    .Where(r => r.UserID == user.UserID && !r.IsRevoked)
+                    .ToListAsync();
+                foreach (var t in oldTokens)
+                    t.IsRevoked = true;
+
+                _context.RefreshTokens.Add(new Core.Entities.RefreshToken
                 {
-                    Page1Access = permission.Page1Access,
-                    Page2Access = permission.Page2Access,
-                    Page3Access = permission.Page3Access,
-                    Page4Access = permission.Page4Access,
-                    DataScope = permission.DataScope,
-                    CanViewVendor = permission.CanViewVendor,
-                    CanViewCost = permission.CanViewCost,
-                    CanViewCustomer = permission.CanViewCustomer
+                    UserID = (int)user.UserID,
+                    Token = refreshToken,
+                    CurrentCompanyID = primary.CompanyID,
+                    ExpiresAt = DateTime.UtcNow.AddDays(14),
+                    IsRevoked = false,
+                    CreatedAt = DateTime.UtcNow,
+                    LastUsedAt = DateTime.UtcNow
                 });
 
-            return Ok(new
-            {
-                Token = accessToken,
-                UserID = user.UserID,         // ✅ เพิ่ม
-                Username = user.Username,
-                FullName = user.FullName,
-                UserRole = user.UserRole,       // ✅ เพิ่ม
-                Division = user.Division,       // ✅ เพิ่ม
-                PrimaryCompanyID = primary?.CompanyID,
-                PrimaryCompanyCode = primary?.CompanyCode,
-                Companies = companies,
-                Permission = permission == null ? null : new
-                {
-                    permission.UserID,
-                    permission.CompanyID,
-                    permission.Department,
-                    permission.UserRole,
-                    permission.RoleKey,
-                    permission.Tier,
-                    permission.Page1Access,
-                    permission.Page2Access,
-                    permission.Page3Access,
-                    permission.Page4Access,
-                    permission.DataScope,
-                    permission.CanViewVendor,
-                    permission.CanViewCost,
-                    permission.CanViewCustomer
-                }
-            });
-        }
+                await _context.SaveChangesAsync();
 
+                // ✅ ล้าง cache หลัง SaveChanges สำเร็จเท่านั้น
+                HttpContext.RequestServices.GetRequiredService<IMemoryCache>()
+                    .Remove($"tv_{user.Username}");
+
+                Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = true,
+                    SameSite = SameSiteMode.Lax,
+                    Expires = DateTime.UtcNow.AddDays(14)
+                });
+
+                await WriteLoginLogAsync("SSO", true,
+                    username: user.Username,
+                    email: user.Email,
+                    userId: (int)user.UserID,
+                    companyId: primary.CompanyID);
+
+                return Ok(new
+                {
+                    Token = accessToken,
+                    UserID = user.UserID,
+                    Username = user.Username,
+                    FullName = user.FullName,
+                    UserRole = user.UserRole,
+                    Division = user.Division,
+                    PrimaryCompanyID = primary.CompanyID,
+                    PrimaryCompanyCode = primary.CompanyCode,
+                    Companies = companies,
+                    Permission = permission == null ? null : new
+                    {
+                        permission.UserID,
+                        permission.CompanyID,
+                        permission.Department,
+                        permission.UserRole,
+                        permission.RoleKey,
+                        permission.Tier,
+                        permission.Page1Access,
+                        permission.Page2Access,
+                        permission.Page3Access,
+                        permission.Page4Access,
+                        permission.DataScope,
+                        permission.CanViewVendor,
+                        permission.CanViewCost,
+                        permission.CanViewCustomer
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("MS CALLBACK ERROR: " + ex);
+                await WriteLoginLogAsync("SSO", false,
+                    failReason: ex.Message.Length > 300 ? ex.Message.Substring(0, 300) : ex.Message);
+                return StatusCode(500, new { message = ex.Message });
+            }
+        }
         // ========== Private Helpers ==========
 
         private async Task<MicrosoftTokenResponse> ExchangeCodeForToken(string code)
@@ -692,6 +769,41 @@ namespace Mgt.Lit.WebApi.Controllers
             public string? Mail { get; set; }
             public string? DisplayName { get; set; }
             public string? UserPrincipalName { get; set; }
+        }
+        private async Task WriteLoginLogAsync(
+    string method,          // "SSO" หรือ "PASSWORD"
+    bool isSuccess,
+    string? username = null,
+    string? email = null,
+    int? userId = null,
+    int? companyId = null,
+    string? failReason = null)
+        {
+            var ip = Request.Headers["X-Forwarded-For"].FirstOrDefault()?.Split(',')[0].Trim()
+                     ?? HttpContext.Connection.RemoteIpAddress?.ToString();
+
+            var ua = Request.Headers.UserAgent.ToString();
+            if (ua.Length > 500) ua = ua.Substring(0, 500);
+
+            // ✅ เขียนลง Console ก่อนเสมอ — ถ้า DB ล่มยังเห็นร่องรอยได้
+            Console.WriteLine($"LOGIN [{method}] {(isSuccess ? "SUCCESS" : "FAILED")} " +
+                              $"user={username ?? email ?? "-"} ip={ip} {failReason}");
+
+            try
+            {
+                await _context.Database.ExecuteSqlInterpolatedAsync($@"
+            INSERT INTO dbo.Log_UserLogin
+                (UserID, Username, Email, LoginMethod, IsSuccess,
+                 FailReason, IpAddress, UserAgent, CompanyID, LoginAt)
+            VALUES
+                ({userId}, {username}, {email}, {method}, {isSuccess},
+                 {failReason}, {ip}, {ua}, {companyId}, GETDATE())");
+            }
+            catch (Exception ex)
+            {
+                // ห้ามให้การเขียน log ทำให้ Login พัง
+                Console.WriteLine("LOGIN LOG WRITE FAILED: " + ex.Message);
+            }
         }
 
     }

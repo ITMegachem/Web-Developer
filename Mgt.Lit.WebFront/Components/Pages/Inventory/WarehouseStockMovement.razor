@@ -159,10 +159,10 @@
                             <td class="text-center align-middle">
                                 <span class="highlight-text">@item.DocumentNo</span>
                             </td>
-                            <td class="text-center align-middle">@item.ReceiptReqmtQty.ToString("N0")</td>
+                            <td class="text-center align-middle">@item.ReceiptReqmtQty.ToString("#,##0.###")</td>
                             <td class="text-center align-middle"
                                 style="@(item.AvailableQty < 0 ? "color:#dc3545; font-weight:700;" : "")">
-                                @item.AvailableQty.ToString("N0")
+                                @item.AvailableQty.ToString("#,##0.###")
                             </td>
                             <td class="text-center align-middle">
                                 @if (!string.IsNullOrWhiteSpace(item.IndustryName))

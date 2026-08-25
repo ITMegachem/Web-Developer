@@ -52,7 +52,7 @@ else
                             <button class="alert-close" @onclick="() => showAlert = false">✕</button>
                         </div>
                     }
-
+                    
                     <div class="field-block">
                         <label class="form-label">Username</label>
                         <div class="input-wrap">
@@ -102,7 +102,7 @@ else
                         </div>
                     </div>
 
-                    <div class="btn-wrap">
+                     <div class="btn-wrap">
                         <button class="btn-login" @onclick="DoLogin" disabled="@isLoading">
                             @if (isLoading)
                             {
@@ -120,7 +120,7 @@ else
                         <span class="divider-line"></span>
                         <span class="divider-text">or</span>
                         <span class="divider-line"></span>
-                    </div>
+                    </div> 
 
                     <div class="btn-wrap">
                         <button class="btn-microsoft" @onclick="LoginWithMicrosoft" disabled="@isLoading">

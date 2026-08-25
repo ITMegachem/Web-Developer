@@ -109,13 +109,14 @@
 
         <div class="d-flex justify-content-between align-items-center px-3 pt-2 pb-1">
             <span class="text-muted small">@totalItems record(s) found</span>
-            @if (allItems.Any())
+            @* ปุ่ม Export แสดงเฉพาะ Leader ขึ้นไป (Tier2 ขึ้นไป) — Tier1/User ไม่เห็น *@
+            @if (allItems.Any() && CanExportReport)
             {
-                @*<button class="btn btn-sm btn-success rounded-pill px-3"
+                <button class="btn btn-sm btn-success rounded-pill px-3"
                         disabled="@isLoading"
                         @onclick="ExportData">
                     <i class="bi bi-download me-1"></i> Export Excel
-                </button>*@
+                </button>
             }
         </div>
 
@@ -123,7 +124,7 @@
             <table class="table modern-table mb-0" style="font-size: 13px;">
                 <thead>
                     <tr style="font-size: 13px; white-space: nowrap;">
-                        
+
                         <th>Billing Doc</th>
                         <th>Billing Date</th>
                         <th>Customer Name</th>
@@ -147,8 +148,8 @@
                         @foreach (var r in pagedItems)
                         {
                             <tr style="font-size:13px;">
-                                
 
+                                
                                 <td style="font-family:monospace; white-space:nowrap">
                                     @r.BillingDocument
                                 </td>
@@ -164,7 +165,7 @@
                                     title="@r.CustomerGroup">
                                     @r.CustomerGroup
                                 </td>
-                               
+
                                 <td style="max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
                                     title="@r.MaterialName">
                                     @r.MaterialName
@@ -175,8 +176,8 @@
                                         @r.MaterialGroup
                                     </span>
                                 </td>
-                                
 
+                                
                                 <td class="text-center fw-bold" style="white-space:nowrap">
                                     @r.Quantity?.ToString("N0")
                                 </td>
@@ -290,6 +291,33 @@
 </div>
 
 @code {
+
+    // ── Export permission ──────────────────────────────────────────────────────
+    // แสดงปุ่ม Export เฉพาะ Leader ขึ้นไป (Tier2 ขึ้นไป) — Tier1/User ไม่เห็น
+    private bool CanExportReport
+    {
+        get
+        {
+            var p = AuthState.Permission;
+            if (p == null) return false;
+
+            // 1) เช็คจาก Tier ก่อน (เช่น "Tier1", "Tier2", "T2", "2") → Tier2 ขึ้นไป = เห็น
+            var tierNo = ExtractTierNumber(p.Tier);
+            if (tierNo.HasValue) return tierNo.Value >= 2;
+
+            // 2) ถ้าไม่มี Tier ให้ fallback ดูจาก Role → Leader ขึ้นไป (ไม่รวม user)
+            var role = p.UserRole?.Trim().ToLowerInvariant();
+            return role is "leader" or "manager" or "admin";
+        }
+    }
+
+    // ดึงเลขลำดับออกจากค่า Tier ที่อาจอยู่ในรูป "Tier2", "T2", "TIER 2", "2"
+    private static int? ExtractTierNumber(string? tier)
+    {
+        if (string.IsNullOrWhiteSpace(tier)) return null;
+        var digits = new string(tier.Where(char.IsDigit).ToArray());
+        return int.TryParse(digits, out var n) ? n : (int?)null;
+    }
 
     // ── Filter model ──────────────────────────────────────────────────────────
     private SalesReportFilter filters = new() { Page = 1, PageSize = 15 };
@@ -558,6 +586,8 @@
     // ── Export ────────────────────────────────────────────────────────────────
     private async Task ExportData()
     {
+        // กันไว้อีกชั้น: Tier1/User ไม่มีสิทธิ์ Export แม้จะเรียก method นี้ตรง ๆ
+        if (!CanExportReport) return;
         if (!allItems.Any()) return;
 
         try
