@@ -1,12 +1,14 @@
+
+using Blazorise;
+using Blazorise.Bootstrap5;
+using Blazorise.Charts;
+using Blazorise.Icons.FontAwesome;
 using Mgt.Lit.WebFront.Auth;
 using Mgt.Lit.WebFront.Components;
 using Mgt.Lit.WebFront.Services;
+using Mgt.Lit.WebFront.Services.DashBoard;
 using Mgt.Lit.WebFront.Services.Member;
 using Mgt.Lit.WebFront.Services.SalesOrder;
-using Blazorise;
-using Blazorise.Bootstrap5;
-using Blazorise.Icons.FontAwesome;
-using Blazorise.Charts;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -67,7 +69,33 @@ builder.Services.AddHttpClient<ApiHttpClient>(client =>
     client.Timeout = TimeSpan.FromSeconds(60);
 })
 .AddHttpMessageHandler<AuthTokenHandler>();
-
+builder.Services.AddHttpClient<DashSalesOverviewApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+});
+builder.Services.AddHttpClient<DashYearlyComparisonApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+});
+builder.Services.AddHttpClient<DashSalePerformanceApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+});
+builder.Services.AddHttpClient<DashProductOverviewApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+});
+builder.Services.AddHttpClient<DashProductMovementApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+});
+builder.Services.AddHttpClient<DashCustomerOverviewApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+});
+builder.Services.AddHttpClient<DashBillingDailyApiService>(c =>
+{ c.BaseAddress = new Uri(apiBaseUrl!); }
+);
 // ✅ Services อื่น
 builder.Services.AddScoped<IAccountService, AccountService>();
 
@@ -79,6 +107,7 @@ builder.Services.AddScoped<INofReportService>(sp =>
 builder.Services.AddScoped<DownloadLogService>();
 builder.Services.AddScoped<PageContext>();
 builder.Services.AddScoped<LoggingHeaderHandler>();
+//builder.Services.AddApexCharts();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents()

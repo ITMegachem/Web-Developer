@@ -1,0 +1,242 @@
+@page "/product-movement"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout DashboardLayout
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using static Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter
+@inject DashProductMovementApiService MovementApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+
+<div class="dash-bg">
+    <div class="dash-page">
+        @if (_loading && _data is not null)
+        {
+            <div class="dash-overlay"><span class="dash-spinner"></span></div>
+        }
+        <div class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Dashboard</div>
+                <h1 class="dash-title">Product Movement</h1>
+                <div class="dash-subtitle">Monthly product movement by customer and material</div>
+            </div>
+        </div>
+
+        @* ---------- Filter bar ---------- *@
+        <div class="dash-filters dash-filter-panel">
+            <div class="dash-field">
+                <div class="dash-field-label">Year</div>
+                <DashSelect @bind-Value="_selectedYear" @bind-Value:after="ReloadAsync"
+                            Placeholder="All Years" Options="@_years.Select(y => y.ToString())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Customer</div>
+                <DashSelect @bind-Value="_selectedCustomer" @bind-Value:after="OnCustomerChangedAsync"
+                            Placeholder="All Customers" Options="_customers" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Material Name</div>
+                <DashSelect @bind-Value="_selectedMaterial" @bind-Value:after="ReloadAsync"
+                            Placeholder="All Materials" Options="_materials" />
+            </div>
+        </div>
+
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading product movement data</span>
+            </div>
+        }
+        else
+        {
+            @* ---------- Matrix: Material × เดือน (ค่า = Quantity) ---------- *@
+            <div class="dash-card">
+                <div class="dash-card-header">Monthly Product Movement</div>
+                <div class="dash-card-body">
+                    <div class="table-scroll dash-table-tall">
+                        <table class="table table-bordered matrix-table">
+                            <thead>
+                                <tr>
+                                    <th class="sticky-col">Material Name</th>
+                                    @foreach (var m in _monthCols)
+                                    {
+                                        <th class="metric-head text-center clickable-cell @ColHeaderClass(m.Id)"
+                                            @onclick="() => ToggleMonthOnlyAsync(m.Id)">
+                                            @m.Name
+                                        </th>
+                                    }
+                                    <th class="metric-head text-center">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (_materialRows.Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="@(_monthCols.Count + 2)" class="dash-table-empty">No product movement data found</td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    @foreach (var mat in _materialRows)
+                                    {
+                                        <tr class="@RowClass(mat)">
+                                            <td class="sticky-col clickable-cell" @onclick="() => ToggleMaterialOnlyAsync(mat)">@mat</td>
+                                            @foreach (var m in _monthCols)
+                                            {
+                                                var c = Cell(mat, m.Id);
+                                                <td class="num clickable-cell @CellClass(mat, m.Id)" @onclick="() => ToggleCellAsync(mat, m.Id)">@(c is null ? "" : c.Quantity.ToString("N0"))</td>
+                                            }
+                                            <td class="num table-total">@RowT(mat).ToString("N0")</td>
+                                        </tr>
+                                    }
+                                    <tr>
+                                        <td class="sticky-col table-total">Total</td>
+                                        @foreach (var m in _monthCols)
+                                        {
+                                            <td class="num table-total">@ColT(m.Id).ToString("N0")</td>
+                                        }
+                                        <td class="num table-total">@GrandT().ToString("N0")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private ProductMovementDto? _data;
+
+    private string _selectedYear = "";
+    private string _selectedCustomer = "";
+    private string _selectedMaterial = "";
+    private int? _selectedMonthId;   // ★ cross-filter จากคลิกคอลัมน์เดือน/เซลล์ในตาราง matrix (ไม่มี dropdown คู่กัน)
+
+    private readonly List<int> _years =
+        Enumerable.Range(DateTime.Now.Year - 5, 6).OrderByDescending(y => y).ToList();
+
+    private List<string> _customers = new();   // dropdown
+    private List<string> _materials = new();    // dropdown (cascade ตาม customer)
+
+    // matrix
+    private List<string> _materialRows = new();
+    private List<(int Id, string Name)> _monthCols = new();
+
+    private ProductMovementFilter BuildFilter() => new()
+    {
+        Year = int.TryParse(_selectedYear, out var y) ? y : (int?)null,
+        CustomerFullName = string.IsNullOrWhiteSpace(_selectedCustomer) ? null : _selectedCustomer,
+        MaterialName = string.IsNullOrWhiteSpace(_selectedMaterial) ? null : _selectedMaterial,
+        MonthId = _selectedMonthId
+        // SalesGroup: server บังคับตาม BU ของ user
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (string.IsNullOrWhiteSpace(AuthState.Token))
+            await AuthState.InitializeAsync();
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+
+    // เปลี่ยนลูกค้า -> reset material ที่เลือก แล้วโหลดใหม่ (Materials จะ cascade ตามลูกค้า)
+    private async Task OnCustomerChangedAsync()
+    {
+        _selectedMaterial = "";
+        await LoadAsync();
+    }
+
+    private bool _loading;
+
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try { await LoadCoreAsync(); }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task LoadCoreAsync()
+    {
+        _data = await MovementApi.GetAsync(BuildFilter());
+        if (_data is null) return;
+
+        _customers = _data.Customers;
+        _materials = _data.Materials;
+
+        _materialRows = _data.ByMonth.Select(r => r.MaterialName).Distinct().OrderBy(s => s).ToList();
+        _monthCols = _data.ByMonth
+            .Select(r => (r.MonthId, r.MonthName))
+            .Distinct()
+            .OrderBy(m => m.MonthId)
+            .Select(m => (m.MonthId, m.MonthName))
+            .ToList();
+
+        StateHasChanged();
+    }
+
+    private ProductMovementRowDto? Cell(string material, int monthId)
+        => _data?.ByMonth.FirstOrDefault(r => r.MaterialName == material && r.MonthId == monthId);
+
+    private decimal RowT(string material) => _data?.RowTotals.GetValueOrDefault(material) ?? 0;
+    private decimal ColT(int monthId) => _data?.ColTotals.GetValueOrDefault(monthId) ?? 0;
+    private decimal GrandT() => _data?.GrandTotal ?? 0;
+
+    // ---------- Cross-filter: คลิกแถว (Material only) / คอลัมน์ (Month only) / เซลล์ (ทั้งคู่พร้อมกัน) ----------
+    // แต่ละแบบคลิกจะ "ตั้งค่า" ให้ตรงกับสถานะเป้าหมายของมันเป๊ะ ๆ เสมอ (ไม่ใช่แค่เช็คมิติของตัวเอง)
+    // ถ้าคลิกแล้วสถานะเป้าหมายตรงกับสถานะปัจจุบันอยู่แล้ว = คลิกซ้ำ -> เคลียร์ตัวกรองทั้งคู่
+    private string RowClass(string material) => _selectedMaterial == material ? "row-cross-filter-active" : "";
+    private string ColHeaderClass(int monthId) => _selectedMonthId == monthId ? "col-cross-filter-active" : "";
+    private string CellClass(string material, int monthId)
+        => (_selectedMaterial == material && _selectedMonthId == monthId) ? "cell-cross-filter-active" : "";
+
+    private async Task ToggleMaterialOnlyAsync(string material)
+    {
+        if (_selectedMaterial == material && _selectedMonthId is null)
+        {
+            _selectedMaterial = "";
+        }
+        else
+        {
+            _selectedMaterial = material;
+            _selectedMonthId = null;
+        }
+        await LoadAsync();
+    }
+
+    private async Task ToggleMonthOnlyAsync(int monthId)
+    {
+        if (string.IsNullOrEmpty(_selectedMaterial) && _selectedMonthId == monthId)
+        {
+            _selectedMonthId = null;
+        }
+        else
+        {
+            _selectedMaterial = "";
+            _selectedMonthId = monthId;
+        }
+        await LoadAsync();
+    }
+
+    private async Task ToggleCellAsync(string material, int monthId)
+    {
+        if (_selectedMaterial == material && _selectedMonthId == monthId)
+        {
+            _selectedMaterial = "";
+            _selectedMonthId = null;
+        }
+        else
+        {
+            _selectedMaterial = material;
+            _selectedMonthId = monthId;
+        }
+        await LoadAsync();
+    }
+}

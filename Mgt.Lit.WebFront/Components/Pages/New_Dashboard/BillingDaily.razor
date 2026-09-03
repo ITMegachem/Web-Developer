@@ -1,0 +1,166 @@
+@page "/billing-daily"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout DashboardLayout
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using static Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter
+@inject DashBillingDailyApiService BillingApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+
+<div class="dash-bg">
+    <div class="dash-page">
+        @if (_loading && _data is not null)
+        {
+            <div class="dash-overlay"><span class="dash-spinner"></span></div>
+        }
+        <div class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Dashboard</div>
+                <h1 class="dash-title">Billing Daily</h1>
+                <div class="dash-subtitle">Daily billing transactions and sales order details</div>
+            </div>
+        </div>
+
+        @* ---------- Filter bar ---------- *@
+        <div class="dash-filters dash-filter-panel dash-filter-panel-4">
+            <div class="dash-field">
+                <div class="dash-field-label">Date From</div>
+                <input type="date" class="dash-select" @bind="_dateFrom" @bind:after="ReloadAsync" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Date To</div>
+                <input type="date" class="dash-select" @bind="_dateTo" @bind:after="ReloadAsync" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Customer</div>
+                <DashSelect @bind-Value="_selectedCustomer" @bind-Value:after="ReloadAsync"
+                            Placeholder="All Customers" Options="_customers" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Sales Employee</div>
+                <DashSelect @bind-Value="_selectedSale" @bind-Value:after="ReloadAsync"
+                            Placeholder="All Sales Employees" Options="_salespeople" />
+            </div>
+        </div>
+
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading daily billing data</span>
+            </div>
+        }
+        else
+        {
+            <div class="dash-card">
+                <div class="dash-card-header">
+                    <span>Sales Orders</span>
+                    <span class="dash-header-summary">
+                        THB @_data.GrandTotal.ToString("N0") · @_data.Rows.Count records
+                    </span>
+                </div>
+                <div class="dash-card-body">
+                    <div class="table-scroll dash-table-tall">
+                        <table class="table table-bordered matrix-table">
+                            <thead>
+                                <tr>
+                                    <th class="metric-head">Billing Document</th>
+                                    <th class="metric-head">Billing Date</th>
+                                    <th class="metric-head">Sales Employee</th>
+                                    <th class="metric-head">Customer Name</th>
+                                    <th class="metric-head">Material</th>
+                                    <th class="metric-head">Material Name</th>
+                                    <th class="metric-head">Product Group</th>
+                                    <th class="metric-head text-end">Total Revenue</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (_data.Rows.Count == 0)
+                                {
+                                    <tr><td colspan="8" class="dash-table-empty">No billing records found</td></tr>
+                                }
+                                else
+                                {
+                                    @foreach (var r in _data.Rows)
+                                    {
+                                        <tr>
+                                            <td>@r.BillDoc</td>
+                                            <td>@(r.BillDate?.ToString("dd/MM/yyyy"))</td>
+                                            <td>@r.SaleEm</td>
+                                            <td>@r.Customer</td>
+                                            <td>@r.MaterialCode</td>
+                                            <td>@r.MaterialName</td>
+                                            <td>@r.ProductGroup</td>
+                                            <td class="num">@r.TotalRevenue.ToString("N0")</td>
+                                        </tr>
+                                    }
+                                    <tr>
+                                        <td colspan="7" class="table-total" style="text-align:right;">Total</td>
+                                        <td class="num table-total">@_data.GrandTotal.ToString("N0")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private BillingDailyDto? _data;
+
+    private DateTime? _dateFrom = new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1);
+    private DateTime? _dateTo = DateTime.Now.Date;
+    private string _selectedCustomer = "";
+    private string _selectedSale = "";
+
+    private List<string> _customers = new();
+    private List<string> _salespeople = new();
+
+    private BillingDailyFilter BuildFilter() => new()
+    {
+        DateFrom = _dateFrom,
+        DateTo = _dateTo,
+        CustomerFullName = string.IsNullOrWhiteSpace(_selectedCustomer) ? null : _selectedCustomer,
+        SalesEmployeeBP = string.IsNullOrWhiteSpace(_selectedSale) ? null : _selectedSale
+        // SalesGroup: server บังคับตาม BU ของ user
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (string.IsNullOrWhiteSpace(AuthState.Token))
+            await AuthState.InitializeAsync();
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+
+    private bool _loading;
+
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try { await LoadCoreAsync(); }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task LoadCoreAsync()
+    {
+        _data = await BillingApi.GetAsync(BuildFilter());
+        if (_data is null) return;
+
+        // เติม dropdown ก็ต่อเมื่อยังไม่ได้เลือก (list จะได้ไม่หดตามที่กรอง)
+        if (string.IsNullOrWhiteSpace(_selectedCustomer))
+            _customers = _data.Customers;
+        if (string.IsNullOrWhiteSpace(_selectedSale))
+            _salespeople = _data.SalesEmployees;
+
+        StateHasChanged();
+    }
+}

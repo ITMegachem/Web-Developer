@@ -1,0 +1,133 @@
+@page "/yearly-comparison"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout DashboardLayout
+@implements IAsyncDisposable
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using Microsoft.JSInterop
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using static Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter
+@inject DashYearlyComparisonApiService YearlyApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject IJSRuntime JS
+
+
+<div class="dash-bg">
+    <div class="dash-page">
+        <div class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Dashboard</div>
+                <div class="dash-title">Yearly Comparison</div>
+                <div class="dash-subtitle">Monthly net amount, gross profit and margin comparison by year</div>
+            </div>
+        </div>
+
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading yearly comparison data</span>
+            </div>
+        }
+        else
+        {
+            @* 6 area chart เรียง 3 ปี/บรรทัด ปีน้อย -> ปีมาก *@
+            <div class="year-grid">
+                @foreach (var year in _data.Years)
+                {
+                    @* @key ให้ Blazor แยกแต่ละการ์ด + Options แยก instance ต่อปี กัน id ชนกัน *@
+                    <div class="dash-card" @key="year.Year">
+                        <div class="dash-card-header">
+                            <span>@year.Year</span>
+                            <span style="font-weight:500;font-size:13px;">
+                                Net @FormatCompact(year.TotalNetAmount) · GP% @year.GrossProfitMarginPercent.ToString("N2")
+                            </span>
+                        </div>
+                        <div class="dash-card-body">
+                            <div id="@ChartIdFor(year.Year)"
+                                 class="echarts-host echarts-host-year"
+                                 role="img"
+                                 aria-label="@($"Monthly comparison chart for {year.Year}")"></div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private YearlyComparisonDto? _data;
+    private bool _chartsNeedRender;
+    private readonly HashSet<string> _renderedChartIds = new();
+
+    private static string ChartIdFor(int year) => $"yearly-comparison-{year}";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // token อยู่ใน localStorage ต้องรอ JS interop พร้อม (หลัง render แรก)
+            if (string.IsNullOrWhiteSpace(AuthState.Token))
+                await AuthState.InitializeAsync();
+
+            _data = await YearlyApi.GetAsync();
+            _chartsNeedRender = _data is not null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (_chartsNeedRender && _data is not null)
+        {
+            _chartsNeedRender = false;
+            await RenderChartsAsync();
+        }
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        if (_data is null) return;
+
+        foreach (var year in _data.Years)
+        {
+            var chartId = ChartIdFor(year.Year);
+            var points = year.Months
+                .Select(month => new
+                {
+                    Category = month.MonthName,
+                    NetAmount = month.NetAmount,
+                    GrossProfit = month.GrossProfit,
+                    Percent = month.GrossProfitMarginPercent
+                })
+                .ToArray();
+
+            await JS.InvokeVoidAsync(
+                "dashboardECharts.renderYearlyComparison",
+                chartId,
+                points);
+            _renderedChartIds.Add(chartId);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        // No chart IDs means this is the statically prerendered component instance.
+        if (_renderedChartIds.Count == 0) return;
+
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "dashboardECharts.disposeMany",
+                _renderedChartIds.ToArray());
+        }
+        catch (JSDisconnectedException)
+        {
+            // The Blazor Server circuit has already ended.
+        }
+        catch (InvalidOperationException)
+        {
+            // The component is being disposed outside an interactive render.
+        }
+    }
+}

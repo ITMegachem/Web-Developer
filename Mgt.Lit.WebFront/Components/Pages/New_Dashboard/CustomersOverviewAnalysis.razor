@@ -1,0 +1,211 @@
+@page "/customers-overview"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout DashboardLayout
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using Mgt.Lit.WebFront.Components
+@using static Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter
+@inject DashCustomerOverviewApiService CustomerApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+
+<div class="dash-bg">
+    <div class="dash-page">
+        @if (_loading && _data is not null)
+        {
+            <div class="dash-overlay"><span class="dash-spinner"></span></div>
+        }
+        <div class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Dashboard</div>
+                <h1 class="dash-title">Customers Overview Analysis</h1>
+                <div class="dash-subtitle">Monthly customer revenue, gross profit and margin analysis</div>
+            </div>
+        </div>
+
+        @* ---------- Filter bar ---------- *@
+        <div class="dash-filters dash-filter-panel">
+            <div class="dash-field">
+                <div class="dash-field-label">Year</div>
+                <DashSelect @bind-Value="_selectedYear" @bind-Value:after="ReloadAsync"
+                            Placeholder="All Years" Options="@_years.Select(y => y.ToString())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Industry</div>
+                <DashSelect @bind-Value="_selectedIndustry" @bind-Value:after="OnIndustryChangedAsync"
+                            Placeholder="All Industries" Options="_industries" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Customer</div>
+                <DashSelect @bind-Value="_selectedCustomer" @bind-Value:after="ReloadAsync"
+                            Placeholder="All Customers" Options="_customers" />
+            </div>
+        </div>
+
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading customer analysis data</span>
+            </div>
+        }
+        else
+        {
+            @* ---------- Matrix: Customer × เดือน (header 2 ชั้น) ---------- *@
+            <div class="dash-card">
+                <div class="dash-card-header">Total Revenue Overview by Customer</div>
+                <div class="dash-card-body">
+                    <div class="table-scroll dash-table-tall">
+                        <table class="table table-bordered matrix-table">
+                            <thead>
+                                <tr>
+                                    <th class="sticky-col" rowspan="2">Customer</th>
+                                    @foreach (var m in _monthCols)
+                                    {
+                                        <th colspan="3" class="period-head text-center">@m.Name</th>
+                                    }
+                                    <th colspan="3" class="period-head text-center">Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var m in _monthCols)
+                                    {
+                                        <th class="metric-head period-start">Total Revenue</th>
+                                        <th class="metric-head">Total Gross Profit</th>
+                                        <th class="metric-head">%Margin</th>
+                                    }
+                                    <th class="metric-head period-start">Total Revenue</th>
+                                    <th class="metric-head">Total Gross Profit</th>
+                                    <th class="metric-head">%Margin</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (_customerRows.Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="@(4 + (_monthCols.Count * 3))" class="dash-table-empty">No customer data found</td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    @foreach (var cust in _customerRows)
+                                    {
+                                        var tot = RowT(cust);
+                                        <tr>
+                                            <td class="sticky-col">@cust</td>
+                                            @foreach (var m in _monthCols)
+                                            {
+                                                var c = Cell(cust, m.Id);
+                                                <td class="num period-start">@(c is null ? "" : c.TotalRevenue.ToString("N0"))</td>
+                                                <td class="num">@(c is null ? "" : c.TotalGrossProfit.ToString("N0"))</td>
+                                                <td class="num">@(c is null ? "" : c.TotalPercentMargin.ToString("N2") + "%")</td>
+                                            }
+                                            <td class="num period-start table-total">@tot.TotalRevenue.ToString("N0")</td>
+                                            <td class="num table-total">@tot.TotalGrossProfit.ToString("N0")</td>
+                                            <td class="num table-total">@tot.TotalPercentMargin.ToString("N2")%</td>
+                                        </tr>
+                                    }
+                                    <tr>
+                                        <td class="sticky-col table-total">Total</td>
+                                        @foreach (var m in _monthCols)
+                                        {
+                                            var ct = ColT(m.Id);
+                                            <td class="num period-start table-total">@ct.TotalRevenue.ToString("N0")</td>
+                                            <td class="num table-total">@ct.TotalGrossProfit.ToString("N0")</td>
+                                            <td class="num table-total">@ct.TotalPercentMargin.ToString("N2")%</td>
+                                        }
+                                        @{
+                                            var gt = GrandT();
+                                        }
+                                        <td class="num period-start table-total">@gt.TotalRevenue.ToString("N0")</td>
+                                        <td class="num table-total">@gt.TotalGrossProfit.ToString("N0")</td>
+                                        <td class="num table-total">@gt.TotalPercentMargin.ToString("N2")%</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private CustomerOverviewDto? _data;
+
+    private string _selectedYear = "";
+    private string _selectedIndustry = "";
+    private string _selectedCustomer = "";
+
+    private readonly List<int> _years =
+        Enumerable.Range(DateTime.Now.Year - 5, 6).OrderByDescending(y => y).ToList();
+
+    private List<string> _industries = new();   // dropdown
+    private List<string> _customers = new();     // dropdown (cascade ตาม industry)
+
+    // matrix
+    private List<string> _customerRows = new();
+    private List<(int Id, string Name)> _monthCols = new();
+
+    private CustomerOverviewFilter BuildFilter() => new()
+    {
+        Year = int.TryParse(_selectedYear, out var y) ? y : (int?)null,
+        IndustryName = string.IsNullOrWhiteSpace(_selectedIndustry) ? null : _selectedIndustry,
+        CustomerFullName = string.IsNullOrWhiteSpace(_selectedCustomer) ? null : _selectedCustomer
+        // SalesGroup: server บังคับตาม BU ของ user
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (string.IsNullOrWhiteSpace(AuthState.Token))
+            await AuthState.InitializeAsync();
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+
+    // เปลี่ยน industry -> reset customer ที่เลือก แล้วโหลดใหม่ (Customers จะ cascade)
+    private async Task OnIndustryChangedAsync()
+    {
+        _selectedCustomer = "";
+        await LoadAsync();
+    }
+
+    private bool _loading;
+
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try { await LoadCoreAsync(); }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task LoadCoreAsync()
+    {
+        _data = await CustomerApi.GetAsync(BuildFilter());
+        if (_data is null) return;
+
+        _industries = _data.Industries;
+        _customers = _data.Customers;
+
+        _customerRows = _data.ByMonth.Select(r => r.Customer).Distinct().OrderBy(s => s).ToList();
+        _monthCols = _data.ByMonth
+            .Select(r => (r.MonthId, r.MonthName))
+            .Distinct()
+            .OrderBy(m => m.MonthId)
+            .Select(m => (m.MonthId, m.MonthName))
+            .ToList();
+
+        StateHasChanged();
+    }
+
+    private CustomerByMonthRowDto? Cell(string customer, int monthId)
+        => _data?.ByMonth.FirstOrDefault(r => r.Customer == customer && r.MonthId == monthId);
+
+    private SalePerfTotalDto RowT(string customer) => _data?.RowTotals.GetValueOrDefault(customer) ?? new();
+    private SalePerfTotalDto ColT(int monthId) => _data?.ColTotals.GetValueOrDefault(monthId) ?? new();
+    private SalePerfTotalDto GrandT() => _data?.GrandTotal ?? new();
+}

@@ -1,0 +1,388 @@
+@page "/sales-performance"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout DashboardLayout
+@implements IAsyncDisposable
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using Microsoft.JSInterop
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using static Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter
+@inject DashSalePerformanceApiService SaleApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject IJSRuntime JS
+
+
+<div class="dash-bg">
+    <div class="dash-page">
+        @if (_loading && _data is not null)
+        {
+            <div class="dash-overlay"><span class="dash-spinner"></span></div>
+        }
+        <div class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Dashboard</div>
+                <h1 class="dash-title">Sales Performance</h1>
+                <div class="dash-subtitle">Individual sales performance by year, month and trend</div>
+            </div>
+        </div>
+
+        @* ---------- Filter bar ---------- *@
+        <div class="dash-filters dash-filter-panel">
+            @* BU: โชว์เฉพาะ user ที่ดูได้มากกว่า 1 BU (เช่น BU1 manager ใหญ่) *@
+            @if (_availableBus.Count > 1)
+            {
+                <div class="dash-field">
+                    <div class="dash-field-label">BU</div>
+                    <DashSelect @bind-Value="_selectedBu" @bind-Value:after="OnBuChangedAsync"
+                                Placeholder="All Business Units" Options="_availableBus" />
+                </div>
+            }
+            <div class="dash-field">
+                <div class="dash-field-label">Year</div>
+                <DashSelect @bind-Value="_selectedYear" @bind-Value:after="ReloadAsync"
+                            Placeholder="All Years" Options="@_years.Select(y => y.ToString())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Sales Employee</div>
+                <DashSelect @bind-Value="_selectedSale" @bind-Value:after="ReloadAsync"
+                            Placeholder="All Sales Employees" Options="_salespeople" />
+            </div>
+        </div>
+
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading sales performance data</span>
+            </div>
+        }
+        else
+        {
+            @* ---------- ตาราง 1: Total Revenue Overview By Sales (matrix คน × ปี) ---------- *@
+            <div class="dash-card mb-4">
+                <div class="dash-card-header">Total Revenue Overview by Sales Employee</div>
+                <div class="dash-card-body">
+                    <div class="table-scroll" style="max-height:420px;">
+                        <table class="table table-bordered matrix-table">
+                            <thead>
+                                <tr>
+                                    <th class="sticky-col" rowspan="2">Sales</th>
+                                    @foreach (var y in _yearCols)
+                                    {
+                                        <th colspan="3" class="period-head text-center">@y</th>
+                                    }
+                                    <th colspan="3" class="period-head text-center">Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var y in _yearCols)
+                                    {
+                                        <th class="metric-head period-start">Total Revenue</th>
+                                        <th class="metric-head">Total Gross Profit</th>
+                                        <th class="metric-head">%Margin</th>
+                                    }
+                                    <th class="metric-head period-start">Total Revenue</th>
+                                    <th class="metric-head">Total Gross Profit</th>
+                                    <th class="metric-head">%Margin</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var sale in _salesByYear)
+                                {
+                                    var rt = YearRowTotal(sale);
+                                    <tr class="clickable-row @(sale == _selectedSale ? "row-cross-filter-active" : "")"
+                                        @onclick="() => ToggleSalesmanFilterAsync(sale)">
+                                        <td class="sticky-col">@sale</td>
+                                        @foreach (var y in _yearCols)
+                                        {
+                                            var c = CellYear(sale, y);
+                                            <td class="num period-start">@(c is null ? "" : c.TotalRevenue.ToString("N0"))</td>
+                                            <td class="num">@(c is null ? "" : c.TotalGrossProfit.ToString("N0"))</td>
+                                            <td class="num">@(c is null ? "" : c.TotalPercentMargin.ToString("N2") + "%")</td>
+                                        }
+                                        <td class="num period-start table-total">@rt.TotalRevenue.ToString("N0")</td>
+                                        <td class="num table-total">@rt.TotalGrossProfit.ToString("N0")</td>
+                                        <td class="num table-total">@rt.TotalPercentMargin.ToString("N2")%</td>
+                                    </tr>
+                                }
+                                <tr>
+                                    <td class="sticky-col table-total">Total</td>
+                                    @foreach (var y in _yearCols)
+                                    {
+                                        var ct = YearColTotal(y);
+                                        <td class="num period-start table-total">@ct.TotalRevenue.ToString("N0")</td>
+                                        <td class="num table-total">@ct.TotalGrossProfit.ToString("N0")</td>
+                                        <td class="num table-total">@ct.TotalPercentMargin.ToString("N2")%</td>
+                                    }
+                                    @{
+                                        var gy = YearGrandTotal();
+                                    }
+                                    <td class="num period-start table-total">@gy.TotalRevenue.ToString("N0")</td>
+                                    <td class="num table-total">@gy.TotalGrossProfit.ToString("N0")</td>
+                                    <td class="num table-total">@gy.TotalPercentMargin.ToString("N2")%</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            @* ---------- ตาราง 2: รายได้ Sale แต่ละเดือน (matrix คน × เดือน) ---------- *@
+            <div class="dash-card mb-4">
+                <div class="dash-card-header">Monthly Revenue by Sales Employee</div>
+                <div class="dash-card-body">
+                    <div class="table-scroll" style="max-height:460px;">
+                        <table class="table table-bordered matrix-table">
+                            <thead>
+                                <tr>
+                                    <th class="sticky-col" rowspan="2">Sales</th>
+                                    @foreach (var m in _monthCols)
+                                    {
+                                        <th colspan="3" class="period-head text-center">@m.Name</th>
+                                    }
+                                    <th colspan="3" class="period-head text-center">Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var m in _monthCols)
+                                    {
+                                        <th class="metric-head period-start">Total Revenue</th>
+                                        <th class="metric-head">Total Gross Profit</th>
+                                        <th class="metric-head">%Margin</th>
+                                    }
+                                    <th class="metric-head period-start">Total Revenue</th>
+                                    <th class="metric-head">Total Gross Profit</th>
+                                    <th class="metric-head">%Margin</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var sale in _salesByMonth)
+                                {
+                                    var rt = MonthRowTotal(sale);
+                                    <tr class="clickable-row @(sale == _selectedSale ? "row-cross-filter-active" : "")"
+                                        @onclick="() => ToggleSalesmanFilterAsync(sale)">
+                                        <td class="sticky-col">@sale</td>
+                                        @foreach (var m in _monthCols)
+                                        {
+                                            var c = CellMonth(sale, m.Id);
+                                            <td class="num period-start">@(c is null ? "" : c.TotalRevenue.ToString("N0"))</td>
+                                            <td class="num">@(c is null ? "" : c.TotalGrossProfit.ToString("N0"))</td>
+                                            <td class="num">@(c is null ? "" : c.TotalPercentMargin.ToString("N2") + "%")</td>
+                                        }
+                                        <td class="num period-start table-total">@rt.TotalRevenue.ToString("N0")</td>
+                                        <td class="num table-total">@rt.TotalGrossProfit.ToString("N0")</td>
+                                        <td class="num table-total">@rt.TotalPercentMargin.ToString("N2")%</td>
+                                    </tr>
+                                }
+                                <tr>
+                                    <td class="sticky-col table-total">Total</td>
+                                    @foreach (var m in _monthCols)
+                                    {
+                                        var ct = MonthColTotal(m.Id);
+                                        <td class="num period-start table-total">@ct.TotalRevenue.ToString("N0")</td>
+                                        <td class="num table-total">@ct.TotalGrossProfit.ToString("N0")</td>
+                                        <td class="num table-total">@ct.TotalPercentMargin.ToString("N2")%</td>
+                                    }
+                                    @{
+                                        var gm = MonthGrandTotal();
+                                    }
+                                    <td class="num period-start table-total">@gm.TotalRevenue.ToString("N0")</td>
+                                    <td class="num table-total">@gm.TotalGrossProfit.ToString("N0")</td>
+                                    <td class="num table-total">@gm.TotalPercentMargin.ToString("N2")%</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            @* ---------- Chart 3: Revenue and Gross Profit Margin Trend (X = Sale Employee) ---------- *@
+            <div class="dash-card">
+                <div class="dash-card-header">Revenue and Gross Profit Margin Trend</div>
+                <div class="dash-card-body">
+                    <div id="@PerformanceChartId"
+                         class="echarts-host echarts-host-performance"
+                         role="img"
+                         aria-label="Revenue and gross profit margin by sales employee chart"></div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private SalePerformanceDto? _data;
+
+    private string _selectedYear = "";
+    private string _selectedSale = "";
+    private string _selectedBu = "";             // BU ที่เลือก ("" = ทุก BU สำหรับ manager ใหญ่)
+
+    private readonly List<int> _years =
+        Enumerable.Range(DateTime.Now.Year - 5, 6).OrderByDescending(y => y).ToList();
+
+    private List<string> _availableBus = new();  // BU ที่ user เลือกได้ (server กำหนด)
+    private List<string> _salespeople = new();   // dropdown (list เต็ม ไม่หด)
+
+    // ตาราง 1 (คน × ปี)
+    private List<int> _yearCols = new();
+    private List<string> _salesByYear = new();
+
+    // ตาราง 2 (คน × เดือน)
+    private List<(int Id, string Name)> _monthCols = new();
+    private List<string> _salesByMonth = new();
+
+    private const string PerformanceChartId = "sales-performance-trend";
+    private bool _chartNeedsRender;
+    private bool _chartInteropReady;
+    private DotNetObjectReference<SalePerformance>? _dotNetRef;
+
+    private SalePerformanceFilter BuildFilter() => new()
+    {
+        Year = int.TryParse(_selectedYear, out var y) ? y : (int?)null,
+        SalesEmployeeBP = string.IsNullOrWhiteSpace(_selectedSale) ? null : _selectedSale,
+        // BU ที่ user เลือก — ส่งไปเป็นคำขอ แต่ server จะ resolve ตามสิทธิ์อีกที
+        // (BU2/3/4 ถูกบังคับให้เป็น BU ตัวเองเสมอ ไม่ว่าจะส่งค่าอะไรมา)
+        SalesGroup = string.IsNullOrWhiteSpace(_selectedBu) ? null : _selectedBu
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            if (string.IsNullOrWhiteSpace(AuthState.Token))
+                await AuthState.InitializeAsync();
+            await LoadAsync();
+            return;
+        }
+
+        if (_chartNeedsRender && _data is not null)
+        {
+            _chartNeedsRender = false;
+            await RenderChartAsync();
+        }
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+
+    // เปลี่ยน BU -> reset พนักงานที่เลือก (คนละ BU กัน) แล้วโหลดใหม่
+    private async Task OnBuChangedAsync()
+    {
+        _selectedSale = "";
+        await LoadAsync();
+    }
+
+    // ★ คลิกชื่อพนักงานในตาราง (ทั้ง 2 ตาราง) หรือแท่งกราฟ = เท่ากับเลือกจาก dropdown "Sales Employee" ตัวเดียวกัน
+    //   (ใช้ field _selectedSale ร่วมกัน dropdown จึงอัปเดตตามไปด้วยอัตโนมัติ และยังกรองต่อได้ตามปกติ)
+    //   คลิกคนเดิมซ้ำ = ยกเลิกตัวกรอง กลับไปเป็น "All Sales Employees"
+    private async Task ToggleSalesmanFilterAsync(string sale)
+    {
+        _selectedSale = _selectedSale == sale ? "" : sale;
+        await LoadAsync();
+    }
+
+    private bool _loading;
+
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try { await LoadCoreAsync(); }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task LoadCoreAsync()
+    {
+        _data = await SaleApi.GetAsync(BuildFilter());
+        if (_data is null) return;
+
+        // BU ที่เลือกได้ + BU ที่ server บังคับใช้จริง (server เป็นเจ้าของความจริง)
+        _availableBus = _data.AvailableBus ?? new();
+        if (string.IsNullOrWhiteSpace(_selectedBu) && !string.IsNullOrWhiteSpace(_data.EffectiveBu))
+            _selectedBu = _data.EffectiveBu;
+
+        if (string.IsNullOrWhiteSpace(_selectedSale))
+            _salespeople = _data.EmployeeTrend.Select(e => e.SaleEM).Distinct().OrderBy(s => s).ToList();
+
+        // ตาราง 1: ปีเป็นคอลัมน์ (น้อย -> มาก), คนเป็นแถว
+        _yearCols = _data.ByYear.Select(r => r.Year).Distinct().OrderBy(y => y).ToList();
+        _salesByYear = _data.ByYear.Select(r => r.SaleEM).Distinct().OrderBy(s => s).ToList();
+
+        // ตาราง 2: เดือนเป็นคอลัมน์, คนเป็นแถว
+        _monthCols = _data.ByMonth
+            .Select(r => (r.MonthId, r.MonthName))
+            .Distinct()
+            .OrderBy(m => m.MonthId)
+            .Select(m => (m.MonthId, m.MonthName))
+            .ToList();
+        _salesByMonth = _data.ByMonth.Select(r => r.SaleEM).Distinct().OrderBy(s => s).ToList();
+
+        _chartNeedsRender = true;
+        StateHasChanged();
+    }
+
+    private async Task RenderChartAsync()
+    {
+        if (_data is null) return;
+
+        _dotNetRef ??= DotNetObjectReference.Create(this);
+
+        var points = _data.EmployeeTrend
+            .Select(employee => new
+            {
+                Category = employee.SaleEM,
+                Amount = employee.TotalRevenue,
+                Percent = employee.TotalPercentMargin,
+                Selected = !string.IsNullOrEmpty(_selectedSale) && employee.SaleEM == _selectedSale
+            })
+            .ToArray();
+
+        await JS.InvokeVoidAsync(
+            "dashboardECharts.renderSalesPerformanceTrend",
+            PerformanceChartId,
+            points,
+            _dotNetRef);
+        _chartInteropReady = true;
+    }
+
+    // ★ กราฟยิง click event กลับมาที่นี่ผ่าน JS interop (ดู dashboard-echarts.js)
+    [JSInvokable]
+    public async Task OnEmployeeBarClicked(int dataIndex)
+    {
+        if (_data is null || dataIndex < 0 || dataIndex >= _data.EmployeeTrend.Count) return;
+        await ToggleSalesmanFilterAsync(_data.EmployeeTrend[dataIndex].SaleEM);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _dotNetRef?.Dispose();
+
+        // The statically prerendered component is disposed before JS interop exists.
+        if (!_chartInteropReady) return;
+
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "dashboardECharts.dispose",
+                PerformanceChartId);
+        }
+        catch (JSDisconnectedException)
+        {
+            // The Blazor Server circuit has already ended.
+        }
+        catch (InvalidOperationException)
+        {
+            // The component is being disposed outside an interactive render.
+        }
+    }
+
+    private SalePerfByYearRowDto? CellYear(string sale, int year)
+        => _data?.ByYear.FirstOrDefault(r => r.SaleEM == sale && r.Year == year);
+
+    private SalePerfByMonthRowDto? CellMonth(string sale, int monthId)
+        => _data?.ByMonth.FirstOrDefault(r => r.SaleEM == sale && r.MonthId == monthId);
+
+    private SalePerfTotalDto YearRowTotal(string sale) => _data?.ByYearRowTotals.GetValueOrDefault(sale) ?? new();
+    private SalePerfTotalDto YearColTotal(int year) => _data?.ByYearColTotals.GetValueOrDefault(year) ?? new();
+    private SalePerfTotalDto YearGrandTotal() => _data?.ByYearGrandTotal ?? new();
+    private SalePerfTotalDto MonthRowTotal(string sale) => _data?.ByMonthRowTotals.GetValueOrDefault(sale) ?? new();
+    private SalePerfTotalDto MonthColTotal(int monthId) => _data?.ByMonthColTotals.GetValueOrDefault(monthId) ?? new();
+    private SalePerfTotalDto MonthGrandTotal() => _data?.ByMonthGrandTotal ?? new();
+}

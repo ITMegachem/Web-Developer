@@ -1,4 +1,5 @@
 ﻿@using Mgt.Lit.WebFront.Auth
+@using Mgt.Lit.WebFront.Models.Dashboard
 @inject Mgt.Lit.WebFront.Auth.AuthState AuthState
 @inject Mgt.Lit.WebFront.Services.AuthService Auth
 @inject NavigationManager Nav
@@ -46,12 +47,12 @@
             <ul class="nav-list list-unstyled">
 
                 @* ── Dashboards Section ── *@
-                @if (HasAnyDashboard)
+                @* @if (HasAnyDashboard)
                 {
-                    <li class="section-label-white">@(!IsCollapsed ? T("Dashboards") : "•••")</li>
+                    <li class="section-label-white">@(!IsCollapsed ? T("Dashboards") : "•••")</li> *@
 
                     @* DB1 — Admin & Manager ของ companyID=1 *@
-                    @if (CanViewDB1)
+                    @* @if (CanViewDB1)
                     {
                         <li class="nav-item">
                             <NavLink href="/dashboard" class="modern-link-item active-dash">
@@ -62,10 +63,10 @@
                                 }
                             </NavLink>
                         </li>
-                    }
+                    } *@
 
                     @* DB2 — Leader ของ companyID=1 และ division=BU2 *@
-                    @if (CanViewDB2)
+                    @* @if (CanViewDB2)
                     {
                         <li class="nav-item">
                             <NavLink href="/dashboard2" class="modern-link-item active-dash">
@@ -76,10 +77,10 @@
                                 }
                             </NavLink>
                         </li>
-                    }
+                    } *@
 
                     @* DB3 — Leader ของ companyID=1 และ division=BU3 *@
-                    @if (CanViewDB3)
+                    @* @if (CanViewDB3)
                     {
                         <li class="nav-item">
                             <NavLink href="/dashboard3" class="modern-link-item active-dash">
@@ -90,11 +91,26 @@
                                 }
                             </NavLink>
                         </li>
+                    } *@
+                @* } *@
+       
+                @if (HasAnyDashboard)
+                {
+                    <li class="section-label-white">@(!IsCollapsed ? T("Sales Intelligence Matrix") : "•••")</li>
+
+                    @foreach (var item in DashboardMenu.Where(d => d.CanView()))
+                    {
+                        <li class="nav-item">
+                            <NavLink href="@item.Href" class="modern-link-item active-dash">
+                                <img src="@item.Icon" class="menu-icon-img" />
+                                @if (!IsCollapsed)
+                                {
+                                    <span class="ms-3">@T(item.LabelKey)</span>
+                                }
+                            </NavLink>
+                        </li>
                     }
                 }
-
-       
-
                 @* ── Pages / Management Section ── *@
                 @if (HasAnyManagementPage)
                 {
@@ -280,7 +296,14 @@
         string.Equals(Role, "leader", StringComparison.OrdinalIgnoreCase);
 
     // ── Dashboard permissions ─────────────────────────────────────────────────
-
+    private List<DashboardNavItem> DashboardMenu => new()
+{
+    new("/sales-overview", "DB1", "/images/chart-histogram.png", () => CanViewDB1),
+    new("/sales-overview", "DB2", "/images/chart-histogram.png", () => CanViewDB2),
+    new("/sales-overview", "DB3", "/images/chart-histogram.png", () => CanViewDB3),
+    new("/sales-overview", "DB4", "/images/chart-histogram.png", () => CanViewDB4),
+};
+    private bool HasAnyDashboard => DashboardMenu.Any(d => d.CanView());
     /// DB1 : Admin หรือ Manager ของ companyID = 1 ที่ไม่ใช่ Purchase
     private string? Department =>
      AuthState.Permission?.Department;
@@ -305,7 +328,12 @@
         IsLeader &&
         string.Equals(Division, "BU3", StringComparison.OrdinalIgnoreCase);
 
-    private bool HasAnyDashboard => CanViewDB1 || CanViewDB2 || CanViewDB3;
+    private bool CanViewDB4 =>
+        PrimaryCompanyID == 1 && 
+        IsLeader &&
+        string.Equals(Division, "BU4", StringComparison.OrdinalIgnoreCase);
+
+    // private bool HasAnyDashboard => CanViewDB1 || CanViewDB2 || CanViewDB3;
 
     // ── Page permissions ──────────────────────────────────────────────────────
 
@@ -375,6 +403,7 @@
             ["DB1"] = "Overview",
             ["DB2"] = "BU2 Dashboard",
             ["DB3"] = "BU3 Dashboard",
+            ["DB4"] = "BU4 Dashboard",
             ["Dashboards"] = "Dashboards",
             ["Pages"] = "Pages",
             ["Management"] = "Management",
@@ -391,6 +420,7 @@
             ["DB1"] = "ภาพรวม",
             ["DB2"] = "แดชบอร์ด BU2",
             ["DB3"] = "แดชบอร์ด BU3",
+            ["DB4"] = "แดชบอร์ด BU4",
             ["Dashboards"] = "แดชบอร์ด",
             ["Pages"] = "หน้า",
             ["Management"] = "การจัดการ",

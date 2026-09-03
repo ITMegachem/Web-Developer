@@ -1,0 +1,201 @@
+@page "/products-overview"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout DashboardLayout
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using static Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter
+@inject DashProductOverviewApiService ProductApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+
+<div class="dash-bg">
+    <div class="dash-page">
+        @if (_loading && _data is not null)
+        {
+            <div class="dash-overlay"><span class="dash-spinner"></span></div>
+        }
+        <div class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Dashboard</div>
+                <div class="dash-title">Product Overview</div>
+                <div class="dash-subtitle">Monthly product revenue, gross profit and margin overview</div>
+            </div>
+        </div>
+
+        @* ---------- Filter bar ---------- *@
+        <div class="dash-filters dash-filter-panel">
+            <div class="dash-field">
+                <div class="dash-field-label">Year</div>
+                <DashSelect @bind-Value="_selectedYear" @bind-Value:after="ReloadAsync"
+                            Placeholder="All Years" Options="@_years.Select(y => y.ToString())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Material Group</div>
+                <DashSelect @bind-Value="_selectedGroup" @bind-Value:after="OnGroupChangedAsync"
+                            Placeholder="All Material Groups" Options="_materialGroups" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Material Name</div>
+                <DashSelect @bind-Value="_selectedMaterial" @bind-Value:after="ReloadAsync"
+                            Placeholder="All Materials" Options="_materials" />
+            </div>
+        </div>
+
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading product overview data</span>
+            </div>
+        }
+        else
+        {
+            @* ---------- Matrix: Material × เดือน (header 2 ชั้น) ---------- *@
+            <div class="dash-card">
+                <div class="dash-card-header">Product Overview</div>
+                <div class="dash-card-body">
+                    <div class="table-scroll" style="max-height:520px;">
+                        <table class="table table-bordered matrix-table">
+                            <thead>
+                                <tr>
+                                    <th class="sticky-col" rowspan="2">Material Name</th>
+                                    @foreach (var m in _monthCols)
+                                    {
+                                        <th colspan="3" class="period-head text-center">@m.Name</th>
+                                    }
+                                    <th colspan="3" class="period-head text-center">Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var m in _monthCols)
+                                    {
+                                        <th class="metric-head period-start">Total Revenue</th>
+                                        <th class="metric-head">Total Gross Profit</th>
+                                        <th class="metric-head">%Margin</th>
+                                    }
+                                    <th class="metric-head period-start">Total Revenue</th>
+                                    <th class="metric-head">Total Gross Profit</th>
+                                    <th class="metric-head">%Margin</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var mat in _materialRows)
+                                {
+                                    var rt = RowT(mat);
+                                    <tr>
+                                        <td class="sticky-col">@mat</td>
+                                        @foreach (var m in _monthCols)
+                                        {
+                                            var c = Cell(mat, m.Id);
+                                            <td class="num period-start">@(c is null ? "" : c.TotalRevenue.ToString("N0"))</td>
+                                            <td class="num">@(c is null ? "" : c.TotalGrossProfit.ToString("N0"))</td>
+                                            <td class="num">@(c is null ? "" : c.TotalPercentMargin.ToString("N2") + "%")</td>
+                                        }
+                                        <td class="num period-start table-total">@rt.TotalRevenue.ToString("N0")</td>
+                                        <td class="num table-total">@rt.TotalGrossProfit.ToString("N0")</td>
+                                        <td class="num table-total">@rt.TotalPercentMargin.ToString("N2")%</td>
+                                    </tr>
+                                }
+                                <tr>
+                                    <td class="sticky-col table-total">Total</td>
+                                    @foreach (var m in _monthCols)
+                                    {
+                                        var ct = ColT(m.Id);
+                                        <td class="num period-start table-total">@ct.TotalRevenue.ToString("N0")</td>
+                                        <td class="num table-total">@ct.TotalGrossProfit.ToString("N0")</td>
+                                        <td class="num table-total">@ct.TotalPercentMargin.ToString("N2")%</td>
+                                    }
+                                    @{
+                                        var gt = GrandT();
+                                    }
+                                    <td class="num period-start table-total">@gt.TotalRevenue.ToString("N0")</td>
+                                    <td class="num table-total">@gt.TotalGrossProfit.ToString("N0")</td>
+                                    <td class="num table-total">@gt.TotalPercentMargin.ToString("N2")%</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private ProductOverviewDto? _data;
+
+    private string _selectedYear = "";
+    private string _selectedGroup = "";
+    private string _selectedMaterial = "";
+
+    private readonly List<int> _years =
+        Enumerable.Range(DateTime.Now.Year - 5, 6).OrderByDescending(y => y).ToList();
+
+    private List<string> _materialGroups = new();   // dropdown options
+    private List<string> _materials = new();         // dropdown options (cascade)
+
+    // matrix
+    private List<string> _materialRows = new();
+    private List<(int Id, string Name)> _monthCols = new();
+
+    private ProductOverviewFilter BuildFilter() => new()
+    {
+        Year = int.TryParse(_selectedYear, out var y) ? y : (int?)null,
+        MaterialGroupName = string.IsNullOrWhiteSpace(_selectedGroup) ? null : _selectedGroup,
+        MaterialName = string.IsNullOrWhiteSpace(_selectedMaterial) ? null : _selectedMaterial
+        // SalesGroup: server บังคับตาม BU ของ user
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (string.IsNullOrWhiteSpace(AuthState.Token))
+            await AuthState.InitializeAsync();
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+
+    // เปลี่ยนกลุ่ม -> reset material ที่เลือก แล้วโหลดใหม่ (Materials จะ cascade ตามกลุ่ม)
+    private async Task OnGroupChangedAsync()
+    {
+        _selectedMaterial = "";
+        await LoadAsync();
+    }
+
+    private bool _loading;
+
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try { await LoadCoreAsync(); }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task LoadCoreAsync()
+    {
+        _data = await ProductApi.GetAsync(BuildFilter());
+        if (_data is null) return;
+
+        _materialGroups = _data.MaterialGroups;
+        _materials = _data.Materials;
+
+        _materialRows = _data.ByMonth.Select(r => r.MaterialName).Distinct().OrderBy(s => s).ToList();
+        _monthCols = _data.ByMonth
+            .Select(r => (r.MonthId, r.MonthName))
+            .Distinct()
+            .OrderBy(m => m.MonthId)
+            .Select(m => (m.MonthId, m.MonthName))
+            .ToList();
+
+        StateHasChanged();
+    }
+
+    private ProductByMonthRowDto? Cell(string material, int monthId)
+        => _data?.ByMonth.FirstOrDefault(r => r.MaterialName == material && r.MonthId == monthId);
+
+    private SalePerfTotalDto RowT(string material) => _data?.RowTotals.GetValueOrDefault(material) ?? new();
+    private SalePerfTotalDto ColT(int monthId) => _data?.ColTotals.GetValueOrDefault(monthId) ?? new();
+    private SalePerfTotalDto GrandT() => _data?.GrandTotal ?? new();
+}

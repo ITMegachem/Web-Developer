@@ -1,0 +1,409 @@
+@page "/sales-overview"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout DashboardLayout
+@implements IAsyncDisposable
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using Microsoft.JSInterop
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using static Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter
+@inject DashSalesOverviewApiService SalesApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject IJSRuntime JS
+
+<div class="dash-bg">
+    <div class="dash-page">
+        @if (_loading)
+        {
+            <div class="dash-overlay"><span class="dash-spinner"></span></div>
+        }
+        <header class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Dashboard</div>
+                <h1 class="dash-title">MGT Sales Overview</h1>
+                <div class="dash-subtitle">Executive summary of sales revenue and profitability</div>
+            </div>
+        </header>
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading dashboard data</span>
+            </div>
+        }
+        else
+        {
+            <div class="dash-layout">
+                @* ---------- Sidebar: logo + Total Product/Customer/BU stats ---------- *@
+                <aside class="dash-sidebar">
+                    <div class="dash-logo-mark" aria-hidden="true">M</div>
+                    <div class="dash-logo">MGT</div>
+                    <div class="dash-sidebar-title">MGT Sales Overview</div>
+                    <div class="sidebar-stat">
+                        <div class="sidebar-stat-label">Total Product</div>
+                        <div class="sidebar-stat-value">@FormatCompact(_data.Summary.TotalProduct)</div>
+                    </div>
+                    <div class="sidebar-stat">
+                        <div class="sidebar-stat-label">Total Customer</div>
+                        <div class="sidebar-stat-value">@FormatCompact(_data.Summary.TotalCustomer)</div>
+                    </div>
+                    <div class="sidebar-stat">
+                        <div class="sidebar-stat-label">Total BU1</div>
+                        <div class="sidebar-stat-value">@FormatCompact(_data.Summary.TotalBU1)</div>
+                    </div>
+                    <div class="sidebar-stat">
+                        <div class="sidebar-stat-label">Total BU2</div>
+                        <div class="sidebar-stat-value">@FormatCompact(_data.Summary.TotalBU2)</div>
+                    </div>
+                    <div class="sidebar-stat">
+                        <div class="sidebar-stat-label">Total BU3</div>
+                        <div class="sidebar-stat-value">@FormatCompact(_data.Summary.TotalBU3)</div>
+                    </div>
+                    <div class="sidebar-stat">
+                        <div class="sidebar-stat-label">Total BU4</div>
+                        <div class="sidebar-stat-value">@FormatCompact(_data.Summary.TotalBU4)</div>
+                    </div>
+                    <div class="sidebar-stat">
+                        <div class="sidebar-stat-label">Total Other</div>
+                        <div class="sidebar-stat-value">@FormatCompact(_data.Summary.TotalOther)</div>
+                    </div>
+                </aside>
+                <div class="dash-main">
+                    @* ---------- Top row: 4 KPI cards + Search Year filter ---------- *@
+                    <div class="dash-top-row">
+                        <div class="dash-card kpi-card">
+                            <div class="dash-card-header">Total Revenue</div>
+                            <div class="dash-card-body"><div class="kpi-value">@FormatCompact(_data.Summary.TotalRevenue)</div></div>
+                        </div>
+                        <div class="dash-card kpi-card">
+                            <div class="dash-card-header">Total COGS</div>
+                            <div class="dash-card-body"><div class="kpi-value">@FormatCompact(_data.Summary.TotalCogs)</div></div>
+                        </div>
+                        <div class="dash-card kpi-card">
+                            <div class="dash-card-header">Total Gross Profit</div>
+                            <div class="dash-card-body"><div class="kpi-value">@FormatCompact(_data.Summary.TotalGrossProfit)</div></div>
+                        </div>
+                        <div class="dash-card kpi-card">
+                            <div class="dash-card-header">% Gross Profit Margin</div>
+                            <div class="dash-card-body"><div class="kpi-value">@_data.Summary.GrossProfitMarginPercent.ToString("N2")%</div></div>
+                        </div>
+                        <div class="dash-card filter-card">
+                            <div class="dash-card-header">Search Year</div>
+                            <div class="dash-card-body">
+                                <DashSelect @bind-Value="YearStr" @bind-Value:after="ReloadDataAsync"
+                                            Options="@_years.Select(y => y.ToString())" />
+                            </div>
+                        </div>
+                    </div>
+                    @* ---------- Breakdown tables: Name / Total Revenue / %Margin + Total row ---------- *@
+                    @* ครอบด้วย .table-scroll เพื่อจำกัดความสูง แล้วเลื่อนดูข้อมูล (หัว + แถว Total ค้างไว้) *@
+                    <div class="dash-row-3">
+                        <div class="dash-card">
+                            <div class="dash-card-header">Total Revenue by Salesman</div>
+                            <div class="dash-card-body">
+                                <div class="table-scroll">
+                                    <table class="table table-striped table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Sales Employee</th>
+                                                <th>Total Revenue</th>
+                                                <th>%Margin</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var row in _data.BySalesman)
+                                            {
+                                                <tr class="clickable-row @(IsCrossFilterActive(row.Key, _filter.SalesEmployeeBP) ? "row-cross-filter-active" : "")"
+                                                    @onclick="() => ToggleCrossFilterAsync(CrossFilterField.Salesman, row.Key)">
+                                                    <td>@row.Key</td>
+                                                    <td>@row.NetAmount.ToString("N0")</td>
+                                                    <td>@row.MarginPercent.ToString("N2")%</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                        <tfoot>
+                                            <tr>
+                                                <th>Total</th>
+                                                <th>@GetTotalRevenue(_data.BySalesman).ToString("N0")</th>
+                                                <th>@GetTotalMargin(_data.BySalesman).ToString("N2")%</th>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="dash-card">
+                            <div class="dash-card-header">Total Revenue by Material Group</div>
+                            <div class="dash-card-body">
+                                <div class="table-scroll">
+                                    <table class="table table-striped table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Material Group Name</th>
+                                                <th>Total Revenue</th>
+                                                <th>%Margin</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var row in _data.ByMaterialGroup)
+                                            {
+                                                <tr class="clickable-row @(IsCrossFilterActive(row.Key, _filter.MaterialGroupName) ? "row-cross-filter-active" : "")"
+                                                    @onclick="() => ToggleCrossFilterAsync(CrossFilterField.MaterialGroup, row.Key)">
+                                                    <td>@row.Key</td>
+                                                    <td>@row.NetAmount.ToString("N0")</td>
+                                                    <td>@row.MarginPercent.ToString("N2")%</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                        <tfoot>
+                                            <tr>
+                                                <th>Total</th>
+                                                <th>@GetTotalRevenue(_data.ByMaterialGroup).ToString("N0")</th>
+                                                <th>@GetTotalMargin(_data.ByMaterialGroup).ToString("N2")%</th>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="dash-card">
+                            <div class="dash-card-header">Total Revenue by Affiliate</div>
+                            <div class="dash-card-body">
+                                <div class="table-scroll">
+                                    <table class="table table-striped table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Affiliate Customer Name</th>
+                                                <th>Total Revenue</th>
+                                                <th>%Margin</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var row in _data.ByAffiliate)
+                                            {
+                                                <tr class="clickable-row @(IsCrossFilterActive(row.Key, _filter.AffiliateCustomerName) ? "row-cross-filter-active" : "")"
+                                                    @onclick="() => ToggleCrossFilterAsync(CrossFilterField.Affiliate, row.Key)">
+                                                    <td>@row.Key</td>
+                                                    <td>@row.NetAmount.ToString("N0")</td>
+                                                    <td>@row.MarginPercent.ToString("N2")%</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                        <tfoot>
+                                            <tr>
+                                                <th>Total</th>
+                                                <th>@GetTotalRevenue(_data.ByAffiliate).ToString("N0")</th>
+                                                <th>@GetTotalMargin(_data.ByAffiliate).ToString("N2")%</th>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    @* ---------- Bottom row: combo chart (Revenue + GP Margin trend) + Industry treemap ---------- *@
+                    <div class="dash-bottom-row">
+                        <div class="dash-card">
+                            <div class="dash-card-header">Revenue and Gross Profit Margin Trend</div>
+                            <div class="dash-card-body">
+                                <div id="@TrendChartId"
+                                     class="echarts-host"
+                                     role="img"
+                                     aria-label="Monthly revenue and gross profit margin chart"></div>
+                            </div>
+                        </div>
+                        <div class="dash-card">
+                            <div class="dash-card-header">Total Revenue by Industry Name</div>
+                            <div class="dash-card-body">
+                                <div id="@IndustryChartId"
+                                     class="echarts-host"
+                                     role="img"
+                                     aria-label="Revenue by industry treemap"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+@code {
+    private SalesOverviewDto? _data;
+    private bool _loading;
+    private SalesOverviewFilter _filter = new() { Year = DateTime.Now.Year };
+    private string YearStr
+    {
+        get => _filter.Year?.ToString() ?? "";
+        set => _filter.Year = int.TryParse(value, out var y) ? y : (int?)null;
+    }
+    private readonly List<int> _years = Enumerable.Range(DateTime.Now.Year - 5, 6).OrderByDescending(y => y).ToList();
+    private const string TrendChartId = "sales-overview-trend";
+    private const string IndustryChartId = "sales-overview-industry";
+    private bool _chartsNeedRender;
+    private bool _chartInteropReady;
+    private DotNetObjectReference<SalesOverview>? _dotNetRef;
+
+    // ★ cross-filter: มีค่าได้ครั้งละ 1 field เท่านั้น (Salesman / Material Group / Affiliate / Industry / Month)
+    //   เลือกจากการคลิกตาราง/กราฟ — คลิกค่าเดิมซ้ำ = ยกเลิกตัวกรอง, คลิกค่าอื่น = สลับไปกรองตามอันใหม่แทน
+    //   Year (dropdown "Search Year") เป็นตัวกรองแยกต่างหาก กรองควบคู่กับ cross-filter เสมอ
+    private enum CrossFilterField { Salesman, MaterialGroup, Affiliate, Industry, Month }
+
+    // ⚠️ โหลดข้อมูลใน OnAfterRenderAsync(firstRender) ไม่ใช่ OnInitializedAsync
+    // เพราะ AuthState.Token อ่านจาก localStorage ผ่าน JS interop ได้เฉพาะ "หลัง" render รอบแรก
+    // ถ้าโหลดใน OnInitializedAsync จะได้ token ว่าง -> "Token is missing"
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            if (string.IsNullOrWhiteSpace(AuthState.Token))
+                await AuthState.InitializeAsync();
+
+            _data = await SalesApi.GetOverviewAsync(_filter);
+            _chartsNeedRender = _data is not null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (_chartsNeedRender && _data is not null)
+        {
+            _chartsNeedRender = false;
+            await RenderChartsAsync();
+        }
+    }
+
+    private async Task ReloadDataAsync()
+    {
+        _loading = true; StateHasChanged();
+        try
+        {
+            _data = await SalesApi.GetOverviewAsync(_filter);
+            _chartsNeedRender = _data is not null;
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        if (_data is null) return;
+
+        _dotNetRef ??= DotNetObjectReference.Create(this);
+
+        var trendPoints = _data.MonthlyRevenue
+            .Select(m => new
+            {
+                Category = m.MonthName,
+                Amount = m.Revenue,
+                Percent = m.GrossProfitMarginPercent,
+                Selected = _filter.MonthId.HasValue && _filter.MonthId.Value == m.MonthId
+            })
+            .ToArray();
+
+        var industryPoints = _data.ByIndustry
+            .Select(row => new
+            {
+                Name = row.Key,
+                Value = row.NetAmount,
+                Selected = !string.IsNullOrEmpty(_filter.IndustryName) && _filter.IndustryName == row.Key
+            })
+            .ToArray();
+
+        await JS.InvokeVoidAsync(
+            "dashboardECharts.renderSalesOverviewTrend",
+            TrendChartId,
+            trendPoints,
+            _dotNetRef);
+        await JS.InvokeVoidAsync(
+            "dashboardECharts.renderIndustryTreemap",
+            IndustryChartId,
+            industryPoints,
+            _dotNetRef);
+        _chartInteropReady = true;
+    }
+
+    // ★ กราฟยิง click event กลับมาที่นี่ผ่าน JS interop (ดู dashboard-echarts.js)
+    [JSInvokable]
+    public async Task OnMonthBarClicked(int dataIndex)
+    {
+        if (_data is null || dataIndex < 0 || dataIndex >= _data.MonthlyRevenue.Count) return;
+        var monthId = _data.MonthlyRevenue[dataIndex].MonthId;
+        await ToggleCrossFilterAsync(CrossFilterField.Month, monthId.ToString());
+    }
+
+    [JSInvokable]
+    public async Task OnIndustryClicked(string industryName)
+    {
+        await ToggleCrossFilterAsync(CrossFilterField.Industry, industryName);
+    }
+
+    // คลิกค่าเดิมซ้ำ = ยกเลิก cross-filter, คลิกค่าใหม่ (ไม่ว่าจาก field ไหน) = ล้างของเก่าทั้งหมดแล้วกรองตามค่าใหม่แทน
+    private async Task ToggleCrossFilterAsync(CrossFilterField field, string? value)
+    {
+        var turningOff = field switch
+        {
+            CrossFilterField.Salesman => _filter.SalesEmployeeBP == value,
+            CrossFilterField.MaterialGroup => _filter.MaterialGroupName == value,
+            CrossFilterField.Affiliate => _filter.AffiliateCustomerName == value,
+            CrossFilterField.Industry => _filter.IndustryName == value,
+            CrossFilterField.Month => _filter.MonthId?.ToString() == value,
+            _ => false
+        };
+
+        _filter.SalesEmployeeBP = null;
+        _filter.MaterialGroupName = null;
+        _filter.AffiliateCustomerName = null;
+        _filter.IndustryName = null;
+        _filter.MonthId = null;
+
+        if (!turningOff)
+        {
+            switch (field)
+            {
+                case CrossFilterField.Salesman: _filter.SalesEmployeeBP = value; break;
+                case CrossFilterField.MaterialGroup: _filter.MaterialGroupName = value; break;
+                case CrossFilterField.Affiliate: _filter.AffiliateCustomerName = value; break;
+                case CrossFilterField.Industry: _filter.IndustryName = value; break;
+                case CrossFilterField.Month: _filter.MonthId = int.TryParse(value, out var m) ? m : (int?)null; break;
+            }
+        }
+
+        await ReloadDataAsync();
+    }
+
+    private static bool IsCrossFilterActive(string? rowKey, string? activeValue)
+        => !string.IsNullOrEmpty(activeValue) && rowKey == activeValue;
+
+    public async ValueTask DisposeAsync()
+    {
+        _dotNetRef?.Dispose();
+
+        // The statically prerendered component is disposed before JS interop exists.
+        if (!_chartInteropReady) return;
+
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "dashboardECharts.disposeMany",
+                new[] { TrendChartId, IndustryChartId });
+        }
+        catch (JSDisconnectedException)
+        {
+            // The Blazor Server circuit has already ended.
+        }
+        catch (InvalidOperationException)
+        {
+            // The component is being disposed outside an interactive render.
+        }
+    }
+
+    private static decimal GetTotalRevenue(IEnumerable<BreakdownRowDto> rows) => rows.Sum(r => r.NetAmount);
+    private static decimal GetTotalMargin(IEnumerable<BreakdownRowDto> rows)
+    {
+        var net = rows.Sum(r => r.NetAmount);
+        return net == 0 ? 0 : Math.Round(rows.Sum(r => r.GrossProfit) / net * 100, 2);
+    }
+}

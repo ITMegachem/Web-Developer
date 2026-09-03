@@ -1,6 +1,7 @@
 ﻿using Mgt.Lit.Core.Data;
 using Mgt.Lit.Core.Interfaces;
 using Mgt.Lit.Core.Services;
+using Mgt.Lit.Core.Services.Dashboard;
 using Mgt.Lit.WebApi.Filters;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -98,6 +99,13 @@ builder.Services
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
 builder.Services.AddScoped<ActivityLogFilter>();
+builder.Services.AddScoped<ISalesOverviewService, SalesOverviewService>();
+builder.Services.AddScoped<IYearlyComparisonService, YearlyComparisonService>();
+builder.Services.AddScoped<ISalePerformanceService, SalePerformanceService>();
+builder.Services.AddScoped<IProductOverviewService, ProductOverviewService>();
+builder.Services.AddScoped<IProductMovementService, ProductMovementService>();
+builder.Services.AddScoped<ICustomerOverviewService, CustomerOverviewService>(); 
+builder.Services.AddScoped<IBillingDailyService, BillingDailyService>();
 builder.Services.AddHttpClient();
 // =======================
 // CORS

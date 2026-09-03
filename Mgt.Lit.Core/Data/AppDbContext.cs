@@ -12,6 +12,7 @@ namespace Mgt.Lit.Core.Data
             : base(options) { }
         public DbSet<DownloadLog> DownloadLogs { get; set; }
         public DbSet<MsUser> MsUsers { get; set; }
+        public DbSet<MsMonth> MsMonths { get; set; }
         public DbSet<MsCompany> MsCompanies { get; set; }
         public DbSet<MsUserCompany> MsUserCompanies { get; set; }
         public DbSet<MGT_Sale> MGT_Sale { get; set; }

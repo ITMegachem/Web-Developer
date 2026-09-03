@@ -1,0 +1,65 @@
+@* Layout เฉพาะหน้า Dashboard — ซ้อนใน AppLayout เดิม (ยังได้ sidebar/app-shell ครบ) + แท็บสลับหน้า
+   active คำนวณเองแบบ prefix เพราะหน้า SalesOverview มีหลาย route (/sales-overview-01..04)
+   ต้องให้แท็บเดียว active ได้ทุก route ของหน้านั้น *@
+
+@inherits LayoutComponentBase
+@layout Mgt.Lit.WebFront.Components.Layout.MainLay.AppLayout
+@using Microsoft.AspNetCore.Components.Routing
+@inject NavigationManager Nav
+@implements IDisposable
+
+<div class="dashboard-layout-scope">
+    <div class="dash-nav-shell">
+        <nav class="dash-tabs" aria-label="Dashboard navigation">
+            @foreach (var tab in _tabs)
+            {
+                <a href="@tab.Href" class="dash-tab @(IsActive(tab) ? "active" : "")">
+                    <span>@tab.Label</span>
+                </a>
+            }
+        </nav>
+    </div>
+
+    @Body
+</div>
+
+@code {
+    private record Tab(string Label, string Href, string MatchPrefix);
+
+    // Href = route ที่คลิกแล้วไป (server กรอง BU ตาม user เอง route ไหนก็ได้)
+    // MatchPrefix = ใช้เช็ค active: URL ปัจจุบันขึ้นต้นด้วยค่านี้ = แท็บนี้ active
+    //   -> "/sales-overview-0" คลุม 01/02/03/04 ทั้งหมด
+    // *** หน้าที่ยังไม่ได้สร้าง คลิกแล้วจะ 404 จนกว่าจะทำหน้านั้น — แก้ Href ให้ตรง @page จริงเมื่อทำเสร็จ ***
+    private readonly List<Tab> _tabs = new()
+    {
+        new("MGT Sales Overview",          "/sales-overview",    "/sales-overview"),
+        new("Yearly Comparison",           "/yearly-comparison", "/yearly-comparison"),
+        new("Sales Performance",           "/sales-performance", "/sales-performance"),
+        // new("Comprehensive",               "/comprehensive",     "/comprehensive"),
+        new("Product Overview",            "/products-overview", "/products-overview"),
+        new("Product Movement",            "/product-movement",  "/product-movement"),
+        new("Customer Overview Analysis",  "/customers-overview","/customers-overview"),
+        new("Daily Billing",               "/billing-daily",     "/billing-daily"),
+    };
+
+    private string CurrentPath
+    {
+        get
+        {
+            var rel = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimEnd('/').ToLowerInvariant();
+            return "/" + rel;
+        }
+    }
+
+    private bool IsActive(Tab tab)
+        => CurrentPath.StartsWith(tab.MatchPrefix.ToLowerInvariant());
+
+    protected override void OnInitialized()
+        => Nav.LocationChanged += OnLocationChanged;
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+        => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+        => Nav.LocationChanged -= OnLocationChanged;
+}
