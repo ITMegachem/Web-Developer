@@ -101,11 +101,11 @@
                     @foreach (var item in DashboardMenu.Where(d => d.CanView()))
                     {
                         <li class="nav-item">
-                            <NavLink href="@item.Href" class="modern-link-item active-dash">
+                            <NavLink href="@item.Href" class="@($"modern-link-item active-dash {item.ExtraClass}")">
                                 <img src="@item.Icon" class="menu-icon-img" />
                                 @if (!IsCollapsed)
                                 {
-                                    <span class="ms-3">@T(item.LabelKey)</span>
+                                    <span class="@(item.ExtraClass is null ? "ms-3" : null)">@T(item.LabelKey)</span>
                                 }
                             </NavLink>
                         </li>
@@ -302,8 +302,21 @@
     new("/sales-overview", "DB2", "/images/chart-histogram.png", () => CanViewDB2),
     new("/sales-overview", "DB3", "/images/chart-histogram.png", () => CanViewDB3),
     new("/sales-overview", "DB4", "/images/chart-histogram.png", () => CanViewDB4),
+    new("/opportunity-win-rate", "OpportunityWinRate", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
+    new("/avg-days-to-close", "AvgDaysToClose", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
+    new("/cross-sell-upsell-gains", "CrossSellUpsellGains", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
+    new("/pricing-margin-performance", "PricingMarginPerformance", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
+    new("/sales-forecast-accuracy", "SalesForecastAccuracy", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
+    new("/sales-productivity", "SalesProductivity", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
+    new("/customer-churn-analysis", "CustomerChurnAnalysis", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
+    new("/forecast-monthly", "ForecastMonthly", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
+    new("/visit-report", "VisitReport", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
 };
     private bool HasAnyDashboard => DashboardMenu.Any(d => d.CanView());
+
+    /// Opportunity Win Rate Report : ใครที่เห็น dashboard ใดก็ได้ ให้เห็นรายงานนี้ด้วย
+    private bool CanViewOpportunityWinRate =>
+        CanViewDB1 || CanViewDB2 || CanViewDB3 || CanViewDB4;
     /// DB1 : Admin หรือ Manager ของ companyID = 1 ที่ไม่ใช่ Purchase
     private string? Department =>
      AuthState.Permission?.Department;
@@ -404,6 +417,15 @@
             ["DB2"] = "BU2 Dashboard",
             ["DB3"] = "BU3 Dashboard",
             ["DB4"] = "BU4 Dashboard",
+            ["OpportunityWinRate"] = "Opportunity Win Rate Report",
+            ["AvgDaysToClose"] = "Average Days to Close Report",
+            ["CrossSellUpsellGains"] = "Cross-Sell & Upsell Gains Report",
+            ["PricingMarginPerformance"] = "Pricing & Margin Performance Report",
+            ["SalesForecastAccuracy"] = "Sales Forecast Accuracy Report",
+            ["SalesProductivity"] = "Sales Productivity Report",
+            ["CustomerChurnAnalysis"] = "Customer Churn Analysis Report",
+            ["ForecastMonthly"] = "Forecast Monthly Report",
+            ["VisitReport"] = "Visit Report",
             ["Dashboards"] = "Dashboards",
             ["Pages"] = "Pages",
             ["Management"] = "Management",
@@ -421,6 +443,15 @@
             ["DB2"] = "แดชบอร์ด BU2",
             ["DB3"] = "แดชบอร์ด BU3",
             ["DB4"] = "แดชบอร์ด BU4",
+            ["OpportunityWinRate"] = "รายงานอัตราการปิดการขาย",
+            ["AvgDaysToClose"] = "เฉลี่ยจำนวนวันในการปิดการขาย",
+            ["CrossSellUpsellGains"] = "รายงานยอดขายเพิ่ม (Cross-Sell & Upsell)",
+            ["PricingMarginPerformance"] = "รายงานประสิทธิภาพราคาและกำไร",
+            ["SalesForecastAccuracy"] = "รายงานความแม่นยำการพยากรณ์ยอดขาย",
+            ["SalesProductivity"] = "รายงานประสิทธิภาพการขาย",
+            ["CustomerChurnAnalysis"] = "รายงานวิเคราะห์ลูกค้าที่เลิกใช้บริการ",
+            ["ForecastMonthly"] = "รายงานพยากรณ์ยอดขายรายเดือน",
+            ["VisitReport"] = "รายงานการเข้าเยี่ยมลูกค้า",
             ["Dashboards"] = "แดชบอร์ด",
             ["Pages"] = "หน้า",
             ["Management"] = "การจัดการ",

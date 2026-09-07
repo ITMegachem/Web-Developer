@@ -114,6 +114,38 @@
         font-weight: 800;
     }
 
+    /* COMPACT — หน้าตาเหมือนเมนูย่อยใต้ Management (.sub-pill-link) ทุกอย่าง
+       ต้องระบุ .modern-link-item.link-compact (2 คลาส) เพื่อชนะ .active-dash ที่ติดมากับ markup */
+    .modern-link-item.link-compact {
+        padding: 12px 18px;
+        border-radius: 12px;
+        background: transparent;
+        color: #475569;
+        font-size: 14px;
+        font-weight: 400;
+    }
+
+        .modern-link-item.link-compact:hover {
+            background: #f1f5f9;
+        }
+
+        /* ตอนอยู่หน้านั้น (NavLink เติมคลาส active) ไม่ต้องเปลี่ยนเป็นเขียว — คงหน้าตาเดิมไว้ */
+        .modern-link-item.link-compact.active {
+            background: transparent;
+            color: #475569;
+            font-weight: 400;
+        }
+
+            .modern-link-item.link-compact.active:hover {
+                background: #f1f5f9;
+            }
+
+        .modern-link-item.link-compact .menu-icon-img {
+            width: 18px;
+            height: 18px;
+            margin-right: 10px;
+        }
+
 /* ===============================
    ICONS
 =================================*/

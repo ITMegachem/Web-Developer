@@ -1,0 +1,565 @@
+@page "/avg-days-to-close"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout AppLayout
+@rendermode InteractiveServer
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using Microsoft.JSInterop
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using Mgt.Lit.WebFront.Components
+@inject DashAverageDaysToCloseApiService DaysToCloseApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<style>
+    /* ── Average Days to Close Report — สไตล์เฉพาะหน้านี้ (คำนำหน้า adc-) ───── */
+    .adc-reset-btn {
+        background: #fff;
+        border: 1px solid var(--card-border);
+        color: var(--neutral-700);
+        font-weight: 600;
+        font-size: 13px;
+        padding: 9px 16px;
+        border-radius: 10px;
+        white-space: nowrap;
+    }
+    .adc-reset-btn:hover { background: var(--neutral-100); }
+
+    .adc-kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 12px; }
+
+    .adc-kpi { background: var(--surface); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px 16px; }
+    .adc-kpi-label { font-size: 12.5px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
+    .adc-kpi-value { font-size: 24px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
+    .adc-kpi-value.danger { color: #be123c; }
+    .adc-kpi-sub { font-size: 11.5px; color: var(--muted); margin-bottom: 4px; }
+    .adc-kpi-compare { font-size: 11.5px; }
+
+    .adc-legend { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; font-size: 12.5px; color: var(--neutral-700); margin-bottom: 16px; }
+    .adc-legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+
+    .adc-insight {
+        display: flex; align-items: center; gap: 12px;
+        background: #eef6fb; border: 1px solid #cfe4f2; border-radius: 12px;
+        padding: 12px 18px; margin-bottom: 16px; font-size: 13px; color: #1f2933;
+    }
+    .adc-insight-badge {
+        background: #2f7cb0; color: #fff; font-weight: 700; font-size: 12px;
+        padding: 6px 14px; border-radius: 999px; white-space: nowrap;
+    }
+
+    .adc-chart-row { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: stretch; }
+    .adc-table-row { display: grid; grid-template-columns: 1.7fr 1fr; gap: 16px; margin-bottom: 16px; align-items: start; }
+
+    .adc-status-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+    .adc-status-badge.fast { background: #dcfce7; color: #15803d; }
+    .adc-status-badge.normal { background: #dbeafe; color: #1d4ed8; }
+    .adc-status-badge.warning { background: #ffedd5; color: #c2410c; }
+    .adc-status-badge.slow { background: #fee2e2; color: #b91c1c; }
+
+    .adc-diff-pos { color: #15803d; font-weight: 600; }
+    .adc-diff-neg { color: #b91c1c; font-weight: 600; }
+
+    .adc-summary-row { display: flex; justify-content: space-between; font-size: 12.5px; padding: 4px 0; }
+    .adc-summary-row.total { font-weight: 700; border-top: 1px solid var(--card-border); margin-top: 6px; padding-top: 8px; }
+
+    .adc-empty-panel { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 180px; color: var(--muted); font-size: 12.5px; text-align: center; padding: 12px; }
+    .adc-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    @@media (max-width: 1400px) {
+        .adc-kpi-row { grid-template-columns: repeat(3, 1fr); }
+        .adc-chart-row { grid-template-columns: 1fr; }
+        .adc-table-row { grid-template-columns: 1fr; }
+    }
+    @@media (max-width: 640px) { .adc-kpi-row { grid-template-columns: 1fr 1fr; } }
+</style>
+
+<div class="dash-bg">
+    <div class="dash-page">
+        @if (_loading)
+        {
+            <div class="dash-overlay"><span class="dash-spinner"></span></div>
+        }
+        <div class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Report</div>
+                <div class="dash-title">Average Days to Close Report</div>
+                <div class="dash-subtitle">Average time taken to turn an opportunity into a closed-won deal</div>
+            </div>
+        </div>
+
+        <div class="dash-filters dash-filter-panel">
+            <div class="dash-field">
+                <div class="dash-field-label">Closed Won Date Range</div>
+                <input id="dateRange" class="dash-input" placeholder="Select date range" autocomplete="off" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Salesperson</div>
+                <DashSelect @bind-Value="_selectedSalesperson" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableSalesEmployees ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Product</div>
+                <DashSelect @bind-Value="_selectedProduct" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableProducts ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Industry</div>
+                <DashSelect @bind-Value="_selectedIndustry" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableIndustries ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Customer</div>
+                <DashSelect @bind-Value="_selectedCustomer" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableCustomers ?? new())" />
+            </div>
+            <div class="dash-field" style="align-self:flex-end">
+                <button type="button" class="adc-reset-btn" @onclick="ResetAsync">↺ Reset</button>
+            </div>
+        </div>
+
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading days-to-close data</span>
+            </div>
+        }
+        else
+        {
+            var kpi = _data.Kpi;
+
+            <div class="adc-kpi-row">
+                <div class="adc-kpi">
+                    <div class="adc-kpi-label">Avg Days to Close</div>
+                    <div class="adc-kpi-value">@(kpi.AvgDaysToClose?.ToString("0.0") ?? "N/A")</div>
+                    <div class="adc-kpi-sub">Closed Won deals only</div>
+                    @RenderPercentCompare(kpi.AvgDaysImprovementPercent, invert: false)
+                </div>
+                <div class="adc-kpi">
+                    <div class="adc-kpi-label">Fastest Customer</div>
+                    <div class="adc-kpi-value">@(kpi.FastestCustomerDays?.ToString() ?? "N/A")</div>
+                    <div class="adc-kpi-sub">@(kpi.FastestCustomerName ?? "—")</div>
+                </div>
+                <div class="adc-kpi">
+                    <div class="adc-kpi-label">Slowest Customer</div>
+                    <div class="adc-kpi-value danger">@(kpi.SlowestCustomerDays?.ToString() ?? "N/A")</div>
+                    <div class="adc-kpi-sub">@(kpi.SlowestCustomerName ?? "—")</div>
+                </div>
+                <div class="adc-kpi">
+                    <div class="adc-kpi-label">Longest Avg. Sales Cycle</div>
+                    <div class="adc-kpi-value danger">@(kpi.LongestSalespersonAvgDays?.ToString("0.0") ?? "N/A")</div>
+                    <div class="adc-kpi-sub">@(kpi.LongestSalespersonName ?? "—")</div>
+                </div>
+                <div class="adc-kpi">
+                    <div class="adc-kpi-label">Closed Won Deals</div>
+                    <div class="adc-kpi-value">@kpi.ClosedWonDeals</div>
+                    <div class="adc-kpi-sub">Deals</div>
+                    @RenderPercentCompare(kpi.ClosedWonDealsChangePercent, invert: true)
+                </div>
+                <div class="adc-kpi">
+                    <div class="adc-kpi-label">Deals &gt; 90 Days</div>
+                    <div class="adc-kpi-value danger">@kpi.DealsOver90Days (@kpi.DealsOver90DaysPercent.ToString("0.0")%)</div>
+                    <div class="adc-kpi-sub">Deals that took too long</div>
+                    @RenderPercentCompare(kpi.DealsOver90DaysRateChangePercent, invert: false)
+                </div>
+            </div>
+
+            <div class="adc-legend">
+                <span><span class="adc-legend-dot" style="background:#22c55e"></span>Fast (≤30 days)</span>
+                <span><span class="adc-legend-dot" style="background:#2f7cb0"></span>Normal (31-70 days)</span>
+                <span><span class="adc-legend-dot" style="background:#f59e0b"></span>Warning (71-90 days)</span>
+                <span><span class="adc-legend-dot" style="background:#ef4444"></span>Slow (&gt;90 days)</span>
+            </div>
+
+            <div class="adc-insight">
+                <span class="adc-insight-badge">Summary</span>
+                <span>@InsightText</span>
+            </div>
+
+            <div class="adc-chart-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Avg Days to Close Trend (Monthly)</div>
+                    <div class="dash-card-body">
+                        <div id="@TrendChartId" class="echarts-host" role="img" aria-label="Monthly average days to close trend"></div>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Avg Days to Close by Status</div>
+                    <div class="dash-card-body">
+                        @if (_data.ByStatus.Sum(x => x.DealCount) == 0)
+                        {
+                            <div class="adc-empty-panel">No closed-won deals with computable days for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@StatusChartId" class="echarts-host" role="img" aria-label="Deals by days-to-close status"></div>
+                        }
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Avg Days to Close by Industry</div>
+                    <div class="dash-card-body">
+                        @if (_data.ByIndustry.Count == 0)
+                        {
+                            <div class="adc-empty-panel">No data for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@IndustryChartId" class="echarts-host" role="img" aria-label="Average days to close by industry"></div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="adc-chart-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Avg Days to Close by Product (Top 10)</div>
+                    <div class="dash-card-body">
+                        @if (_data.ByProduct.Count == 0)
+                        {
+                            <div class="adc-empty-panel">No product data for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@ProductChartId" class="echarts-host" role="img" aria-label="Average days to close by product"></div>
+                        }
+                    </div>
+                </div>
+
+                @RenderDaysTable("Avg Days to Close by Salesperson", "Salesperson", _data.BySalesperson, showMinMax: false)
+                @RenderDaysTable("Avg Days to Close by Customer (Top 8)", "Customer", _data.ByCustomer.Take(8).ToList(), showMinMax: true)
+            </div>
+
+            <div class="adc-table-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Closed Won Opportunity Detail (Latest @Math.Min(10, _data.RecentClosedWonOpportunities.Count))</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Deal ID</th>
+                                        <th>Opportunity Name</th>
+                                        <th>Customer</th>
+                                        <th>Salesperson</th>
+                                        <th>Product</th>
+                                        <th>Industry</th>
+                                        <th>Amount (THB)</th>
+                                        <th>Created Date</th>
+                                        <th>Closed Won Date</th>
+                                        <th>Days to Close</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @if (_data.RecentClosedWonOpportunities.Count == 0)
+                                    {
+                                        <tr><td colspan="11" class="dash-table-empty">No closed-won opportunities for this filter</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var row in _data.RecentClosedWonOpportunities)
+                                        {
+                                            <tr>
+                                                <td>@row.DealId</td>
+                                                <td>@row.OpportunityName</td>
+                                                <td>@row.CustomerName</td>
+                                                <td>@row.SalesEmployeeBP</td>
+                                                <td>@row.Product</td>
+                                                <td>@row.IndustryName</td>
+                                                <td>@row.DealAmount.ToString("N0")</td>
+                                                <td>@(row.CreatedDate?.ToString("dd MMM yyyy") ?? "")</td>
+                                                <td>@(row.ClosedWonDate?.ToString("dd MMM yyyy") ?? "")</td>
+                                                <td>@(row.DaysToClose?.ToString() ?? "N/A")</td>
+                                                <td>@RenderStatusBadge(row.Status)</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dash-card">
+                    <div class="dash-card-header">Summary</div>
+                    <div class="dash-card-body">
+                        <div class="adc-summary-row"><span>Total Closed Won Deals</span><span>@kpi.ClosedWonDeals</span></div>
+                        <div class="adc-summary-row"><span>Avg Days to Close</span><span>@(kpi.AvgDaysToClose?.ToString("0.0") ?? "N/A")</span></div>
+                        <div class="adc-summary-row"><span>Median Days to Close</span><span>@(kpi.MedianDaysToClose?.ToString("0.0") ?? "N/A")</span></div>
+                        <div class="adc-summary-row"><span>Min Days to Close</span><span>@(kpi.MinDaysToClose?.ToString() ?? "N/A")</span></div>
+                        <div class="adc-summary-row total"><span>Max Days to Close</span><span>@(kpi.MaxDaysToClose?.ToString() ?? "N/A")</span></div>
+                        <div class="adc-summary-row"><span>Deals &gt; 90 Days</span><span>@kpi.DealsOver90Days (@kpi.DealsOver90DaysPercent.ToString("0.0")%)</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="adc-note">
+                Note: Days to Close = Closed Won Date − Created Date, computed only for Closed Won deals with both dates present.
+                Median is shown alongside Average because a few unusually long deals can pull the average up.
+                "vs Previous Period" compares against the immediately preceding period of equal length. Data source: Zoho CRM (crm/v8/Deals).
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private AverageDaysToCloseDto? _data;
+    private bool _loading;
+    private bool _chartsNeedRender;
+
+    private DateTime? _dateFrom;
+    private DateTime? _dateTo;
+    private string _selectedSalesperson = "";
+    private string _selectedProduct = "";
+    private string _selectedIndustry = "";
+    private string _selectedCustomer = "";
+
+    private const string TrendChartId = "adc-trend";
+    private const string StatusChartId = "adc-status";
+    private const string IndustryChartId = "adc-industry";
+    private const string ProductChartId = "adc-product";
+
+    private IJSObjectReference? _jsModule;
+    private DotNetObjectReference<AvgDaysToClose>? _dotNetRef;
+
+    private AverageDaysToCloseFilter BuildFilter() => new()
+    {
+        DateFrom = _dateFrom,
+        DateTo = _dateTo,
+        SalesEmployeeBP = string.IsNullOrWhiteSpace(_selectedSalesperson) ? null : _selectedSalesperson,
+        Product = string.IsNullOrWhiteSpace(_selectedProduct) ? null : _selectedProduct,
+        IndustryName = string.IsNullOrWhiteSpace(_selectedIndustry) ? null : _selectedIndustry,
+        CustomerName = string.IsNullOrWhiteSpace(_selectedCustomer) ? null : _selectedCustomer
+        // SalesGroup: server บังคับตาม BU ของ user
+    };
+
+    private static string FormatCompact(decimal value) => Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter.FormatCompact(value);
+
+    private static string StatusCssClass(string status) => status switch
+    {
+        "เร็ว" => "fast",
+        "ปานกลาง" => "normal",
+        "เริ่มนาน" => "warning",
+        "นาน" => "slow",
+        _ => "normal"
+    };
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "เร็ว" => "Fast",
+        "ปานกลาง" => "Normal",
+        "เริ่มนาน" => "Warning",
+        "นาน" => "Slow",
+        _ => status
+    };
+
+    private RenderFragment RenderStatusBadge(string status) => __builder =>
+    {
+        if (string.IsNullOrEmpty(status)) { <span class="adc-note">N/A</span> }
+        else { <span class="adc-status-badge @StatusCssClass(status)">@StatusLabel(status)</span> }
+    };
+
+    private string InsightText
+    {
+        get
+        {
+            if (_data is null) return "";
+            var kpi = _data.Kpi;
+            var slowestGroup = _data.ByIndustry.OrderByDescending(x => x.AvgDays).FirstOrDefault();
+
+            var trendText = kpi.AvgDaysImprovementPercent.HasValue
+                ? (kpi.AvgDaysImprovementPercent.Value >= 0
+                    ? $"average days to close improved {kpi.AvgDaysImprovementPercent.Value.ToString("0.0")}%"
+                    : $"average days to close got {Math.Abs(kpi.AvgDaysImprovementPercent.Value).ToString("0.0")}% slower")
+                : "no comparable previous period";
+
+            var industryText = slowestGroup is not null
+                ? $" — \"{slowestGroup.GroupName}\" deals take the longest to close ({slowestGroup.AvgDays.ToString("0.0")} days avg)"
+                : "";
+
+            return $"{trendText} vs the previous period, with {kpi.DealsOver90Days} deals ({kpi.DealsOver90DaysPercent.ToString("0.0")}%) taking over 90 days{industryText}.";
+        }
+    }
+
+    private RenderFragment RenderPercentCompare(decimal? percent, bool invert) => __builder =>
+    {
+        if (!percent.HasValue)
+        {
+            <div class="adc-kpi-compare adc-note">vs Previous Period: N/A</div>
+        }
+        else
+        {
+            var good = invert ? percent.Value <= 0 : percent.Value >= 0;
+            <div class="adc-kpi-compare @(good ? "adc-diff-pos" : "adc-diff-neg")">
+                @(percent.Value >= 0 ? "+" : "")@percent.Value.ToString("0.0")% vs Previous Period
+            </div>
+        }
+    };
+
+    private RenderFragment RenderDaysTable(string title, string keyLabel, List<DaysToCloseGroupRowDto> rows, bool showMinMax) => __builder =>
+    {
+        <div class="dash-card">
+            <div class="dash-card-header">@title</div>
+            <div class="dash-card-body">
+                <div class="table-scroll">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>@keyLabel</th>
+                                <th>Closed Won</th>
+                                <th>Avg Days</th>
+                                @if (showMinMax)
+                                {
+                                    <th>Min</th>
+                                    <th>Max</th>
+                                }
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (rows.Count == 0)
+                            {
+                                <tr><td colspan="@(showMinMax ? 6 : 4)" class="dash-table-empty">No data found</td></tr>
+                            }
+                            else
+                            {
+                                @foreach (var row in rows)
+                                {
+                                    <tr>
+                                        <td>@row.GroupName</td>
+                                        <td>@row.ClosedWonDeals</td>
+                                        <td>@row.AvgDays.ToString("0.0")</td>
+                                        @if (showMinMax)
+                                        {
+                                            <td>@row.MinDays</td>
+                                            <td>@row.MaxDays</td>
+                                        }
+                                        <td>@RenderStatusBadge(row.Status)</td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    };
+
+    // ⚠️ ห้ามยิง JS interop ต่อจาก StateHasChanged ในเมธอดเดียวกันทันที — ต้องรอ OnAfterRenderAsync(firstRender:false)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            if (string.IsNullOrWhiteSpace(AuthState.Token))
+                await AuthState.InitializeAsync();
+
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await _jsModule.InvokeVoidAsync("initDateRange", _dotNetRef);
+
+            _dateFrom = new DateTime(DateTime.Now.Year, 1, 1);
+            _dateTo = DateTime.Now.Date;
+
+            _data = await DaysToCloseApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (_chartsNeedRender && _data is not null)
+        {
+            _chartsNeedRender = false;
+            await RenderChartsAsync();
+        }
+    }
+
+    [JSInvokable]
+    public async Task SetDateRange(string start, string end)
+    {
+        if (string.IsNullOrEmpty(start) || string.IsNullOrEmpty(end))
+        {
+            _dateFrom = null; _dateTo = null;
+        }
+        else
+        {
+            if (DateTime.TryParse(start, out var s)) _dateFrom = s;
+            if (DateTime.TryParse(end, out var e)) _dateTo = e;
+        }
+        await LoadAsync();
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+
+    private async Task ResetAsync()
+    {
+        _selectedSalesperson = "";
+        _selectedProduct = "";
+        _selectedIndustry = "";
+        _selectedCustomer = "";
+        _dateFrom = new DateTime(DateTime.Now.Year, 1, 1);
+        _dateTo = DateTime.Now.Date;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try
+        {
+            _data = await DaysToCloseApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        if (_data is null) return;
+
+        var trendPoints = _data.Trend
+            .Select(p => new { periodLabel = p.PeriodLabel, closedWonDeals = p.ClosedWonDeals, avgDaysToClose = p.AvgDaysToClose })
+            .ToArray();
+        await JS.InvokeVoidAsync("dashboardECharts.renderDaysToCloseTrend", TrendChartId, trendPoints);
+
+        if (_data.ByStatus.Sum(x => x.DealCount) > 0)
+        {
+            var statusPoints = _data.ByStatus
+                .Select(s => new { name = StatusLabel(s.Status), value = s.DealCount })
+                .ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderShareDonut", StatusChartId, statusPoints, "Closed Won Deals");
+        }
+
+        if (_data.ByIndustry.Count > 0)
+        {
+            var rows = _data.ByIndustry.Take(8)
+                .Select(r => new { groupName = r.GroupName, avgDays = r.AvgDays, closedWonDeals = r.ClosedWonDeals })
+                .ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderAvgDaysBar", IndustryChartId, rows);
+        }
+
+        if (_data.ByProduct.Count > 0)
+        {
+            var rows = _data.ByProduct
+                .Select(r => new { groupName = r.GroupName, avgDays = r.AvgDays, closedWonDeals = r.ClosedWonDeals })
+                .ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderAvgDaysBar", ProductChartId, rows);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_jsModule is not null)
+        {
+            try { await _jsModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+        _dotNetRef?.Dispose();
+    }
+}

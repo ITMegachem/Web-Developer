@@ -3,6 +3,69 @@
 @layout DashboardLayout
 @implements IAsyncDisposable
 <link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+<style>
+    /* ลดขนาด Font เฉพาะ 4 การ์ด KPI แถวบน (Total Revenue/COGS/Gross Profit/%Margin) — ไม่กระทบ .kpi-value หน้าอื่น */
+    .dash-top-row .kpi-value {
+        font-size: clamp(20px, 1.6vw, 26px);
+    }
+
+    /* ย้าย Search Year ไปอยู่บนหัวเพจแล้ว เหลือแค่ 4 การ์ด KPI ใน .dash-top-row (เดิมเผื่อคอลัมน์ filter-card 150px ไว้ด้วย) */
+    .dash-top-row {
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    }
+
+    /* กล่อง Search Year บนหัวเพจ (ข้างชื่อรายงาน) */
+    .dash-top .filter-card {
+        min-width: 160px;
+    }
+
+    /* Highlight แถวที่ %Margin ต่ำกว่า 30% ในตาราง Breakdown — ทำเป็น badge กลมๆ แบบเดียวกับ status badge
+       ในหน้ารายงานอื่น (ไม่ทาสีเต็มเซลล์ตารางแบบก่อนหน้านี้ เพราะทำให้ดูเป็นก้อนสี่เหลี่ยมแข็งๆ ไม่สมดุลกับแถวอื่น)
+       ★ ต้องเจาะจงกว่า .table-scroll td (มี color เป็นของตัวเองอยู่แล้ว) ไม่งั้นสีแดงจะโดนทับ */
+    .table-scroll td .margin-badge-low {
+        display: inline-block;
+        white-space: nowrap;
+        color: #b91c1c !important;
+        font-weight: 700;
+        background: #fee2e2;
+        border-radius: 999px;
+        padding: 3px 11px;
+        line-height: 1.3;
+        font-size: 12.5px;
+    }
+
+    /* ปรับตาราง Breakdown ทั้ง 3 คอลัมน์ (By Salesman/Material Group/Affiliate) ให้ทุกอย่างอยู่บรรทัดเดียวและสมดุลกัน
+       ★ font-size ของ .table-scroll ที่ใช้ร่วมกับหน้าอื่นถูกขยายไว้ใหญ่ (16-18px ตาม breakpoint) ซึ่งกว้างเกินไปสำหรับ
+       เลย์เอาต์ 3 คอลัมน์แคบๆ นี้ ทำให้ชื่อยาว/หัวคอลัมน์ยาวตกบรรทัด จึงลดขนาดเฉพาะ 3 การ์ดนี้ + บังคับ 1 บรรทัดเสมอ
+       (ชื่อที่ยาวเกินคอลัมน์จะโดนตัดด้วย "…" แทนการขึ้นบรรทัดใหม่ — เอาเมาส์ชี้ค้างจะเห็นชื่อเต็มจาก title attribute) */
+    .dash-row-3 .table-scroll table {
+        table-layout: fixed;
+        font-size: 13px !important;
+        line-height: 1.35 !important;
+    }
+
+    .dash-row-3 .table-scroll th,
+    .dash-row-3 .table-scroll td {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .dash-row-3 .table-scroll th:first-child,
+    .dash-row-3 .table-scroll td:first-child {
+        width: 46%;
+    }
+
+    .dash-row-3 .table-scroll th:nth-child(2),
+    .dash-row-3 .table-scroll td:nth-child(2) {
+        width: 32%;
+    }
+
+    .dash-row-3 .table-scroll th:last-child,
+    .dash-row-3 .table-scroll td:last-child {
+        width: 22%;
+    }
+</style>
 @using System.Linq
 @using Microsoft.JSInterop
 @using Mgt.Lit.Core.DTOs.DashBoard
@@ -24,6 +87,16 @@
                 <h1 class="dash-title">MGT Sales Overview</h1>
                 <div class="dash-subtitle">Executive summary of sales revenue and profitability</div>
             </div>
+            @if (_data is not null)
+            {
+                <div class="dash-card filter-card">
+                    <div class="dash-card-header">Search Year</div>
+                    <div class="dash-card-body">
+                        <DashSelect @bind-Value="YearStr" @bind-Value:after="ReloadDataAsync"
+                                    Options="@_years.Select(y => y.ToString())" />
+                    </div>
+                </div>
+            }
         </header>
         @if (_data is null)
         {
@@ -88,13 +161,6 @@
                             <div class="dash-card-header">% Gross Profit Margin</div>
                             <div class="dash-card-body"><div class="kpi-value">@_data.Summary.GrossProfitMarginPercent.ToString("N2")%</div></div>
                         </div>
-                        <div class="dash-card filter-card">
-                            <div class="dash-card-header">Search Year</div>
-                            <div class="dash-card-body">
-                                <DashSelect @bind-Value="YearStr" @bind-Value:after="ReloadDataAsync"
-                                            Options="@_years.Select(y => y.ToString())" />
-                            </div>
-                        </div>
                     </div>
                     @* ---------- Breakdown tables: Name / Total Revenue / %Margin + Total row ---------- *@
                     @* ครอบด้วย .table-scroll เพื่อจำกัดความสูง แล้วเลื่อนดูข้อมูล (หัว + แถว Total ค้างไว้) *@
@@ -116,9 +182,18 @@
                                             {
                                                 <tr class="clickable-row @(IsCrossFilterActive(row.Key, _filter.SalesEmployeeBP) ? "row-cross-filter-active" : "")"
                                                     @onclick="() => ToggleCrossFilterAsync(CrossFilterField.Salesman, row.Key)">
-                                                    <td>@row.Key</td>
+                                                    <td title="@row.Key">@row.Key</td>
                                                     <td>@row.NetAmount.ToString("N0")</td>
-                                                    <td>@row.MarginPercent.ToString("N2")%</td>
+                                                    <td>
+                                                        @if (row.MarginPercent < 30)
+                                                        {
+                                                            <span class="margin-badge-low">@row.MarginPercent.ToString("N2")%</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            @(row.MarginPercent.ToString("N2") + "%")
+                                                        }
+                                                    </td>
                                                 </tr>
                                             }
                                         </tbody>
@@ -150,9 +225,18 @@
                                             {
                                                 <tr class="clickable-row @(IsCrossFilterActive(row.Key, _filter.MaterialGroupName) ? "row-cross-filter-active" : "")"
                                                     @onclick="() => ToggleCrossFilterAsync(CrossFilterField.MaterialGroup, row.Key)">
-                                                    <td>@row.Key</td>
+                                                    <td title="@row.Key">@row.Key</td>
                                                     <td>@row.NetAmount.ToString("N0")</td>
-                                                    <td>@row.MarginPercent.ToString("N2")%</td>
+                                                    <td>
+                                                        @if (row.MarginPercent < 30)
+                                                        {
+                                                            <span class="margin-badge-low">@row.MarginPercent.ToString("N2")%</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            @(row.MarginPercent.ToString("N2") + "%")
+                                                        }
+                                                    </td>
                                                 </tr>
                                             }
                                         </tbody>
@@ -184,9 +268,18 @@
                                             {
                                                 <tr class="clickable-row @(IsCrossFilterActive(row.Key, _filter.AffiliateCustomerName) ? "row-cross-filter-active" : "")"
                                                     @onclick="() => ToggleCrossFilterAsync(CrossFilterField.Affiliate, row.Key)">
-                                                    <td>@row.Key</td>
+                                                    <td title="@row.Key">@row.Key</td>
                                                     <td>@row.NetAmount.ToString("N0")</td>
-                                                    <td>@row.MarginPercent.ToString("N2")%</td>
+                                                    <td>
+                                                        @if (row.MarginPercent < 30)
+                                                        {
+                                                            <span class="margin-badge-low">@row.MarginPercent.ToString("N2")%</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            @(row.MarginPercent.ToString("N2") + "%")
+                                                        }
+                                                    </td>
                                                 </tr>
                                             }
                                         </tbody>

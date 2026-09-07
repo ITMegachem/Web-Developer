@@ -1,0 +1,603 @@
+@page "/sales-productivity"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout AppLayout
+@rendermode InteractiveServer
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using Microsoft.JSInterop
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using Mgt.Lit.WebFront.Components
+@inject DashSalesProductivityApiService ProductivityApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<style>
+    /* ── Sales Productivity Report — สไตล์เฉพาะหน้านี้ (คำนำหน้า spr-) ───── */
+    .spr-reset-btn {
+        background: #fff;
+        border: 1px solid var(--card-border);
+        color: var(--neutral-700);
+        font-weight: 600;
+        font-size: 13px;
+        padding: 9px 16px;
+        border-radius: 10px;
+        white-space: nowrap;
+    }
+    .spr-reset-btn:hover { background: var(--neutral-100); }
+
+    .spr-kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 12px; }
+
+    .spr-kpi { background: var(--surface); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px 16px; }
+    .spr-kpi-label { font-size: 12.5px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
+    .spr-kpi-value { font-size: 22px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
+    .spr-kpi-sub { font-size: 11.5px; color: var(--muted); }
+    .spr-kpi-compare { font-size: 11.5px; margin-top: 2px; }
+    .spr-diff-pos { color: #15803d; font-weight: 600; }
+    .spr-diff-neg { color: #b91c1c; font-weight: 600; }
+
+    .spr-chart-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: stretch; }
+    .spr-main-row { display: grid; grid-template-columns: 1.8fr 1fr; gap: 16px; margin-bottom: 16px; align-items: start; }
+    .spr-bottom-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: start; }
+
+    .spr-status-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .spr-status-badge.excellent { background: #dcfce7; color: #15803d; }
+    .spr-status-badge.good { background: #dbeafe; color: #1d4ed8; }
+    .spr-status-badge.watch { background: #ffedd5; color: #c2410c; }
+    .spr-status-badge.needs-improvement { background: #fee2e2; color: #b91c1c; }
+    .spr-status-badge.na { background: #e5e7eb; color: #4b5563; }
+
+    .spr-highlight-list { display: flex; flex-direction: column; gap: 10px; }
+    .spr-highlight-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--card-border); border-radius: 10px; }
+    .spr-highlight-rank { width: 30px; height: 30px; border-radius: 50%; background: var(--neutral-100); color: var(--brand-dark); font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .spr-highlight-label { font-size: 11.5px; color: var(--muted); font-weight: 600; margin-bottom: 2px; }
+    .spr-highlight-name { font-size: 13.5px; font-weight: 700; color: var(--brand-dark); }
+    .spr-highlight-sub { font-size: 11.5px; color: var(--muted); }
+
+    .spr-empty-panel { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 180px; color: var(--muted); font-size: 12.5px; text-align: center; padding: 12px; }
+    .spr-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    @@media (max-width: 1400px) {
+        .spr-kpi-row { grid-template-columns: repeat(3, 1fr); }
+        .spr-chart-row { grid-template-columns: 1fr; }
+        .spr-main-row { grid-template-columns: 1fr; }
+        .spr-bottom-row { grid-template-columns: 1fr; }
+    }
+    @@media (max-width: 640px) { .spr-kpi-row { grid-template-columns: 1fr 1fr; } }
+</style>
+
+<div class="dash-bg">
+    <div class="dash-page">
+        @if (_loading)
+        {
+            <div class="dash-overlay"><span class="dash-spinner"></span></div>
+        }
+        <div class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Report</div>
+                <div class="dash-title">Sales Productivity Report</div>
+                <div class="dash-subtitle">How effectively each salesperson creates, qualifies, and converts opportunities into revenue</div>
+            </div>
+        </div>
+
+        <div class="dash-filters dash-filter-panel">
+            <div class="dash-field">
+                <div class="dash-field-label">Opportunity Created Date Range</div>
+                <input id="dateRange" class="dash-input" placeholder="Select date range" autocomplete="off" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Salesperson</div>
+                <DashSelect @bind-Value="_selectedSalesperson" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableSalesEmployees ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Opportunity Stage</div>
+                <DashSelect @bind-Value="_selectedStage" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableStages ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Product</div>
+                <DashSelect @bind-Value="_selectedProduct" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableProducts ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Customer</div>
+                <DashSelect @bind-Value="_selectedCustomer" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableCustomers ?? new())" />
+            </div>
+            <div class="dash-field" style="align-self:flex-end">
+                <button type="button" class="spr-reset-btn" @onclick="ResetAsync">↺ Reset</button>
+            </div>
+        </div>
+
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading sales productivity data</span>
+            </div>
+        }
+        else
+        {
+            var kpi = _data.Kpi;
+
+            <div class="spr-kpi-row">
+                <div class="spr-kpi">
+                    <div class="spr-kpi-label">Total Opportunities</div>
+                    <div class="spr-kpi-value">@kpi.TotalOpportunities</div>
+                    <div class="spr-kpi-sub">New opportunities created</div>
+                    @RenderPercentCompare(kpi.TotalOpportunitiesChangePercent, invert: false)
+                </div>
+                <div class="spr-kpi">
+                    <div class="spr-kpi-label">Salespersons</div>
+                    <div class="spr-kpi-value">@kpi.ActiveSalespersons</div>
+                    <div class="spr-kpi-sub">Active in this period</div>
+                </div>
+                <div class="spr-kpi">
+                    <div class="spr-kpi-label">Avg Opportunity / Salesperson</div>
+                    <div class="spr-kpi-value">@kpi.AvgOpportunityPerSalesperson.ToString("0.0")</div>
+                    <div class="spr-kpi-sub">Opportunities per person</div>
+                </div>
+                <div class="spr-kpi">
+                    <div class="spr-kpi-label">Qualified Opportunities</div>
+                    <div class="spr-kpi-value">@kpi.QualifiedOpportunities</div>
+                    <div class="spr-kpi-sub">Past initial qualification stage</div>
+                </div>
+                <div class="spr-kpi">
+                    <div class="spr-kpi-label">Qualified Opportunity Rate</div>
+                    <div class="spr-kpi-value">@kpi.QualifiedOpportunityRatePercent.ToString("0.0")%</div>
+                    <div class="spr-kpi-sub">Qualified ÷ Total Opportunities</div>
+                </div>
+            </div>
+
+            <div class="spr-kpi-row">
+                <div class="spr-kpi">
+                    <div class="spr-kpi-label">Won Opportunities</div>
+                    <div class="spr-kpi-value">@kpi.WonOpportunities</div>
+                    <div class="spr-kpi-sub">Closed Won</div>
+                </div>
+                <div class="spr-kpi">
+                    <div class="spr-kpi-label">Lost Opportunities</div>
+                    <div class="spr-kpi-value">@kpi.LostOpportunities</div>
+                    <div class="spr-kpi-sub">Closed Lost / Cancelled</div>
+                </div>
+                <div class="spr-kpi">
+                    <div class="spr-kpi-label">Overall Win Rate</div>
+                    <div class="spr-kpi-value">@(kpi.OverallWinRatePercent.HasValue ? kpi.OverallWinRatePercent.Value.ToString("0.0") + "%" : "N/A")</div>
+                    <div class="spr-kpi-sub">Won ÷ (Won + Lost)</div>
+                </div>
+                <div class="spr-kpi">
+                    <div class="spr-kpi-label">Revenue (Closed Won)</div>
+                    <div class="spr-kpi-value">@FormatCompact(kpi.RevenueClosedWon) THB</div>
+                    <div class="spr-kpi-sub">Avg Won Deal: @FormatCompact(kpi.AvgWonDealSize) THB</div>
+                </div>
+                <div class="spr-kpi">
+                    <div class="spr-kpi-label">Avg Revenue / Opportunity</div>
+                    <div class="spr-kpi-value">@FormatCompact(kpi.RevenuePerOpportunity) THB</div>
+                    <div class="spr-kpi-sub">Open Pipeline Value: @FormatCompact(kpi.PipelineValue) THB</div>
+                </div>
+            </div>
+
+            <div class="spr-chart-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Opportunity Trend (Monthly)</div>
+                    <div class="dash-card-body">
+                        <div id="@TrendChartId" class="echarts-host" role="img" aria-label="Monthly opportunity trend"></div>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Opportunity Pipeline by Stage</div>
+                    <div class="dash-card-body">
+                        @if (_data.PipelineByStage.Sum(x => x.DealCount) == 0)
+                        {
+                            <div class="spr-empty-panel">No data for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@FunnelChartId" class="echarts-host" role="img" aria-label="Opportunity pipeline by stage"></div>
+                        }
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Opportunities by Product (Top 8)</div>
+                    <div class="dash-card-body">
+                        @if (_data.ByProduct.Count == 0)
+                        {
+                            <div class="spr-empty-panel">No product data for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@ProductChartId" class="echarts-host" role="img" aria-label="Opportunities by product"></div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="spr-main-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Sales Productivity by Salesperson</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Salesperson</th>
+                                        <th>Opportunities</th>
+                                        <th>Qualified</th>
+                                        <th>Won</th>
+                                        <th>Lost</th>
+                                        <th>Win Rate</th>
+                                        <th>Pipeline (THB)</th>
+                                        <th>Revenue (THB)</th>
+                                        <th>Rev/Opp (THB)</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @if (_data.BySalesperson.Count == 0)
+                                    {
+                                        <tr><td colspan="11" class="dash-table-empty">No opportunities for this filter</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @for (var i = 0; i < _data.BySalesperson.Count; i++)
+                                        {
+                                            var row = _data.BySalesperson[i];
+                                            <tr>
+                                                <td>@(i + 1)</td>
+                                                <td>@row.SalesEmployeeBP</td>
+                                                <td>@row.Opportunities</td>
+                                                <td>@row.Qualified</td>
+                                                <td>@row.Won</td>
+                                                <td>@row.Lost</td>
+                                                <td>@(row.WinRatePercent.HasValue ? row.WinRatePercent.Value.ToString("0.0") + "%" : "N/A")</td>
+                                                <td>@row.PipelineValue.ToString("N0")</td>
+                                                <td>@row.Revenue.ToString("N0")</td>
+                                                <td>@row.RevenuePerOpportunity.ToString("N0")</td>
+                                                <td>@RenderStatusBadge(row.Status)</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                                @if (_data.BySalesperson.Count > 0)
+                                {
+                                    <tfoot>
+                                        <tr style="font-weight:700; border-top: 2px solid var(--card-border);">
+                                            <td colspan="2">Total</td>
+                                            <td>@_data.BySalesperson.Sum(x => x.Opportunities)</td>
+                                            <td>@_data.BySalesperson.Sum(x => x.Qualified)</td>
+                                            <td>@_data.BySalesperson.Sum(x => x.Won)</td>
+                                            <td>@_data.BySalesperson.Sum(x => x.Lost)</td>
+                                            <td>@(kpi.OverallWinRatePercent.HasValue ? kpi.OverallWinRatePercent.Value.ToString("0.0") + "%" : "N/A")</td>
+                                            <td>@_data.BySalesperson.Sum(x => x.PipelineValue).ToString("N0")</td>
+                                            <td>@_data.BySalesperson.Sum(x => x.Revenue).ToString("N0")</td>
+                                            <td>@kpi.RevenuePerOpportunity.ToString("N0")</td>
+                                            <td>—</td>
+                                        </tr>
+                                    </tfoot>
+                                }
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dash-card">
+                    <div class="dash-card-header">Top Highlights</div>
+                    <div class="dash-card-body">
+                        <div class="spr-highlight-list">
+                            @if (TopBySalesperson is not null)
+                            {
+                                <div class="spr-highlight-item">
+                                    <div class="spr-highlight-rank">🏆</div>
+                                    <div>
+                                        <div class="spr-highlight-label">Top Opportunities</div>
+                                        <div class="spr-highlight-name">@TopBySalesperson.SalesEmployeeBP</div>
+                                        <div class="spr-highlight-sub">@TopBySalesperson.Opportunities opportunities</div>
+                                    </div>
+                                </div>
+                            }
+                            @if (TopByRevenue is not null)
+                            {
+                                <div class="spr-highlight-item">
+                                    <div class="spr-highlight-rank">💰</div>
+                                    <div>
+                                        <div class="spr-highlight-label">Top Revenue</div>
+                                        <div class="spr-highlight-name">@TopByRevenue.SalesEmployeeBP</div>
+                                        <div class="spr-highlight-sub">@FormatCompact(TopByRevenue.Revenue) THB</div>
+                                    </div>
+                                </div>
+                            }
+                            @if (TopByWinRate is not null)
+                            {
+                                <div class="spr-highlight-item">
+                                    <div class="spr-highlight-rank">🎯</div>
+                                    <div>
+                                        <div class="spr-highlight-label">Top Win Rate</div>
+                                        <div class="spr-highlight-name">@TopByWinRate.SalesEmployeeBP</div>
+                                        <div class="spr-highlight-sub">@(TopByWinRate.WinRatePercent?.ToString("0.0"))% (@TopByWinRate.Closed closed deals)</div>
+                                    </div>
+                                </div>
+                            }
+                            @if (TopBySalesperson is null && TopByRevenue is null && TopByWinRate is null)
+                            {
+                                <div class="spr-empty-panel">No data for this filter</div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="spr-bottom-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Recent Closed Won</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr><th>Close Date</th><th>Opportunity</th><th>Customer</th><th>Salesperson</th><th>Amount (THB)</th></tr>
+                                </thead>
+                                <tbody>
+                                    @if (_data.RecentClosedWon.Count == 0)
+                                    {
+                                        <tr><td colspan="5" class="dash-table-empty">No closed won opportunities</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var row in _data.RecentClosedWon)
+                                        {
+                                            <tr>
+                                                <td>@(row.ClosedDate?.ToString("dd MMM yyyy") ?? "")</td>
+                                                <td>@row.OpportunityName</td>
+                                                <td>@row.CustomerName</td>
+                                                <td>@row.SalesEmployeeBP</td>
+                                                <td>@row.DealAmount.ToString("N0")</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dash-card">
+                    <div class="dash-card-header">Open Pipeline (Top 5 by Value)</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr><th>Opportunity</th><th>Customer</th><th>Salesperson</th><th>Stage</th><th>Amount (THB)</th></tr>
+                                </thead>
+                                <tbody>
+                                    @if (_data.OpenPipelineTop.Count == 0)
+                                    {
+                                        <tr><td colspan="5" class="dash-table-empty">No open pipeline for this filter</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var row in _data.OpenPipelineTop)
+                                        {
+                                            <tr>
+                                                <td>@row.OpportunityName</td>
+                                                <td>@row.CustomerName</td>
+                                                <td>@row.SalesEmployeeBP</td>
+                                                <td>@row.Stage</td>
+                                                <td>@row.DealAmount.ToString("N0")</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dash-card">
+                    <div class="dash-card-header">Lost Opportunities by Reason</div>
+                    <div class="dash-card-body">
+                        @if (_data.LostReasons.Count == 0)
+                        {
+                            <div class="spr-empty-panel">No lost opportunities for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@LostReasonChartId" class="echarts-host" role="img" aria-label="Lost opportunities by reason"></div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="spr-note">
+                Note: All KPIs are based on the Opportunity's Created Date (cohort view) — an opportunity created in the selected period stays in
+                that cohort regardless of when it later closes. "Qualified" means the opportunity has moved past the initial "Draft/Qualification" stage
+                (Zoho has no separate Qualification Status field for this org). "Salespersons" counts only reps who appear in this cohort, not the full sales roster.
+                Status combines opportunity volume, win rate, and revenue vs. team averages — not win rate alone, since a single closed deal can show 100% or 0% misleadingly.
+                Data source: Zoho CRM (crm/v8/Deals + Deal_Items subform).
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private SalesProductivityDto? _data;
+    private bool _loading;
+    private bool _chartsNeedRender;
+
+    private DateTime? _dateFrom;
+    private DateTime? _dateTo;
+    private string _selectedSalesperson = "";
+    private string _selectedStage = "";
+    private string _selectedProduct = "";
+    private string _selectedCustomer = "";
+
+    private const string TrendChartId = "spr-trend";
+    private const string FunnelChartId = "spr-funnel";
+    private const string ProductChartId = "spr-product";
+    private const string LostReasonChartId = "spr-lost-reason";
+
+    private IJSObjectReference? _jsModule;
+    private DotNetObjectReference<SalesProductivity>? _dotNetRef;
+
+    private SalesProductivityFilter BuildFilter() => new()
+    {
+        DateFrom = _dateFrom,
+        DateTo = _dateTo,
+        SalesEmployeeBP = string.IsNullOrWhiteSpace(_selectedSalesperson) ? null : _selectedSalesperson,
+        Stage = string.IsNullOrWhiteSpace(_selectedStage) ? null : _selectedStage,
+        Product = string.IsNullOrWhiteSpace(_selectedProduct) ? null : _selectedProduct,
+        CustomerName = string.IsNullOrWhiteSpace(_selectedCustomer) ? null : _selectedCustomer
+        // SalesGroup: server บังคับตาม BU ของ user
+    };
+
+    private static string FormatCompact(decimal value) => Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter.FormatCompact(value);
+
+    private SalesProductivityRowDto? TopBySalesperson =>
+        (_data?.BySalesperson ?? new()).OrderByDescending(x => x.Opportunities).FirstOrDefault();
+
+    private SalesProductivityRowDto? TopByRevenue =>
+        (_data?.BySalesperson ?? new()).Where(x => x.Revenue > 0).OrderByDescending(x => x.Revenue).FirstOrDefault();
+
+    // เรียงตาม Win Rate ก่อน แล้ว tie-break ด้วยจำนวน Closed Deals (กัน Sales ที่ Won 1/Lost 0 = 100% จาก sample เล็กเกินไป ขึ้นมาอันดับ 1 อย่างเข้าใจผิด)
+    private SalesProductivityRowDto? TopByWinRate =>
+        (_data?.BySalesperson ?? new()).Where(x => x.WinRatePercent.HasValue)
+            .OrderByDescending(x => x.WinRatePercent!.Value).ThenByDescending(x => x.Closed).FirstOrDefault();
+
+    private RenderFragment RenderStatusBadge(string status) => __builder =>
+    {
+        var cssClass = status switch
+        {
+            "Excellent" => "excellent",
+            "Good" => "good",
+            "Watch" => "watch",
+            "Needs Improvement" => "needs-improvement",
+            _ => "na"
+        };
+        <span class="spr-status-badge @cssClass">@status</span>
+    };
+
+    private RenderFragment RenderPercentCompare(decimal? percent, bool invert) => __builder =>
+    {
+        if (!percent.HasValue)
+        {
+            <div class="spr-kpi-compare spr-note">vs Previous Period: N/A</div>
+        }
+        else
+        {
+            var good = invert ? percent.Value <= 0 : percent.Value >= 0;
+            <div class="spr-kpi-compare @(good ? "spr-diff-pos" : "spr-diff-neg")">
+                @(percent.Value >= 0 ? "+" : "")@percent.Value.ToString("0.0")% vs Previous Period
+            </div>
+        }
+    };
+
+    // ⚠️ ห้ามยิง JS interop ต่อจาก StateHasChanged ในเมธอดเดียวกันทันที — ต้องรอ OnAfterRenderAsync(firstRender:false)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            if (string.IsNullOrWhiteSpace(AuthState.Token))
+                await AuthState.InitializeAsync();
+
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await _jsModule.InvokeVoidAsync("initDateRange", _dotNetRef);
+
+            _dateFrom = new DateTime(DateTime.Now.Year, 1, 1);
+            _dateTo = DateTime.Now.Date;
+
+            _data = await ProductivityApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (_chartsNeedRender && _data is not null)
+        {
+            _chartsNeedRender = false;
+            await RenderChartsAsync();
+        }
+    }
+
+    [JSInvokable]
+    public async Task SetDateRange(string start, string end)
+    {
+        if (string.IsNullOrEmpty(start) || string.IsNullOrEmpty(end))
+        {
+            _dateFrom = null; _dateTo = null;
+        }
+        else
+        {
+            if (DateTime.TryParse(start, out var s)) _dateFrom = s;
+            if (DateTime.TryParse(end, out var e)) _dateTo = e;
+        }
+        await LoadAsync();
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+
+    private async Task ResetAsync()
+    {
+        _selectedSalesperson = "";
+        _selectedStage = "";
+        _selectedProduct = "";
+        _selectedCustomer = "";
+        _dateFrom = new DateTime(DateTime.Now.Year, 1, 1);
+        _dateTo = DateTime.Now.Date;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try
+        {
+            _data = await ProductivityApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        if (_data is null) return;
+
+        var trendPoints = _data.Trend
+            .Select(p => new { periodLabel = p.PeriodLabel, newOpportunities = p.NewOpportunities, wonDeals = p.WonDeals, lostDeals = p.LostDeals })
+            .ToArray();
+        await JS.InvokeVoidAsync("dashboardECharts.renderProductivityTrend", TrendChartId, trendPoints);
+
+        if (_data.PipelineByStage.Sum(x => x.DealCount) > 0)
+        {
+            var rows = _data.PipelineByStage.Select(r => new { stage = r.Stage, dealCount = r.DealCount }).ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderStageFunnel", FunnelChartId, rows);
+        }
+
+        if (_data.ByProduct.Count > 0)
+        {
+            var points = _data.ByProduct.Select(r => new { name = r.GroupName, value = r.OpportunityCount }).ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderShareDonut", ProductChartId, points, "Opportunities");
+        }
+
+        if (_data.LostReasons.Count > 0)
+        {
+            var rows = _data.LostReasons.Select(r => new { reason = r.Reason, lostDeals = r.LostDeals, sharePercent = r.SharePercent }).ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderLostReasonBar", LostReasonChartId, rows);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_jsModule is not null)
+        {
+            try { await _jsModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+        _dotNetRef?.Dispose();
+    }
+}

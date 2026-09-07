@@ -1,0 +1,499 @@
+@page "/cross-sell-upsell-gains"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout AppLayout
+@rendermode InteractiveServer
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using Microsoft.JSInterop
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using Mgt.Lit.WebFront.Components
+@inject DashCrossSellUpsellGainsApiService ExpansionApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<style>
+    /* ── Cross-Sell & Upsell Gains Report — สไตล์เฉพาะหน้านี้ (คำนำหน้า csu-) ─── */
+    .csu-reset-btn {
+        background: #fff; border: 1px solid var(--card-border); color: var(--neutral-700);
+        font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 10px; white-space: nowrap;
+    }
+    .csu-reset-btn:hover { background: var(--neutral-100); }
+
+    .csu-kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 12px; }
+    .csu-kpi { background: var(--surface); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px 16px; }
+    .csu-kpi-label { font-size: 12px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
+    .csu-kpi-value { font-size: 21px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
+    .csu-kpi-sub { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .csu-kpi-compare { font-size: 11px; }
+
+    .csu-chart-row { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: stretch; }
+    .csu-table-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: start; }
+    .csu-table-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: start; }
+
+    .csu-diff-pos { color: #15803d; font-weight: 600; }
+    .csu-diff-neg { color: #b91c1c; font-weight: 600; }
+    .csu-na { color: var(--muted); }
+
+    .csu-priority-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .csu-priority-badge.high { background: #fee2e2; color: #b91c1c; }
+    .csu-priority-badge.medium { background: #ffedd5; color: #c2410c; }
+    .csu-priority-badge.develop { background: #dcfce7; color: #15803d; }
+
+    .csu-tag { display: inline-block; background: var(--neutral-100); color: var(--neutral-700); font-size: 10.5px; padding: 2px 7px; border-radius: 999px; margin: 1px 2px 1px 0; white-space: nowrap; }
+    .csu-tag.missing { background: #fef9c3; color: #a16207; }
+
+    .csu-empty-panel { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 180px; color: var(--muted); font-size: 12.5px; text-align: center; padding: 12px; }
+    .csu-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    @@media (max-width: 1400px) {
+        .csu-kpi-row { grid-template-columns: repeat(3, 1fr); }
+        .csu-chart-row { grid-template-columns: 1fr; }
+        .csu-table-row { grid-template-columns: 1fr; }
+        .csu-table-row-2 { grid-template-columns: 1fr; }
+    }
+    @@media (max-width: 640px) { .csu-kpi-row { grid-template-columns: 1fr 1fr; } }
+</style>
+
+<div class="dash-bg">
+    <div class="dash-page">
+        @if (_loading)
+        {
+            <div class="dash-overlay"><span class="dash-spinner"></span></div>
+        }
+        <div class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Report</div>
+                <div class="dash-title">Cross-Sell & Upsell Gains Report</div>
+                <div class="dash-subtitle">Additional revenue gained from the existing customer base via new product groups (Cross-Sell) and higher spend on existing ones (Upsell)</div>
+            </div>
+        </div>
+
+        <div class="dash-filters dash-filter-panel">
+            <div class="dash-field">
+                <div class="dash-field-label">Date Range</div>
+                <input id="dateRange" class="dash-input" placeholder="Select date range" autocomplete="off" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Salesperson</div>
+                <DashSelect @bind-Value="_selectedSalesperson" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableSalesEmployees ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Product Group</div>
+                <DashSelect @bind-Value="_selectedProductGroup" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableProductGroups ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Industry</div>
+                <DashSelect @bind-Value="_selectedIndustry" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableIndustries ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Customer Group</div>
+                <DashSelect @bind-Value="_selectedCustomerGroup" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableCustomerGroups ?? new())" />
+            </div>
+            <div class="dash-field" style="align-self:flex-end">
+                <button type="button" class="csu-reset-btn" @onclick="ResetAsync">↺ Reset</button>
+            </div>
+        </div>
+
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading cross-sell & upsell data</span>
+            </div>
+        }
+        else
+        {
+            var kpi = _data.Kpi;
+
+            <div class="csu-kpi-row">
+                @RenderKpi("Existing Customer Revenue", FormatCompact(kpi.ExistingCustomerRevenue), kpi.ExistingCustomerRevenueYoYPercent)
+                @RenderKpi("Cross-Sell Revenue", FormatCompact(kpi.CrossSellRevenue), kpi.CrossSellRevenueYoYPercent)
+                @RenderKpi("Upsell Revenue (Gain)", FormatCompact(kpi.UpsellRevenue), kpi.UpsellRevenueYoYPercent)
+                @RenderKpi("Cross-Sell & Upsell Gains", FormatCompact(kpi.ExpansionRevenue), kpi.ExpansionRevenueYoYPercent)
+                @RenderKpiPlain("Active Customers", kpi.ActiveCustomers.ToString(), "Existing customers with revenue this period")
+                @RenderKpiPlain("Buy 1 Product Group", kpi.Buy1ProductGroupCustomers.ToString(), "Highest cross-sell priority")
+            </div>
+
+            <div class="csu-kpi-row">
+                @RenderKpi("Cross-Sell Customers", $"{kpi.CrossSellCustomers} ({kpi.CrossSellRatePercent.ToString("0.0")}%)", kpi.CrossSellCustomersYoYChange.HasValue ? (decimal?)kpi.CrossSellCustomersYoYChange.Value : null, "", true)
+                @RenderKpi("Upsell Customers", $"{kpi.UpsellCustomers} ({kpi.UpsellRatePercent.ToString("0.0")}%)", kpi.UpsellCustomersYoYChange.HasValue ? (decimal?)kpi.UpsellCustomersYoYChange.Value : null, "", true)
+                @RenderKpi("Avg Product Groups / Customer", kpi.AvgProductGroupsPerCustomer.ToString("0.0"), kpi.AvgProductGroupsPerCustomerYoYChange.HasValue ? (decimal?)kpi.AvgProductGroupsPerCustomerYoYChange.Value : null, "", true)
+                @RenderKpi("Avg Revenue / Customer", FormatCompact(kpi.AvgRevenuePerCustomer), kpi.AvgRevenuePerCustomerYoYPercent)
+                @RenderKpi("Expansion Revenue Rate", kpi.ExpansionRevenueRatePercent.ToString("0.0") + "%", kpi.ExpansionRevenueRateYoYPoint, "pp")
+                @RenderKpi("Customer Retention Rate", kpi.CustomerRetentionRatePercent.ToString("0.0") + "%", kpi.CustomerRetentionRateYoYPoint, "pp")
+            </div>
+
+            <div class="csu-chart-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Trend: Existing Revenue & Expansion Revenue</div>
+                    <div class="dash-card-body">
+                        <div id="@TrendChartId" class="echarts-host" role="img" aria-label="Existing and expansion revenue trend"></div>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Cross-Sell vs Upsell Revenue</div>
+                    <div class="dash-card-body">
+                        <div id="@DonutChartId" class="echarts-host" role="img" aria-label="Cross-sell vs upsell revenue split"></div>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Existing Customer Revenue Growth YoY</div>
+                    <div class="dash-card-body">
+                        @if (_data.CustomerGrowthYoY.Count == 0)
+                        {
+                            <div class="csu-empty-panel">No comparable customers for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@GrowthChartId" class="echarts-host" role="img" aria-label="Customer revenue growth year over year"></div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="csu-table-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Top 10 Customers by Revenue</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr><th>Customer</th><th>Existing</th><th>Cross-Sell</th><th>Upsell</th><th>Expansion</th><th>YoY</th></tr>
+                                </thead>
+                                <tbody>
+                                    @if (_data.TopCustomers.Count == 0)
+                                    {
+                                        <tr><td colspan="6" class="dash-table-empty">No data found</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var row in _data.TopCustomers)
+                                        {
+                                            <tr>
+                                                <td>@row.CustomerName</td>
+                                                <td>@FormatCompact(row.ExistingRevenue)</td>
+                                                <td>@FormatCompact(row.CrossSellRevenue)</td>
+                                                <td>@FormatCompact(row.UpsellRevenue)</td>
+                                                <td>@FormatCompact(row.ExpansionRevenue)</td>
+                                                <td class="@(row.YoYGrowthPercent is null ? "csu-na" : row.YoYGrowthPercent >= 0 ? "csu-diff-pos" : "csu-diff-neg")">
+                                                    @(row.YoYGrowthPercent is null ? "N/A" : (row.YoYGrowthPercent >= 0 ? "+" : "") + row.YoYGrowthPercent.Value.ToString("0.0") + "%")
+                                                </td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Customer by Product Group Count</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr><th>Groups Purchased</th><th>Customers</th><th>%</th><th>Priority</th></tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in _data.ByProductGroupCount)
+                                    {
+                                        <tr>
+                                            <td>@row.GroupCountLabel</td>
+                                            <td>@row.CustomerCount</td>
+                                            <td>@row.SharePercent.ToString("0.0")%</td>
+                                            <td><span class="csu-priority-badge @row.Priority.ToLowerInvariant()">@row.Priority</span></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                                <tfoot>
+                                    <tr><th>Total</th><th>@_data.ByProductGroupCount.Sum(x => x.CustomerCount)</th><th>100%</th><th></th></tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Cross-Sell Revenue by Product Group</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr><th>#</th><th>Product Group</th><th>Revenue</th><th>Customers</th><th>%</th></tr>
+                                </thead>
+                                <tbody>
+                                    @if (_data.CrossSellByProductGroup.Count == 0)
+                                    {
+                                        <tr><td colspan="5" class="dash-table-empty">No cross-sell revenue for this filter</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var row in _data.CrossSellByProductGroup)
+                                        {
+                                            <tr>
+                                                <td>@row.Rank</td>
+                                                <td>@row.ProductGroup</td>
+                                                <td>@FormatCompact(row.CrossSellRevenue)</td>
+                                                <td>@row.CrossSellCustomers</td>
+                                                <td>@row.SharePercent.ToString("0.0")%</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="csu-table-row-2">
+                <div class="dash-card">
+                    <div class="dash-card-header">Upsell Revenue (Gain) by Product Group</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr><th>Product Group</th><th>Prev. Revenue</th><th>Current Revenue</th><th>Gain</th><th>Growth %</th><th>Customers</th></tr>
+                                </thead>
+                                <tbody>
+                                    @if (_data.UpsellByProductGroup.Count == 0)
+                                    {
+                                        <tr><td colspan="6" class="dash-table-empty">No upsell gain for this filter</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var row in _data.UpsellByProductGroup)
+                                        {
+                                            <tr>
+                                                <td>@row.ProductGroup</td>
+                                                <td>@FormatCompact(row.PreviousRevenue)</td>
+                                                <td>@FormatCompact(row.CurrentRevenue)</td>
+                                                <td>@FormatCompact(row.GainRevenue)</td>
+                                                <td class="@(row.GrowthPercent is null ? "csu-na" : row.GrowthPercent >= 0 ? "csu-diff-pos" : "csu-diff-neg")">
+                                                    @(row.GrowthPercent is null ? "N/A" : (row.GrowthPercent >= 0 ? "+" : "") + row.GrowthPercent.Value.ToString("0.0") + "%")
+                                                </td>
+                                                <td>@row.UpsellCustomers</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Cross-Sell Opportunity List (Candidates)</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr><th>Customer</th><th>Industry</th><th>Current Groups</th><th>Not Yet Purchased</th></tr>
+                                </thead>
+                                <tbody>
+                                    @if (_data.CrossSellOpportunities.Count == 0)
+                                    {
+                                        <tr><td colspan="4" class="dash-table-empty">No low-penetration customers for this filter</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var row in _data.CrossSellOpportunities)
+                                        {
+                                            <tr>
+                                                <td>@row.CustomerName</td>
+                                                <td>@row.IndustryName</td>
+                                                <td>@foreach (var g in row.CurrentProductGroups) { <span class="csu-tag">@g</span> }</td>
+                                                <td>@foreach (var g in row.UnpurchasedProductGroups.Take(6)) { <span class="csu-tag missing">@g</span> }</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="csu-note">⚠️ Not eligibility-checked — this list is not filtered by which products a customer's industry can actually use. Treat as candidates for Sales to screen, not confirmed opportunities.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="csu-note">
+                Note: Existing Customer = first purchase before the selected period. Cross-Sell = revenue from a Product Group the customer never bought before the period.
+                Upsell Gain = MAX(Current Revenue − same-period-last-year Revenue, 0) for Product Groups the customer already bought. "vs Previous" always compares to the same period one year earlier.
+                Data source: SAP Billing Document (synced into the local data warehouse).
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private CrossSellUpsellGainsDto? _data;
+    private bool _loading;
+    private bool _chartsNeedRender;
+
+    private DateTime? _dateFrom;
+    private DateTime? _dateTo;
+    private string _selectedSalesperson = "";
+    private string _selectedProductGroup = "";
+    private string _selectedIndustry = "";
+    private string _selectedCustomerGroup = "";
+
+    private const string TrendChartId = "csu-trend";
+    private const string DonutChartId = "csu-donut";
+    private const string GrowthChartId = "csu-growth";
+
+    private IJSObjectReference? _jsModule;
+    private DotNetObjectReference<CrossSellUpsellGains>? _dotNetRef;
+
+    private CrossSellUpsellGainsFilter BuildFilter() => new()
+    {
+        DateFrom = _dateFrom,
+        DateTo = _dateTo,
+        SalesEmployeeBP = string.IsNullOrWhiteSpace(_selectedSalesperson) ? null : _selectedSalesperson,
+        ProductGroup = string.IsNullOrWhiteSpace(_selectedProductGroup) ? null : _selectedProductGroup,
+        IndustryName = string.IsNullOrWhiteSpace(_selectedIndustry) ? null : _selectedIndustry,
+        CustomerGroup = string.IsNullOrWhiteSpace(_selectedCustomerGroup) ? null : _selectedCustomerGroup
+        // SalesGroup: server บังคับตาม BU ของ user
+    };
+
+    private static string FormatCompact(decimal value) => Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter.FormatCompact(value);
+
+    private RenderFragment RenderKpiPlain(string label, string value, string sub) => __builder =>
+    {
+        <div class="csu-kpi">
+            <div class="csu-kpi-label">@label</div>
+            <div class="csu-kpi-value">@value</div>
+            <div class="csu-kpi-sub">@sub</div>
+        </div>
+    };
+
+    private RenderFragment RenderKpi(string label, string valueText, decimal? diff, string suffix = "%", bool isCount = false) => __builder =>
+    {
+        <div class="csu-kpi">
+            <div class="csu-kpi-label">@label</div>
+            <div class="csu-kpi-value">@valueText</div>
+            @if (diff.HasValue)
+            {
+                <div class="csu-kpi-compare @(diff.Value >= 0 ? "csu-diff-pos" : "csu-diff-neg")">
+                    @(diff.Value >= 0 ? "+" : "")@(isCount ? diff.Value.ToString("0.#") : diff.Value.ToString("0.0"))@suffix vs Prev. Period
+                </div>
+            }
+            else
+            {
+                <div class="csu-kpi-compare csu-na">vs Prev. Period: N/A</div>
+            }
+        </div>
+    };
+
+    // ⚠️ ห้ามยิง JS interop ต่อจาก StateHasChanged ในเมธอดเดียวกันทันที — ต้องรอ OnAfterRenderAsync(firstRender:false)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            if (string.IsNullOrWhiteSpace(AuthState.Token))
+                await AuthState.InitializeAsync();
+
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await _jsModule.InvokeVoidAsync("initDateRange", _dotNetRef);
+
+            _dateFrom = new DateTime(DateTime.Now.Year, 1, 1);
+            _dateTo = DateTime.Now.Date;
+
+            _data = await ExpansionApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (_chartsNeedRender && _data is not null)
+        {
+            _chartsNeedRender = false;
+            await RenderChartsAsync();
+        }
+    }
+
+    [JSInvokable]
+    public async Task SetDateRange(string start, string end)
+    {
+        if (string.IsNullOrEmpty(start) || string.IsNullOrEmpty(end))
+        {
+            _dateFrom = null; _dateTo = null;
+        }
+        else
+        {
+            if (DateTime.TryParse(start, out var s)) _dateFrom = s;
+            if (DateTime.TryParse(end, out var e)) _dateTo = e;
+        }
+        await LoadAsync();
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+
+    private async Task ResetAsync()
+    {
+        _selectedSalesperson = "";
+        _selectedProductGroup = "";
+        _selectedIndustry = "";
+        _selectedCustomerGroup = "";
+        _dateFrom = new DateTime(DateTime.Now.Year, 1, 1);
+        _dateTo = DateTime.Now.Date;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try
+        {
+            _data = await ExpansionApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        if (_data is null) return;
+        var kpi = _data.Kpi;
+
+        var trendPoints = _data.Trend
+            .Select(p => new { periodLabel = p.PeriodLabel, baseRevenue = p.BaseRevenue, crossSellRevenue = p.CrossSellRevenue, upsellRevenue = p.UpsellRevenue, expansionRevenueRatePercent = p.ExpansionRevenueRatePercent })
+            .ToArray();
+        await JS.InvokeVoidAsync("dashboardECharts.renderExpansionTrend", TrendChartId, trendPoints);
+
+        var donutPoints = new[]
+        {
+            new { name = "Cross-Sell Revenue", value = kpi.CrossSellRevenue },
+            new { name = "Upsell Revenue", value = kpi.UpsellRevenue }
+        };
+        await JS.InvokeVoidAsync("dashboardECharts.renderShareDonut", DonutChartId, donutPoints, "Expansion Revenue");
+
+        if (_data.CustomerGrowthYoY.Count > 0)
+        {
+            var top = _data.CustomerGrowthYoY.Take(5);
+            var bottom = _data.CustomerGrowthYoY.OrderBy(x => x.GrowthPercent).Take(5).OrderByDescending(x => x.GrowthPercent);
+            var growthRows = top.Concat(bottom).Distinct()
+                .OrderByDescending(x => x.GrowthPercent)
+                .Select(r => new { name = r.CustomerName, value = r.GrowthPercent })
+                .ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderDivergingBar", GrowthChartId, growthRows);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_jsModule is not null)
+        {
+            try { await _jsModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+        _dotNetRef?.Dispose();
+    }
+}

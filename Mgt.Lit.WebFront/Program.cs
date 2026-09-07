@@ -69,33 +69,75 @@ builder.Services.AddHttpClient<ApiHttpClient>(client =>
     client.Timeout = TimeSpan.FromSeconds(60);
 })
 .AddHttpMessageHandler<AuthTokenHandler>();
+// ★★★ Fix (2026-09): เพิ่ม .AddHttpMessageHandler<AuthTokenHandler>() ให้ Dash*ApiService ทุกตัว ★★★
+// เดิมไม่มีตัวไหนผ่าน handler นี้เลย (ต่างจาก ApiHttpClient/StockService/ฯลฯ ด้านบนที่มี) ทำให้พอ JWT หมดอายุ
+// (30 นาที) รายงาน Dashboard ทุกหน้าจะโยน HttpRequestException 401 ตรงๆ แทนที่จะ refresh token แล้ว retry ให้อัตโนมัติ
+// เหมือนส่วนอื่นของแอป — Dash*ApiService เองยังคง attach token เริ่มต้นเองอยู่ (ไม่ผิดอะไร ซ้ำซ้อนแต่ไม่ชนกัน)
+// handler จะเป็นคนจับ 401 แล้ว refresh + แนบ token ใหม่ retry ให้แทน
 builder.Services.AddHttpClient<DashSalesOverviewApiService>(c =>
 {
     c.BaseAddress = new Uri(apiBaseUrl!);
-});
+}).AddHttpMessageHandler<AuthTokenHandler>();
 builder.Services.AddHttpClient<DashYearlyComparisonApiService>(c =>
 {
     c.BaseAddress = new Uri(apiBaseUrl!);
-});
+}).AddHttpMessageHandler<AuthTokenHandler>();
 builder.Services.AddHttpClient<DashSalePerformanceApiService>(c =>
 {
     c.BaseAddress = new Uri(apiBaseUrl!);
-});
+}).AddHttpMessageHandler<AuthTokenHandler>();
 builder.Services.AddHttpClient<DashProductOverviewApiService>(c =>
 {
     c.BaseAddress = new Uri(apiBaseUrl!);
-});
+}).AddHttpMessageHandler<AuthTokenHandler>();
 builder.Services.AddHttpClient<DashProductMovementApiService>(c =>
 {
     c.BaseAddress = new Uri(apiBaseUrl!);
-});
+}).AddHttpMessageHandler<AuthTokenHandler>();
 builder.Services.AddHttpClient<DashCustomerOverviewApiService>(c =>
 {
     c.BaseAddress = new Uri(apiBaseUrl!);
-});
+}).AddHttpMessageHandler<AuthTokenHandler>();
 builder.Services.AddHttpClient<DashBillingDailyApiService>(c =>
 { c.BaseAddress = new Uri(apiBaseUrl!); }
-);
+).AddHttpMessageHandler<AuthTokenHandler>();
+builder.Services.AddHttpClient<DashPricingMarginPerformanceApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+}).AddHttpMessageHandler<AuthTokenHandler>();
+builder.Services.AddHttpClient<DashCustomerChurnAnalysisApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+}).AddHttpMessageHandler<AuthTokenHandler>();
+builder.Services.AddHttpClient<DashOpportunityWinRateApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+}).AddHttpMessageHandler<AuthTokenHandler>();
+builder.Services.AddHttpClient<DashAverageDaysToCloseApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+}).AddHttpMessageHandler<AuthTokenHandler>();
+builder.Services.AddHttpClient<DashCrossSellUpsellGainsApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+}).AddHttpMessageHandler<AuthTokenHandler>();
+builder.Services.AddHttpClient<DashSalesForecastAccuracyApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+}).AddHttpMessageHandler<AuthTokenHandler>();
+builder.Services.AddHttpClient<DashVisitDailyReportApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+}).AddHttpMessageHandler<AuthTokenHandler>();
+builder.Services.AddHttpClient<DashSalesProductivityApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+}).AddHttpMessageHandler<AuthTokenHandler>();
+builder.Services.AddHttpClient<DashForecastMonthlyApiService>(c =>
+{
+    c.BaseAddress = new Uri(apiBaseUrl!);
+    c.Timeout = TimeSpan.FromSeconds(120); // ★ เรียก SAP live ต่อ Material Code หลายตัวแบบขนาน อาจใช้เวลานานกว่ารายงานอื่น
+}).AddHttpMessageHandler<AuthTokenHandler>();
 // ✅ Services อื่น
 builder.Services.AddScoped<IAccountService, AccountService>();
 

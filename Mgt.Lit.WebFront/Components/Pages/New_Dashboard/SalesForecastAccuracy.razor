@@ -1,0 +1,456 @@
+@page "/sales-forecast-accuracy"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout AppLayout
+@rendermode InteractiveServer
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using Microsoft.JSInterop
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using Mgt.Lit.WebFront.Components
+@inject DashSalesForecastAccuracyApiService ForecastApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<style>
+    /* ── Sales Forecast Accuracy Report — สไตล์เฉพาะหน้านี้ (คำนำหน้า sfa-) ──── */
+    .sfa-reset-btn {
+        background: #fff; border: 1px solid var(--card-border); color: var(--neutral-700);
+        font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 10px; white-space: nowrap;
+    }
+    .sfa-reset-btn:hover { background: var(--neutral-100); }
+
+    .sfa-kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 12px; }
+    .sfa-kpi { background: var(--surface); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px 16px; }
+    .sfa-kpi-label { font-size: 12px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
+    .sfa-kpi-value { font-size: 21px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
+    .sfa-kpi-value.won { color: #15803d; }
+    .sfa-kpi-value.lost { color: #b91c1c; }
+    .sfa-kpi-value.pending { color: #b45309; }
+    .sfa-kpi-sub { font-size: 11px; color: var(--muted); }
+
+    .sfa-source-note {
+        display: flex; align-items: flex-start; gap: 10px;
+        background: #eef6fb; border: 1px solid #cfe4f2; border-radius: 12px;
+        padding: 12px 16px; margin-bottom: 16px; font-size: 12.5px; color: #1f2933;
+    }
+
+    .sfa-chart-row { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; margin-bottom: 16px; align-items: stretch; }
+    .sfa-table-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: start; }
+
+    .sfa-outcome-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .sfa-outcome-badge.won { background: #dcfce7; color: #15803d; }
+    .sfa-outcome-badge.lost { background: #fee2e2; color: #b91c1c; }
+    .sfa-outcome-badge.pending { background: #ffedd5; color: #c2410c; }
+
+    .sfa-na { color: var(--muted); }
+    .sfa-empty-panel { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 180px; color: var(--muted); font-size: 12.5px; text-align: center; padding: 12px; }
+    .sfa-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    @@media (max-width: 1400px) {
+        .sfa-kpi-row { grid-template-columns: repeat(3, 1fr); }
+        .sfa-chart-row { grid-template-columns: 1fr; }
+        .sfa-table-row { grid-template-columns: 1fr; }
+    }
+    @@media (max-width: 640px) { .sfa-kpi-row { grid-template-columns: 1fr 1fr; } }
+</style>
+
+<div class="dash-bg">
+    <div class="dash-page">
+        @if (_loading)
+        {
+            <div class="dash-overlay"><span class="dash-spinner"></span></div>
+        }
+        <div class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Report</div>
+                <div class="dash-title">Sales Forecast Accuracy Report</div>
+                <div class="dash-subtitle">Deals marked "Forecast: Yes" in Zoho CRM, and how many actually closed Won</div>
+            </div>
+        </div>
+
+        <div class="dash-filters dash-filter-panel">
+            <div class="dash-field">
+                <div class="dash-field-label">Closing Date Range</div>
+                <input id="dateRange" class="dash-input" placeholder="Select date range" autocomplete="off" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Salesperson</div>
+                <DashSelect @bind-Value="_selectedSalesperson" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableSalesEmployees ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Customer</div>
+                <DashSelect @bind-Value="_selectedCustomer" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableCustomers ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Product</div>
+                <DashSelect @bind-Value="_selectedProduct" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableProducts ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Industry</div>
+                <DashSelect @bind-Value="_selectedIndustry" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableIndustries ?? new())" />
+            </div>
+            <div class="dash-field" style="align-self:flex-end">
+                <button type="button" class="sfa-reset-btn" @onclick="ResetAsync">↺ Reset</button>
+            </div>
+        </div>
+
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading forecast data</span>
+            </div>
+        }
+        else
+        {
+            var kpi = _data.Kpi;
+
+            <div class="sfa-source-note">
+                <span>ℹ️</span>
+                <span>
+                    Source: Zoho CRM only (Deals where <strong>Forecast = Yes</strong>). Not compared against SAP/actual billing.
+                    Win Rate and Value Realization are computed only among deals that have already closed (Won or Lost) —
+                    <strong>@kpi.PendingDeals of @kpi.TotalForecastedDeals</strong> forecasted deal(s) (@kpi.PendingRatePercent.ToString("0.0")%) are still open and not yet counted.
+                </span>
+            </div>
+
+            <div class="sfa-kpi-row">
+                @RenderKpi("Total Forecasted Deals", kpi.TotalForecastedDeals.ToString(), FormatCompact(kpi.TotalForecastValue), "")
+                @RenderKpi("Won", kpi.WonDeals.ToString(), FormatCompact(kpi.WonValue), "won")
+                @RenderKpi("Lost", kpi.LostDeals.ToString(), FormatCompact(kpi.LostValue), "lost")
+                @RenderKpi("Pending (Still Open)", kpi.PendingDeals.ToString(), FormatCompact(kpi.PendingValue), "pending")
+                @RenderPercentKpi("Forecast Win Rate", kpi.ForecastWinRatePercent, $"Among {kpi.DecidedDeals} decided deal(s)")
+                @RenderPercentKpi("Value Realization", kpi.ForecastValueRealizationPercent, "Won Value / (Won + Lost) Value")
+            </div>
+
+            <div class="sfa-chart-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Forecasted Deals by Closing Month</div>
+                    <div class="dash-card-body">
+                        @if (_data.Trend.Count == 0)
+                        {
+                            <div class="sfa-empty-panel">No forecasted deals with a closing date for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@TrendChartId" class="echarts-host" role="img" aria-label="Forecasted deals by closing month"></div>
+                        }
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Outcome Split</div>
+                    <div class="dash-card-body">
+                        @if (kpi.TotalForecastedDeals == 0)
+                        {
+                            <div class="sfa-empty-panel">No forecasted deals for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@OutcomeDonutChartId" class="echarts-host" role="img" aria-label="Won, Lost, Pending split"></div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="sfa-table-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">By Salesperson</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead><tr><th>Salesperson</th><th>Deals</th><th>Value</th><th>Won</th><th>Lost</th><th>Pending</th><th>Win Rate</th></tr></thead>
+                                <tbody>
+                                    @if (_data.BySalesperson.Count == 0)
+                                    {
+                                        <tr><td colspan="7" class="dash-table-empty">No data found</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var row in _data.BySalesperson)
+                                        {
+                                            <tr>
+                                                <td>@row.GroupName</td>
+                                                <td>@row.TotalDeals</td>
+                                                <td>@FormatCompact(row.ForecastValue)</td>
+                                                <td>@row.WonDeals</td>
+                                                <td>@row.LostDeals</td>
+                                                <td>@row.PendingDeals</td>
+                                                <td>@(row.WinRatePercent?.ToString("0.0") + "%" ?? "N/A")</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">By Customer</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead><tr><th>Customer</th><th>Deals</th><th>Value</th><th>Won</th><th>Lost</th><th>Pending</th><th>Win Rate</th></tr></thead>
+                                <tbody>
+                                    @if (_data.ByCustomer.Count == 0)
+                                    {
+                                        <tr><td colspan="7" class="dash-table-empty">No data found</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var row in _data.ByCustomer)
+                                        {
+                                            <tr>
+                                                <td>@row.GroupName</td>
+                                                <td>@row.TotalDeals</td>
+                                                <td>@FormatCompact(row.ForecastValue)</td>
+                                                <td>@row.WonDeals</td>
+                                                <td>@row.LostDeals</td>
+                                                <td>@row.PendingDeals</td>
+                                                <td>@(row.WinRatePercent?.ToString("0.0") + "%" ?? "N/A")</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">By Product</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead><tr><th>Product</th><th>Deals</th><th>Value</th><th>Won</th><th>Lost</th><th>Pending</th><th>Win Rate</th></tr></thead>
+                                <tbody>
+                                    @if (_data.ByProduct.Count == 0)
+                                    {
+                                        <tr><td colspan="7" class="dash-table-empty">No product data for this filter</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var row in _data.ByProduct)
+                                        {
+                                            <tr>
+                                                <td>@row.GroupName</td>
+                                                <td>@row.TotalDeals</td>
+                                                <td>@FormatCompact(row.ForecastValue)</td>
+                                                <td>@row.WonDeals</td>
+                                                <td>@row.LostDeals</td>
+                                                <td>@row.PendingDeals</td>
+                                                <td>@(row.WinRatePercent?.ToString("0.0") + "%" ?? "N/A")</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dash-card">
+                <div class="dash-card-header">Forecasted Deals (Forecast = Yes)</div>
+                <div class="dash-card-body">
+                    <div class="table-scroll">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Deal ID</th><th>Opportunity Name</th><th>Customer</th><th>Salesperson</th>
+                                    <th>Product</th><th>Industry</th><th>Amount</th><th>Closing Date</th><th>Stage</th><th>Outcome</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (_data.ForecastedDeals.Count == 0)
+                                {
+                                    <tr><td colspan="10" class="dash-table-empty">No deals marked Forecast = Yes for this filter</td></tr>
+                                }
+                                else
+                                {
+                                    @foreach (var row in _data.ForecastedDeals)
+                                    {
+                                        <tr>
+                                            <td>@row.DealId</td>
+                                            <td>@row.OpportunityName</td>
+                                            <td>@row.CustomerName</td>
+                                            <td>@row.SalesEmployeeBP</td>
+                                            <td>@row.Product</td>
+                                            <td>@row.IndustryName</td>
+                                            <td>@row.DealAmount.ToString("N0")</td>
+                                            <td>@(row.ClosingDate?.ToString("dd MMM yyyy") ?? "")</td>
+                                            <td>@row.Stage</td>
+                                            <td><span class="sfa-outcome-badge @row.Outcome.ToLowerInvariant()">@row.Outcome</span></td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sfa-note">
+                Note: This report reflects Zoho CRM only — it is not reconciled against SAP/actual billing. A deal counts here only if its "Forecast" field is set to Yes in Zoho.
+                Win Rate / Value Realization exclude still-open (Pending) deals since their outcome is not known yet. Grouped by Closing Date (the month a deal is expected to close).
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private SalesForecastAccuracyDto? _data;
+    private bool _loading;
+    private bool _chartsNeedRender;
+
+    private DateTime? _dateFrom;
+    private DateTime? _dateTo;
+    private string _selectedSalesperson = "";
+    private string _selectedCustomer = "";
+    private string _selectedProduct = "";
+    private string _selectedIndustry = "";
+
+    private const string TrendChartId = "sfa-trend";
+    private const string OutcomeDonutChartId = "sfa-outcome-donut";
+
+    private IJSObjectReference? _jsModule;
+    private DotNetObjectReference<SalesForecastAccuracy>? _dotNetRef;
+
+    private SalesForecastAccuracyFilter BuildFilter() => new()
+    {
+        DateFrom = _dateFrom,
+        DateTo = _dateTo,
+        SalesEmployeeBP = string.IsNullOrWhiteSpace(_selectedSalesperson) ? null : _selectedSalesperson,
+        CustomerName = string.IsNullOrWhiteSpace(_selectedCustomer) ? null : _selectedCustomer,
+        Product = string.IsNullOrWhiteSpace(_selectedProduct) ? null : _selectedProduct,
+        IndustryName = string.IsNullOrWhiteSpace(_selectedIndustry) ? null : _selectedIndustry
+        // SalesGroup: server บังคับตาม BU ของ user
+    };
+
+    private static string FormatCompact(decimal value) => Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter.FormatCompact(value);
+
+    private RenderFragment RenderKpi(string label, string value, string sub, string variant) => __builder =>
+    {
+        <div class="sfa-kpi">
+            <div class="sfa-kpi-label">@label</div>
+            <div class="sfa-kpi-value @variant">@value</div>
+            <div class="sfa-kpi-sub">@sub</div>
+        </div>
+    };
+
+    private RenderFragment RenderPercentKpi(string label, decimal? percent, string sub) => __builder =>
+    {
+        <div class="sfa-kpi">
+            <div class="sfa-kpi-label">@label</div>
+            <div class="sfa-kpi-value">@(percent.HasValue ? percent.Value.ToString("0.0") + "%" : "N/A")</div>
+            <div class="sfa-kpi-sub">@sub</div>
+        </div>
+    };
+
+    // ⚠️ ห้ามยิง JS interop ต่อจาก StateHasChanged ในเมธอดเดียวกันทันที — ต้องรอ OnAfterRenderAsync(firstRender:false)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            if (string.IsNullOrWhiteSpace(AuthState.Token))
+                await AuthState.InitializeAsync();
+
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await _jsModule.InvokeVoidAsync("initDateRange", _dotNetRef);
+
+            _data = await ForecastApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (_chartsNeedRender && _data is not null)
+        {
+            _chartsNeedRender = false;
+            await RenderChartsAsync();
+        }
+    }
+
+    [JSInvokable]
+    public async Task SetDateRange(string start, string end)
+    {
+        if (string.IsNullOrEmpty(start) || string.IsNullOrEmpty(end))
+        {
+            _dateFrom = null; _dateTo = null;
+        }
+        else
+        {
+            if (DateTime.TryParse(start, out var s)) _dateFrom = s;
+            if (DateTime.TryParse(end, out var e)) _dateTo = e;
+        }
+        await LoadAsync();
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+
+    private async Task ResetAsync()
+    {
+        _selectedSalesperson = "";
+        _selectedCustomer = "";
+        _selectedProduct = "";
+        _selectedIndustry = "";
+        _dateFrom = null;
+        _dateTo = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try
+        {
+            _data = await ForecastApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        if (_data is null) return;
+        var kpi = _data.Kpi;
+
+        if (_data.Trend.Count > 0)
+        {
+            var trendPoints = _data.Trend
+                .Select(t => new { periodLabel = t.PeriodLabel, wonValue = t.WonValue, lostValue = t.LostValue, pendingValue = t.PendingValue })
+                .ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderForecastOutcomeTrend", TrendChartId, trendPoints);
+        }
+
+        if (kpi.TotalForecastedDeals > 0)
+        {
+            var donutPoints = new[]
+            {
+                new { name = "Won", value = kpi.WonDeals },
+                new { name = "Lost", value = kpi.LostDeals },
+                new { name = "Pending", value = kpi.PendingDeals }
+            }.Where(p => p.value > 0).ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderShareDonut", OutcomeDonutChartId, donutPoints, "Deals");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_jsModule is not null)
+        {
+            try { await _jsModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+        _dotNetRef?.Dispose();
+    }
+}

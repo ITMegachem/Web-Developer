@@ -2,6 +2,30 @@
 @* ใช้ Layout เป็น LoginLayout เฉพาะตอนยังไม่ได้ Login *@
 @layout LoginLayout
 <link rel="stylesheet" href="/lib/bootstrap/dist/css/siteLogin.css" />
+<style>
+    .remember-me-row {
+        margin-bottom: 18px;
+        margin-top: -6px;
+    }
+
+    .remember-me-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.88rem;
+        color: #4b5563;
+        cursor: pointer;
+        user-select: none;
+        width: fit-content;
+    }
+
+    .remember-me-label input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        accent-color: #16a34a;
+        cursor: pointer;
+    }
+</style>
 
 @inject AuthService Auth
 @using Mgt.Lit.WebFront.Components.Layout.Data
@@ -102,6 +126,13 @@ else
                         </div>
                     </div>
 
+                    <div class="remember-me-row">
+                        <label class="remember-me-label">
+                            <input type="checkbox" @bind="rememberMe" />
+                            <span>Remember me</span>
+                        </label>
+                    </div>
+
                      <div class="btn-wrap">
                         <button class="btn-login" @onclick="DoLogin" disabled="@isLoading">
                             @if (isLoading)
@@ -147,6 +178,7 @@ else
 @code {
     string username = "";
     string password = "";
+    bool rememberMe = false;
     bool isLoading = false;
     bool showAlert = false;
     bool showPassword = false;
@@ -180,7 +212,7 @@ else
             {
                 Username = username,
                 Password = password
-            });
+            }, rememberMe);
 
             if (result == null)
             {

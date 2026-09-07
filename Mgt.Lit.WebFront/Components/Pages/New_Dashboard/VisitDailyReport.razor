@@ -1,0 +1,461 @@
+@page "/visit-report"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout AppLayout
+@rendermode InteractiveServer
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using Microsoft.JSInterop
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using Mgt.Lit.WebFront.Components
+@inject DashVisitDailyReportApiService VisitApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<style>
+    /* ── Visit Daily Report — สไตล์เฉพาะหน้านี้ (คำนำหน้า vdr-) ───── */
+    .vdr-reset-btn {
+        background: #fff;
+        border: 1px solid var(--card-border);
+        color: var(--neutral-700);
+        font-weight: 600;
+        font-size: 13px;
+        padding: 9px 16px;
+        border-radius: 10px;
+        white-space: nowrap;
+    }
+    .vdr-reset-btn:hover { background: var(--neutral-100); }
+
+    .vdr-kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 16px; }
+
+    .vdr-kpi { background: var(--surface); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px 16px; }
+    .vdr-kpi-label { font-size: 12.5px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
+    .vdr-kpi-value { font-size: 24px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
+    .vdr-kpi-sub { font-size: 11.5px; color: var(--muted); }
+
+    .vdr-chart-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: stretch; }
+    .vdr-table-row { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 16px; }
+
+    .vdr-status-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+    .vdr-status-badge.completed { background: #dcfce7; color: #15803d; }
+    .vdr-status-badge.inprogress { background: #ffedd5; color: #c2410c; }
+
+    .vdr-potential-badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; background: #dbeafe; color: #1d4ed8; white-space: nowrap; }
+    .vdr-empty-panel { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 180px; color: var(--muted); font-size: 12.5px; text-align: center; padding: 12px; }
+    .vdr-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .vdr-muted-cell { color: var(--muted); }
+
+    @@media (max-width: 1400px) {
+        .vdr-kpi-row { grid-template-columns: repeat(3, 1fr); }
+        .vdr-chart-row { grid-template-columns: 1fr; }
+    }
+    @@media (max-width: 640px) { .vdr-kpi-row { grid-template-columns: 1fr 1fr; } }
+</style>
+
+<div class="dash-bg">
+    <div class="dash-page">
+        @if (_loading)
+        {
+            <div class="dash-overlay"><span class="dash-spinner"></span></div>
+        }
+        <div class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Report</div>
+                <div class="dash-title">Visit Daily Report</div>
+                <div class="dash-subtitle">Customer visit activity, products discussed, and competitor intelligence captured by the sales team</div>
+            </div>
+        </div>
+
+        <div class="dash-filters dash-filter-panel">
+            <div class="dash-field">
+                <div class="dash-field-label">Visit Date Range</div>
+                <input id="dateRange" class="dash-input" placeholder="Select date range" autocomplete="off" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Salesperson</div>
+                <DashSelect @bind-Value="_selectedSalesperson" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableSalesEmployees ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Customer</div>
+                <DashSelect @bind-Value="_selectedCustomer" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableCustomers ?? new())" />
+            </div>
+            <div class="dash-field" style="align-self:flex-end">
+                <button type="button" class="vdr-reset-btn" @onclick="ResetAsync">↺ Reset</button>
+            </div>
+        </div>
+
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading visit report data</span>
+            </div>
+        }
+        else
+        {
+            var kpi = _data.Kpi;
+
+            <div class="vdr-kpi-row">
+                <div class="vdr-kpi">
+                    <div class="vdr-kpi-label">Total Visits</div>
+                    <div class="vdr-kpi-value">@kpi.TotalVisits</div>
+                    <div class="vdr-kpi-sub">Visit reports logged</div>
+                </div>
+                <div class="vdr-kpi">
+                    <div class="vdr-kpi-label">Customers Visited</div>
+                    <div class="vdr-kpi-value">@kpi.TotalCustomersVisited</div>
+                    <div class="vdr-kpi-sub">Unique customers</div>
+                </div>
+                <div class="vdr-kpi">
+                    <div class="vdr-kpi-label">Salespeople Active</div>
+                    <div class="vdr-kpi-value">@kpi.TotalSalespeople</div>
+                    <div class="vdr-kpi-sub">Unique sales reps</div>
+                </div>
+                <div class="vdr-kpi">
+                    <div class="vdr-kpi-label">Avg Products / Visit</div>
+                    <div class="vdr-kpi-value">@kpi.AvgProductsPerVisit.ToString("0.0")</div>
+                    <div class="vdr-kpi-sub">@kpi.TotalProductItemsDiscussed total product lines (@kpi.DistinctProductsDiscussed distinct)</div>
+                </div>
+                <div class="vdr-kpi">
+                    <div class="vdr-kpi-label">Competitors Found</div>
+                    <div class="vdr-kpi-value">@kpi.TotalCompetitorsFound</div>
+                    <div class="vdr-kpi-sub">Product lines with competitor info</div>
+                </div>
+                <div class="vdr-kpi">
+                    <div class="vdr-kpi-label">Potential Items</div>
+                    <div class="vdr-kpi-value">@kpi.TotalPotentialItems</div>
+                    <div class="vdr-kpi-sub">Avg duration: @(kpi.AvgVisitDurationMinutes?.ToString("0") ?? "N/A") min</div>
+                </div>
+            </div>
+
+            <div class="vdr-chart-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Visit Activity Trend (Monthly)</div>
+                    <div class="dash-card-body">
+                        <div id="@TrendChartId" class="echarts-host" role="img" aria-label="Monthly visit activity trend"></div>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Visits by Salesperson</div>
+                    <div class="dash-card-body">
+                        @if (_data.BySalesperson.Count == 0)
+                        {
+                            <div class="vdr-empty-panel">No data for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@SalespersonChartId" class="echarts-host" role="img" aria-label="Visits by salesperson"></div>
+                        }
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Visits by Customer (Top 10)</div>
+                    <div class="dash-card-body">
+                        @if (_data.ByCustomer.Count == 0)
+                        {
+                            <div class="vdr-empty-panel">No data for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@CustomerChartId" class="echarts-host" role="img" aria-label="Visits by customer"></div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="vdr-table-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Visit Log (@_data.Visits.Count)</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Visit No.</th>
+                                        <th>Date</th>
+                                        <th>Salesperson</th>
+                                        <th>Customer</th>
+                                        <th>Start</th>
+                                        <th>End</th>
+                                        <th>Duration</th>
+                                        <th>Status</th>
+                                        <th>Products</th>
+                                        <th>Competitors</th>
+                                        <th>Contact Person(s)</th>
+                                        <th>Remark</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @if (_data.Visits.Count == 0)
+                                    {
+                                        <tr><td colspan="12" class="dash-table-empty">No visit reports for this filter</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var row in _data.Visits)
+                                        {
+                                            <tr>
+                                                <td>@row.VisitNumber</td>
+                                                <td>@(row.VisitDate?.ToString("dd MMM yyyy") ?? "")</td>
+                                                <td>@row.SalesEmployeeBP</td>
+                                                <td>@row.CustomerName</td>
+                                                <td>@(row.StartDateTime?.ToString("HH:mm") ?? "")</td>
+                                                <td>@(row.EndDateTime?.ToString("HH:mm") ?? "")</td>
+                                                <td>@(row.DurationMinutes.HasValue ? $"{row.DurationMinutes} min" : "N/A")</td>
+                                                <td>@RenderStatusBadge(row.Status)</td>
+                                                <td>@row.ProductCount</td>
+                                                <td>@row.CompetitorCount</td>
+                                                <td>@(string.IsNullOrWhiteSpace(row.ContactPersons) ? "—" : row.ContactPersons)</td>
+                                                <td class="vdr-muted-cell">@row.DescriptionRemark</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="vdr-table-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Product & Competitor Intelligence (@IntelRows.Count line item@(IntelRows.Count == 1 ? "" : "s"))</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Visit No.</th>
+                                        <th>Date</th>
+                                        <th>Customer</th>
+                                        <th>Product</th>
+                                        <th>Contact / Position</th>
+                                        <th>Competitor</th>
+                                        <th>Competitor Supplier</th>
+                                        <th>Price</th>
+                                        <th>Consumption</th>
+                                        <th>Origin</th>
+                                        <th>Potential</th>
+                                        <th>Notes</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @if (IntelRows.Count == 0)
+                                    {
+                                        <tr><td colspan="12" class="dash-table-empty">No competitor or pricing intelligence captured for this filter</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var (visit, item) in IntelRows)
+                                        {
+                                            <tr>
+                                                <td>@visit.VisitNumber</td>
+                                                <td>@(visit.VisitDate?.ToString("dd MMM yyyy") ?? "")</td>
+                                                <td>@visit.CustomerName</td>
+                                                <td>@(item.MaterialName ?? "—")</td>
+                                                <td>@ContactCell(item)</td>
+                                                <td>@(item.CompetitorName ?? "—")</td>
+                                                <td>@(item.CompetitorSupplier ?? "—")</td>
+                                                <td>@(item.Price ?? "—")</td>
+                                                <td>@(item.Consumption ?? "—")</td>
+                                                <td>@(item.MakerOrigin ?? "—")</td>
+                                                <td>@RenderPotentialBadge(item.Potential)</td>
+                                                <td class="vdr-muted-cell">@(item.StatusNote ?? "")</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="vdr-note">
+                Note: Status is derived — "Completed" when an End Time is recorded, "In Progress" otherwise (Zoho has no explicit visit-status field).
+                "Competitors Found" and "Potential Items" count product lines in Visit_Items where the Sales rep filled in competitor or potential info — most lines are left blank in practice.
+                Data source: Zoho CRM (crm/v8/Visit_Reports + Visit_Items subform).
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private VisitDailyReportDto? _data;
+    private bool _loading;
+    private bool _chartsNeedRender;
+
+    private DateTime? _dateFrom;
+    private DateTime? _dateTo;
+    private string _selectedSalesperson = "";
+    private string _selectedCustomer = "";
+
+    private const string TrendChartId = "vdr-trend";
+    private const string SalespersonChartId = "vdr-salesperson";
+    private const string CustomerChartId = "vdr-customer";
+
+    private IJSObjectReference? _jsModule;
+    private DotNetObjectReference<VisitDailyReport>? _dotNetRef;
+
+    private VisitDailyReportFilter BuildFilter() => new()
+    {
+        DateFrom = _dateFrom,
+        DateTo = _dateTo,
+        SalesEmployeeBP = string.IsNullOrWhiteSpace(_selectedSalesperson) ? null : _selectedSalesperson,
+        CustomerName = string.IsNullOrWhiteSpace(_selectedCustomer) ? null : _selectedCustomer
+        // SalesGroup: server บังคับตาม BU ของ user
+    };
+
+    // แถวที่มีข้อมูลคู่แข่ง/ราคา/ศักยภาพจริง (ตัด line item ที่ว่างเปล่าทั้งหมดออก) เรียงตามวันที่ล่าสุดก่อน
+    private List<(VisitRowDto Visit, VisitItemDetailDto Item)> IntelRows =>
+        (_data?.Visits ?? new())
+            .SelectMany(v => v.Items.Select(i => (Visit: v, Item: i)))
+            .Where(x => !string.IsNullOrWhiteSpace(x.Item.CompetitorName)
+                     || !string.IsNullOrWhiteSpace(x.Item.CompetitorSupplier)
+                     || !string.IsNullOrWhiteSpace(x.Item.Price)
+                     || !string.IsNullOrWhiteSpace(x.Item.Consumption)
+                     || !string.IsNullOrWhiteSpace(x.Item.Potential))
+            .ToList();
+
+    private RenderFragment ContactCell(VisitItemDetailDto item) => __builder =>
+    {
+        if (string.IsNullOrWhiteSpace(item.ContactPerson))
+        {
+            @:—
+        }
+        else
+        {
+            @item.ContactPerson
+            if (!string.IsNullOrWhiteSpace(item.Position))
+            {
+                <span class="vdr-note"> (@item.Position)</span>
+            }
+        }
+    };
+
+    private RenderFragment RenderStatusBadge(string status) => __builder =>
+    {
+        var cssClass = status == "Completed" ? "completed" : "inprogress";
+        <span class="vdr-status-badge @cssClass">@status</span>
+    };
+
+    private RenderFragment RenderPotentialBadge(string? potential) => __builder =>
+    {
+        if (string.IsNullOrWhiteSpace(potential) || potential.Trim().Equals("no", StringComparison.OrdinalIgnoreCase) || potential.Trim() == "-")
+        {
+            @:—
+        }
+        else
+        {
+            <span class="vdr-potential-badge">@potential</span>
+        }
+    };
+
+    // ⚠️ ห้ามยิง JS interop ต่อจาก StateHasChanged ในเมธอดเดียวกันทันที — ต้องรอ OnAfterRenderAsync(firstRender:false)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            if (string.IsNullOrWhiteSpace(AuthState.Token))
+                await AuthState.InitializeAsync();
+
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await _jsModule.InvokeVoidAsync("initDateRange", _dotNetRef);
+
+            _dateFrom = DateTime.Now.Date.AddMonths(-2);
+            _dateTo = DateTime.Now.Date;
+
+            _data = await VisitApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (_chartsNeedRender && _data is not null)
+        {
+            _chartsNeedRender = false;
+            await RenderChartsAsync();
+        }
+    }
+
+    [JSInvokable]
+    public async Task SetDateRange(string start, string end)
+    {
+        if (string.IsNullOrEmpty(start) || string.IsNullOrEmpty(end))
+        {
+            _dateFrom = null; _dateTo = null;
+        }
+        else
+        {
+            if (DateTime.TryParse(start, out var s)) _dateFrom = s;
+            if (DateTime.TryParse(end, out var e)) _dateTo = e;
+        }
+        await LoadAsync();
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+
+    private async Task ResetAsync()
+    {
+        _selectedSalesperson = "";
+        _selectedCustomer = "";
+        _dateFrom = DateTime.Now.Date.AddMonths(-2);
+        _dateTo = DateTime.Now.Date;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try
+        {
+            _data = await VisitApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        if (_data is null) return;
+
+        var trendPoints = _data.Trend
+            .Select(p => new { periodLabel = p.PeriodLabel, visitCount = p.VisitCount, competitorFindings = p.CompetitorFindings })
+            .ToArray();
+        await JS.InvokeVoidAsync("dashboardECharts.renderVisitTrend", TrendChartId, trendPoints);
+
+        if (_data.BySalesperson.Count > 0)
+        {
+            var rows = _data.BySalesperson.Take(10)
+                .Select(r => new { groupName = r.GroupName, visitCount = r.VisitCount, productCount = r.ProductCount, competitorCount = r.CompetitorCount })
+                .ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderVisitGroupBar", SalespersonChartId, rows);
+        }
+
+        if (_data.ByCustomer.Count > 0)
+        {
+            var rows = _data.ByCustomer.Take(10)
+                .Select(r => new { groupName = r.GroupName, visitCount = r.VisitCount, productCount = r.ProductCount, competitorCount = r.CompetitorCount })
+                .ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderVisitGroupBar", CustomerChartId, rows);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_jsModule is not null)
+        {
+            try { await _jsModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+        _dotNetRef?.Dispose();
+    }
+}

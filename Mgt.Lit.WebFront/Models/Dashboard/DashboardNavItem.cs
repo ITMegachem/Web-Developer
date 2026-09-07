@@ -4,5 +4,7 @@
      string Href,
      string LabelKey,
      string Icon,
-     Func<bool> CanView);
+     Func<bool> CanView,
+     // คลาส css เสริมต่อรายการ เช่น "link-compact" = ตัวอักษรเล็กเท่าเมนูย่อย
+     string? ExtraClass = null);
 }

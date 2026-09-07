@@ -8,7 +8,8 @@ namespace Mgt.Lit.WebFront.Auth;
 
 public class AuthState
 {
-    private readonly ProtectedSessionStorage _storage;
+    private readonly ProtectedSessionStorage _sessionStorage;
+    private readonly ProtectedLocalStorage _localStorage;
     private bool _isInitialized;
 
     public string? Token { get; set; }
@@ -18,9 +19,26 @@ public class AuthState
     public int? CurrentCompanyID { get; set; }
     public void Clear() { Token = null; User = null; }
     public bool? CanViewCost { get; set; }
-    public AuthState(ProtectedSessionStorage storage)
+
+    // ★ Remember me — true เมื่อ login ปัจจุบันถูกเก็บใน ProtectedLocalStorage (คงอยู่ข้ามการปิด browser)
+    // แทน ProtectedSessionStorage (หายเมื่อปิด browser) — ตั้งตอน login และใช้ตัดสินใจว่า refresh/switch-company
+    // รอบถัดไปควรเขียนกลับไปที่ storage ไหน เพื่อไม่ให้ remembered session ถูก "ลดระดับ" เป็น session-only โดยไม่ตั้งใจ
+    public bool IsRemembered { get; set; }
+
+    public AuthState(ProtectedSessionStorage sessionStorage, ProtectedLocalStorage localStorage)
     {
-        _storage = storage;
+        _sessionStorage = sessionStorage;
+        _localStorage = localStorage;
+    }
+
+    // เช็ค session storage ก่อนเสมอ (login ของแท็บ/รอบนี้) แล้วค่อย fallback ไป local storage (remembered login)
+    private async Task<(bool Success, T? Value)> GetAsync<T>(string key)
+    {
+        var sessionResult = await _sessionStorage.GetAsync<T>(key);
+        if (sessionResult.Success) return (true, sessionResult.Value);
+
+        var localResult = await _localStorage.GetAsync<T>(key);
+        return (localResult.Success, localResult.Value);
     }
 
     public async Task InitializeAsync(bool force = false)
@@ -36,27 +54,42 @@ public class AuthState
 
         try
         {
-            var tokenResult = await _storage.GetAsync<string>("authToken");
-            if (!tokenResult.Success || string.IsNullOrWhiteSpace(tokenResult.Value))
+            var sessionTokenResult = await _sessionStorage.GetAsync<string>("authToken");
+            var tokenSuccess = sessionTokenResult.Success && !string.IsNullOrWhiteSpace(sessionTokenResult.Value);
+            var tokenValue = sessionTokenResult.Value;
+            IsRemembered = false;
+
+            if (!tokenSuccess)
+            {
+                var localTokenResult = await _localStorage.GetAsync<string>("authToken");
+                if (localTokenResult.Success && !string.IsNullOrWhiteSpace(localTokenResult.Value))
+                {
+                    tokenSuccess = true;
+                    tokenValue = localTokenResult.Value;
+                    IsRemembered = true;
+                }
+            }
+
+            if (!tokenSuccess || string.IsNullOrWhiteSpace(tokenValue))
             {
                 _isInitialized = true;
                 return;
             }
 
-            Token = tokenResult.Value;
+            Token = tokenValue;
 
-            var fullNameResult = await _storage.GetAsync<string>("fullName");
+            var fullNameResult = await GetAsync<string>("fullName");
             var fullName = fullNameResult.Success ? (fullNameResult.Value ?? "") : "";
 
-            var permissionResult = await _storage.GetAsync<View_UserPermission>("permission");
+            var permissionResult = await GetAsync<View_UserPermission>("permission");
             Permission = permissionResult.Success ? permissionResult.Value : null;
 
-            var companyResult = await _storage.GetAsync<int?>("currentCompanyID");
+            var companyResult = await GetAsync<int?>("currentCompanyID");
             CurrentCompanyID = companyResult.Success ? companyResult.Value : null;
 
             if (CurrentCompanyID == null)
             {
-                var primaryCompanyResult = await _storage.GetAsync<int?>("primaryCompanyID");
+                var primaryCompanyResult = await GetAsync<int?>("primaryCompanyID");
                 CurrentCompanyID = primaryCompanyResult.Success ? primaryCompanyResult.Value : null;
             }
 

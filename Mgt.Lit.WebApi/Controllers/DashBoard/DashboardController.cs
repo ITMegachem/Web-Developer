@@ -21,6 +21,15 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
         private readonly IProductMovementService _productMovementService;
         private readonly ICustomerOverviewService _customerOverviewService;
         private readonly IBillingDailyService _billingDailyService;
+        private readonly IPricingMarginPerformanceService _pricingMarginPerformanceService;
+        private readonly ICustomerChurnAnalysisService _customerChurnAnalysisService;
+        private readonly IOpportunityWinRateService _opportunityWinRateService;
+        private readonly IAverageDaysToCloseService _averageDaysToCloseService;
+        private readonly ICrossSellUpsellGainsService _crossSellUpsellGainsService;
+        private readonly ISalesForecastAccuracyService _salesForecastAccuracyService;
+        private readonly IVisitDailyReportService _visitDailyReportService;
+        private readonly ISalesProductivityService _salesProductivityService;
+        private readonly IForecastMonthlyReportService _forecastMonthlyReportService;
 
 
         public DashboardController(AppDbContext context,
@@ -30,7 +39,16 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
             IProductOverviewService productOverviewService,
             IProductMovementService productMovementService,
             ICustomerOverviewService customerOverviewService,
-            IBillingDailyService billingDailyService
+            IBillingDailyService billingDailyService,
+            IPricingMarginPerformanceService pricingMarginPerformanceService,
+            ICustomerChurnAnalysisService customerChurnAnalysisService,
+            IOpportunityWinRateService opportunityWinRateService,
+            IAverageDaysToCloseService averageDaysToCloseService,
+            ICrossSellUpsellGainsService crossSellUpsellGainsService,
+            ISalesForecastAccuracyService salesForecastAccuracyService,
+            IVisitDailyReportService visitDailyReportService,
+            ISalesProductivityService salesProductivityService,
+            IForecastMonthlyReportService forecastMonthlyReportService
             )
         {
             _context = context;
@@ -42,6 +60,15 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
             _productMovementService = productMovementService;
             _customerOverviewService = customerOverviewService;
             _billingDailyService = billingDailyService;
+            _pricingMarginPerformanceService = pricingMarginPerformanceService;
+            _customerChurnAnalysisService = customerChurnAnalysisService;
+            _opportunityWinRateService = opportunityWinRateService;
+            _averageDaysToCloseService = averageDaysToCloseService;
+            _salesForecastAccuracyService = salesForecastAccuracyService;
+            _crossSellUpsellGainsService = crossSellUpsellGainsService;
+            _visitDailyReportService = visitDailyReportService;
+            _salesProductivityService = salesProductivityService;
+            _forecastMonthlyReportService = forecastMonthlyReportService;
         }
         // ---------- BU security: อ่านสิทธิ์จาก JWT claims (Division + DataScope) ----------
         // DataScope = COMPANY / CROSS_COMPANY -> เห็นทุก BU; DIVISION / OWN -> ล็อก BU ตัวเอง (Division)
@@ -129,6 +156,87 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
                 ? await _salePerformanceService.GetDistinctBusAsync(ct)
                 : new List<string> { CurrentDivision() };
             result.EffectiveBu = filter.SalesGroup;
+            return Ok(result);
+        }
+
+        // GET api/dashboard/pricingmarginperformance?Year=2026&TargetMarginPercent=30
+        [HttpGet("pricingmarginperformance")]
+        public async Task<ActionResult<PricingMarginPerformanceDto>> GetPricingMarginPerformance([FromQuery] PricingMarginPerformanceFilter filter, CancellationToken ct)
+        {
+            filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
+            var result = await _pricingMarginPerformanceService.GetAsync(filter, ct);
+            return Ok(result);
+        }
+
+        // GET api/dashboard/customerchurnanalysis?Year=2026
+        [HttpGet("customerchurnanalysis")]
+        public async Task<ActionResult<CustomerChurnAnalysisDto>> GetCustomerChurnAnalysis([FromQuery] CustomerChurnAnalysisFilter filter, CancellationToken ct)
+        {
+            filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
+            var result = await _customerChurnAnalysisService.GetAsync(filter, ct);
+            return Ok(result);
+        }
+
+        // GET api/dashboard/opportunitywinrate?DateFrom=2026-01-01&DateTo=2026-05-31
+        [HttpGet("opportunitywinrate")]
+        public async Task<ActionResult<OpportunityWinRateDto>> GetOpportunityWinRate([FromQuery] OpportunityWinRateFilter filter, CancellationToken ct)
+        {
+            filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
+            var result = await _opportunityWinRateService.GetAsync(filter, ct);
+            return Ok(result);
+        }
+
+        // GET api/dashboard/averagedaystoclose?DateFrom=2026-01-01&DateTo=2026-05-31
+        [HttpGet("averagedaystoclose")]
+        public async Task<ActionResult<AverageDaysToCloseDto>> GetAverageDaysToClose([FromQuery] AverageDaysToCloseFilter filter, CancellationToken ct)
+        {
+            filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
+            var result = await _averageDaysToCloseService.GetAsync(filter, ct);
+            return Ok(result);
+        }
+
+        // GET api/dashboard/crosssellupsellgains?DateFrom=2024-01-01&DateTo=2024-05-31
+        [HttpGet("crosssellupsellgains")]
+        public async Task<ActionResult<CrossSellUpsellGainsDto>> GetCrossSellUpsellGains([FromQuery] CrossSellUpsellGainsFilter filter, CancellationToken ct)
+        {
+            filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
+            var result = await _crossSellUpsellGainsService.GetAsync(filter, ct);
+            return Ok(result);
+        }
+
+        // GET api/dashboard/salesforecastaccuracy?DateFrom=2024-06-01&DateTo=2024-05-31
+        [HttpGet("salesforecastaccuracy")]
+        public async Task<ActionResult<SalesForecastAccuracyDto>> GetSalesForecastAccuracy([FromQuery] SalesForecastAccuracyFilter filter, CancellationToken ct)
+        {
+            filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
+            var result = await _salesForecastAccuracyService.GetAsync(filter, ct);
+            return Ok(result);
+        }
+
+        // GET api/dashboard/visitdailyreport?DateFrom=2026-08-01&DateTo=2026-08-31
+        [HttpGet("visitdailyreport")]
+        public async Task<ActionResult<VisitDailyReportDto>> GetVisitDailyReport([FromQuery] VisitDailyReportFilter filter, CancellationToken ct)
+        {
+            filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
+            var result = await _visitDailyReportService.GetAsync(filter, ct);
+            return Ok(result);
+        }
+
+        // GET api/dashboard/salesproductivity?DateFrom=2026-01-01&DateTo=2026-09-30
+        [HttpGet("salesproductivity")]
+        public async Task<ActionResult<SalesProductivityDto>> GetSalesProductivity([FromQuery] SalesProductivityFilter filter, CancellationToken ct)
+        {
+            filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
+            var result = await _salesProductivityService.GetAsync(filter, ct);
+            return Ok(result);
+        }
+
+        // GET api/dashboard/forecastmonthly?FromMonth=2026-05-01&ToMonth=2026-12-01
+        [HttpGet("forecastmonthly")]
+        public async Task<ActionResult<ForecastMonthlyDto>> GetForecastMonthly([FromQuery] ForecastMonthlyFilter filter, CancellationToken ct)
+        {
+            filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
+            var result = await _forecastMonthlyReportService.GetAsync(filter, ct);
             return Ok(result);
         }
     }

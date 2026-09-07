@@ -1,0 +1,496 @@
+@page "/opportunity-win-rate"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout AppLayout
+@rendermode InteractiveServer
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using Microsoft.JSInterop
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using Mgt.Lit.WebFront.Components
+@inject DashOpportunityWinRateApiService WinRateApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<style>
+    /* ── Opportunity Win Rate Report — สไตล์เฉพาะหน้านี้ (คำนำหน้า owr-) ─────── */
+    .owr-reset-btn {
+        background: #fff;
+        border: 1px solid var(--card-border);
+        color: var(--neutral-700);
+        font-weight: 600;
+        font-size: 13px;
+        padding: 9px 16px;
+        border-radius: 10px;
+        white-space: nowrap;
+    }
+    .owr-reset-btn:hover { background: var(--neutral-100); }
+
+    .owr-kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 16px; }
+
+    .owr-kpi { background: var(--surface); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px 16px; }
+    .owr-kpi-label { font-size: 12.5px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
+    .owr-kpi-value { font-size: 24px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
+    .owr-kpi-value.danger { color: #be123c; }
+    .owr-kpi-value.warn { color: #b45309; }
+    .owr-kpi-sub { font-size: 11.5px; color: var(--muted); margin-bottom: 4px; }
+    .owr-kpi-compare { font-size: 11.5px; }
+
+    .owr-chart-row { display: grid; grid-template-columns: 1.1fr 1.1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: stretch; }
+    .owr-table-row { display: grid; grid-template-columns: 1.7fr 1fr; gap: 16px; margin-bottom: 16px; align-items: start; }
+
+    .owr-diff-pos { color: #15803d; font-weight: 600; }
+    .owr-diff-neg { color: #b91c1c; font-weight: 600; }
+    .owr-na { color: var(--muted); }
+
+    .owr-result-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+    .owr-result-badge.won { background: #dcfce7; color: #15803d; }
+    .owr-result-badge.lost { background: #fee2e2; color: #b91c1c; }
+
+    .owr-view-all { background: none; border: none; color: var(--brand-dark); font-weight: 600; font-size: 12.5px; padding: 8px 0 0; width: 100%; text-align: center; }
+    .owr-view-all:hover { text-decoration: underline; }
+
+    .owr-summary-row { display: flex; justify-content: space-between; font-size: 12.5px; padding: 4px 0; }
+    .owr-summary-row.total { font-weight: 700; border-top: 1px solid var(--card-border); margin-top: 6px; padding-top: 8px; }
+    .owr-summary-title { font-size: 12px; font-weight: 700; color: var(--neutral-700); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .02em; }
+
+    .owr-empty-panel { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 180px; color: var(--muted); font-size: 12.5px; text-align: center; padding: 12px; }
+    .owr-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    @@media (max-width: 1400px) {
+        .owr-kpi-row { grid-template-columns: repeat(3, 1fr); }
+        .owr-chart-row { grid-template-columns: 1fr; }
+        .owr-table-row { grid-template-columns: 1fr; }
+    }
+    @@media (max-width: 640px) { .owr-kpi-row { grid-template-columns: 1fr 1fr; } }
+</style>
+
+<div class="dash-bg">
+    <div class="dash-page">
+        @if (_loading)
+        {
+            <div class="dash-overlay"><span class="dash-spinner"></span></div>
+        }
+        <div class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Report</div>
+                <div class="dash-title">Opportunity Win Rate Report</div>
+                <div class="dash-subtitle">Sales team performance converting opportunities into closed-won deals</div>
+            </div>
+        </div>
+
+        <div class="dash-filters dash-filter-panel">
+            <div class="dash-field">
+                <div class="dash-field-label">Closed Date Range</div>
+                <input id="dateRange" class="dash-input" placeholder="Select date range" autocomplete="off" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Salesperson</div>
+                <DashSelect @bind-Value="_selectedSalesperson" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableSalesEmployees ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Product</div>
+                <DashSelect @bind-Value="_selectedProduct" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableProducts ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Industry</div>
+                <DashSelect @bind-Value="_selectedIndustry" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableIndustries ?? new())" />
+            </div>
+            <div class="dash-field" style="align-self:flex-end">
+                <button type="button" class="owr-reset-btn" @onclick="ResetAsync">↺ Reset</button>
+            </div>
+        </div>
+
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading win rate data</span>
+            </div>
+        }
+        else
+        {
+            var kpi = _data.Kpi;
+
+            <div class="owr-kpi-row">
+                <div class="owr-kpi">
+                    <div class="owr-kpi-label">Win Rate (Deal Count)</div>
+                    <div class="owr-kpi-value">@(kpi.WinRatePercent.HasValue ? kpi.WinRatePercent.Value.ToString("0.0") + "%" : "N/A")</div>
+                    <div class="owr-kpi-sub">Won @kpi.WonOpportunities / Closed @kpi.TotalClosedOpportunities Deals</div>
+                    @RenderCompare(kpi.WinRateVsPreviousPoint, "pp")
+                </div>
+                <div class="owr-kpi">
+                    <div class="owr-kpi-label">Won Opportunities</div>
+                    <div class="owr-kpi-value">@kpi.WonOpportunities</div>
+                    <div class="owr-kpi-sub">Deals</div>
+                    @RenderCompareCount(kpi.WonVsPreviousCount)
+                </div>
+                <div class="owr-kpi">
+                    <div class="owr-kpi-label">Lost Opportunities</div>
+                    <div class="owr-kpi-value danger">@kpi.LostOpportunities</div>
+                    <div class="owr-kpi-sub">Deals</div>
+                    <div class="owr-kpi-compare owr-na">Loss Rate @(kpi.LossRatePercent.HasValue ? kpi.LossRatePercent.Value.ToString("0.0") + "%" : "N/A")</div>
+                </div>
+                <div class="owr-kpi">
+                    <div class="owr-kpi-label">Total Closed Opportunities</div>
+                    <div class="owr-kpi-value">@kpi.TotalClosedOpportunities</div>
+                    <div class="owr-kpi-sub">Deals</div>
+                    @RenderCompareCount(kpi.ClosedVsPreviousCount)
+                </div>
+                <div class="owr-kpi">
+                    <div class="owr-kpi-label">Value Win Rate</div>
+                    <div class="owr-kpi-value warn">@(kpi.ValueWinRatePercent.HasValue ? kpi.ValueWinRatePercent.Value.ToString("0.0") + "%" : "N/A")</div>
+                    <div class="owr-kpi-sub">Won @FormatCompact(kpi.WonValue) / Total @FormatCompact(kpi.WonValue + kpi.LostValue)</div>
+                    @RenderCompare(kpi.ValueWinRateVsPreviousPoint, "pp")
+                </div>
+                <div class="owr-kpi">
+                    <div class="owr-kpi-label">Avg. Deal Size (Won)</div>
+                    <div class="owr-kpi-value">@FormatCompact(kpi.AvgWonDealSize)</div>
+                    <div class="owr-kpi-sub">Lost avg. @FormatCompact(kpi.AvgLostDealSize)</div>
+                    @RenderCompare(kpi.AvgWonDealSizeVsPreviousPercent, "%")
+                </div>
+            </div>
+
+            <div class="owr-chart-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Win Rate Trend (Monthly)</div>
+                    <div class="dash-card-body">
+                        <div id="@TrendChartId" class="echarts-host" role="img" aria-label="Monthly win rate trend"></div>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header d-flex justify-content-between align-items-center">
+                        <span>Win Rate by Salesperson</span>
+                    </div>
+                    <div class="dash-card-body">
+                        @if (_data.BySalesperson.Count == 0)
+                        {
+                            <div class="owr-empty-panel">No closed deals for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@SalespersonChartId" class="echarts-host" role="img" aria-label="Win rate by salesperson"></div>
+                        }
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Win Rate by Industry (Top 8)</div>
+                    <div class="dash-card-body">
+                        @if (_data.ByIndustry.Count == 0)
+                        {
+                            <div class="owr-empty-panel">No closed deals for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@IndustryChartId" class="echarts-host" role="img" aria-label="Win rate by industry"></div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="owr-chart-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Win Rate by Product (Top 8 by Deal Count)</div>
+                    <div class="dash-card-body">
+                        @if (_data.ByProduct.Count == 0)
+                        {
+                            <div class="owr-empty-panel">No product data for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@ProductChartId" class="echarts-host" role="img" aria-label="Win rate by product"></div>
+                        }
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Sales Pipeline (Current Stage)</div>
+                    <div class="dash-card-body">
+                        @if (_data.PipelineByStage.Count == 0)
+                        {
+                            <div class="owr-empty-panel">No pipeline data for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@FunnelChartId" class="echarts-host" role="img" aria-label="Sales pipeline by stage"></div>
+                        }
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Top Lost Reasons</div>
+                    <div class="dash-card-body">
+                        @if (_data.LostReasons.Count == 0)
+                        {
+                            <div class="owr-empty-panel">No lost deals for this filter</div>
+                        }
+                        else
+                        {
+                            <div id="@LostReasonChartId" class="echarts-host" role="img" aria-label="Top lost reasons"></div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="owr-table-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Closed Opportunity Detail (Latest @Math.Min(10, _data.RecentClosedOpportunities.Count) Deals)</div>
+                    <div class="dash-card-body">
+                        <div class="table-scroll">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Deal ID</th>
+                                        <th>Opportunity Name</th>
+                                        <th>Account / Customer</th>
+                                        <th>Salesperson</th>
+                                        <th>Product</th>
+                                        <th>Industry</th>
+                                        <th>Amount (THB)</th>
+                                        <th>Closed Date</th>
+                                        <th>Result</th>
+                                        <th>Won / Lost Reason</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @if (_data.RecentClosedOpportunities.Count == 0)
+                                    {
+                                        <tr><td colspan="10" class="dash-table-empty">No closed opportunities for this filter</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var row in _data.RecentClosedOpportunities)
+                                        {
+                                            <tr>
+                                                <td>@row.DealId</td>
+                                                <td>@row.OpportunityName</td>
+                                                <td>@row.CustomerName</td>
+                                                <td>@row.SalesEmployeeBP</td>
+                                                <td>@row.Product</td>
+                                                <td>@row.IndustryName</td>
+                                                <td>@row.DealAmount.ToString("N0")</td>
+                                                <td>@(row.ClosedDate?.ToString("dd MMM yyyy") ?? "")</td>
+                                                <td><span class="owr-result-badge @(row.Result == "Won" ? "won" : "lost")">@row.Result</span></td>
+                                                <td>@(row.LostReason ?? "")</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dash-card">
+                    <div class="dash-card-header">Summary</div>
+                    <div class="dash-card-body">
+                        @{ var s = _data.Summary; }
+                        <div class="owr-summary-row"><span>Total Opportunities</span><span>@s.TotalOpportunities</span></div>
+                        <div class="owr-summary-row"><span>Open Opportunities</span><span>@s.OpenOpportunities</span></div>
+                        <div class="owr-summary-row"><span>Closed Opportunities</span><span>@s.ClosedOpportunities</span></div>
+                        <div class="owr-summary-row"><span>Won Opportunities</span><span>@s.WonOpportunities</span></div>
+                        <div class="owr-summary-row"><span>Lost Opportunities</span><span>@s.LostOpportunities</span></div>
+
+                        <div class="owr-summary-title">Value Summary (THB)</div>
+                        <div class="owr-summary-row"><span>Won Value</span><span>@s.WonValue.ToString("N0")</span></div>
+                        <div class="owr-summary-row"><span>Lost Value</span><span>@s.LostValue.ToString("N0")</span></div>
+                        <div class="owr-summary-row total"><span>Total Closed Value</span><span>@s.TotalClosedValue.ToString("N0")</span></div>
+                        <div class="owr-summary-row"><span>Value Win Rate</span><span>@(s.ValueWinRatePercent.HasValue ? s.ValueWinRatePercent.Value.ToString("0.0") + "%" : "N/A")</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="owr-note">
+                Note: Win Rate = Won / (Won + Lost) × 100, counted by distinct Deal ID; open deals (Qualification/Proposal/Negotiation/etc.) are excluded.
+                Monthly figures use the Actual Closed Date, not the Created Date. "vs Previous Period" compares against the immediately preceding period of equal length.
+                "Sales Pipeline" shows deals by their current stage — Zoho does not expose stage-history in the synced fields, so this is a pipeline snapshot, not a stage-by-stage win rate funnel.
+                Data source: Zoho CRM (crm/v8/Deals), synced into the local data warehouse.
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private OpportunityWinRateDto? _data;
+    private bool _loading;
+    private bool _chartsNeedRender;
+
+    private DateTime? _dateFrom;
+    private DateTime? _dateTo;
+    private string _selectedSalesperson = "";
+    private string _selectedProduct = "";
+    private string _selectedIndustry = "";
+
+    private const string TrendChartId = "owr-trend";
+    private const string SalespersonChartId = "owr-salesperson";
+    private const string IndustryChartId = "owr-industry";
+    private const string ProductChartId = "owr-product";
+    private const string FunnelChartId = "owr-funnel";
+    private const string LostReasonChartId = "owr-lost-reason";
+
+    private IJSObjectReference? _jsModule;
+    private DotNetObjectReference<OpportunityWinRate>? _dotNetRef;
+
+    private OpportunityWinRateFilter BuildFilter() => new()
+    {
+        DateFrom = _dateFrom,
+        DateTo = _dateTo,
+        SalesEmployeeBP = string.IsNullOrWhiteSpace(_selectedSalesperson) ? null : _selectedSalesperson,
+        Product = string.IsNullOrWhiteSpace(_selectedProduct) ? null : _selectedProduct,
+        IndustryName = string.IsNullOrWhiteSpace(_selectedIndustry) ? null : _selectedIndustry
+        // SalesGroup: server บังคับตาม BU ของ user
+    };
+
+    private static string FormatCompact(decimal value) => Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter.FormatCompact(value);
+
+    private RenderFragment RenderCompare(decimal? diff, string suffix) => __builder =>
+    {
+        @if (diff.HasValue)
+        {
+            <div class="owr-kpi-compare @(diff.Value >= 0 ? "owr-diff-pos" : "owr-diff-neg")">
+                @(diff.Value >= 0 ? "+" : "")@diff.Value.ToString("0.0")@suffix vs Previous Period
+            </div>
+        }
+        else
+        {
+            <div class="owr-kpi-compare owr-na">vs Previous Period: N/A</div>
+        }
+    };
+
+    private RenderFragment RenderCompareCount(int diff) => __builder =>
+    {
+        <div class="owr-kpi-compare @(diff > 0 ? "owr-diff-pos" : diff < 0 ? "owr-diff-neg" : "owr-na")">
+            @(diff > 0 ? "+" : "")@diff vs Previous Period
+        </div>
+    };
+
+    // ⚠️ ห้ามยิง JS interop ต่อจาก StateHasChanged ในเมธอดเดียวกันทันที — ต้องรอ OnAfterRenderAsync(firstRender:false)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            if (string.IsNullOrWhiteSpace(AuthState.Token))
+                await AuthState.InitializeAsync();
+
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await _jsModule.InvokeVoidAsync("initDateRange", _dotNetRef);
+
+            // Default: ปีปัจจุบันถึงวันนี้
+            _dateFrom = new DateTime(DateTime.Now.Year, 1, 1);
+            _dateTo = DateTime.Now.Date;
+
+            _data = await WinRateApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (_chartsNeedRender && _data is not null)
+        {
+            _chartsNeedRender = false;
+            await RenderChartsAsync();
+        }
+    }
+
+    [JSInvokable]
+    public async Task SetDateRange(string start, string end)
+    {
+        if (string.IsNullOrEmpty(start) || string.IsNullOrEmpty(end))
+        {
+            _dateFrom = null; _dateTo = null;
+        }
+        else
+        {
+            if (DateTime.TryParse(start, out var s)) _dateFrom = s;
+            if (DateTime.TryParse(end, out var e)) _dateTo = e;
+        }
+        await LoadAsync();
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+
+    private async Task ResetAsync()
+    {
+        _selectedSalesperson = "";
+        _selectedProduct = "";
+        _selectedIndustry = "";
+        _dateFrom = new DateTime(DateTime.Now.Year, 1, 1);
+        _dateTo = DateTime.Now.Date;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try
+        {
+            _data = await WinRateApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        if (_data is null) return;
+
+        var trendPoints = _data.Trend
+            .Select(p => new { periodLabel = p.PeriodLabel, closedDeals = p.ClosedDeals, winRatePercent = p.WinRatePercent })
+            .ToArray();
+        await JS.InvokeVoidAsync("dashboardECharts.renderWinRateTrend", TrendChartId, trendPoints);
+
+        if (_data.BySalesperson.Count > 0)
+        {
+            var rows = _data.BySalesperson.Take(8)
+                .Select(r => new { groupName = r.GroupName, wonDeals = r.WonDeals, closedDeals = r.ClosedDeals, winRatePercent = r.WinRatePercent })
+                .ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderWinRateBar", SalespersonChartId, rows);
+        }
+
+        if (_data.ByIndustry.Count > 0)
+        {
+            var top = _data.ByIndustry.Take(8).ToList();
+            var industryPoints = top.Select(r => new { name = r.GroupName, value = r.ClosedDeals }).ToArray();
+            var overall = _data.Kpi.WinRatePercent.HasValue ? _data.Kpi.WinRatePercent.Value.ToString("0.0") + "%" : "N/A";
+            await JS.InvokeVoidAsync("dashboardECharts.renderDonutWithCenterMetric", IndustryChartId, industryPoints, overall, "Win Rate");
+        }
+
+        if (_data.ByProduct.Count > 0)
+        {
+            var rows = _data.ByProduct.Take(8)
+                .Select(r => new { groupName = r.GroupName, wonDeals = r.WonDeals, closedDeals = r.ClosedDeals, winRatePercent = r.WinRatePercent })
+                .ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderWinRateBar", ProductChartId, rows);
+        }
+
+        if (_data.PipelineByStage.Count > 0)
+        {
+            var stageRows = _data.PipelineByStage.Select(r => new { stage = r.Stage, dealCount = r.DealCount }).ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderStageFunnel", FunnelChartId, stageRows);
+        }
+
+        if (_data.LostReasons.Count > 0)
+        {
+            var reasonPoints = _data.LostReasons.Select(r => new { name = r.Reason, value = r.LostDeals }).ToArray();
+            var totalLost = _data.Kpi.LostOpportunities.ToString();
+            await JS.InvokeVoidAsync("dashboardECharts.renderDonutWithCenterMetric", LostReasonChartId, reasonPoints, totalLost, "Lost Deals");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_jsModule is not null)
+        {
+            try { await _jsModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+        _dotNetRef?.Dispose();
+    }
+}

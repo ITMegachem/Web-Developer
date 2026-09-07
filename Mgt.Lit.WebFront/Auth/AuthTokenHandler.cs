@@ -10,6 +10,7 @@ public class AuthTokenHandler : DelegatingHandler
 {
     private readonly AuthState _auth;
     private readonly ProtectedSessionStorage _storage;
+    private readonly ProtectedLocalStorage _localStorage;
     private readonly IHttpClientFactory _factory;
 
     // ✅ ลบ _httpContextAccessor ออกแล้ว ไม่ต้องใช้อีก
@@ -19,11 +20,13 @@ public class AuthTokenHandler : DelegatingHandler
     public AuthTokenHandler(
         AuthState auth,
         ProtectedSessionStorage storage,
+        ProtectedLocalStorage localStorage,
         IHttpClientFactory factory)
     // ✅ ลบ IHttpContextAccessor httpContextAccessor ออก
     {
         _auth = auth;
         _storage = storage;
+        _localStorage = localStorage;
         _factory = factory;
     }
 
@@ -69,23 +72,31 @@ public class AuthTokenHandler : DelegatingHandler
         }
     }
 
-    // ✅ เหลืออันเดียว — อ่านจาก ProtectedSessionStorage
+    // ★ เช็ค session storage ก่อนเสมอ แล้วค่อย fallback ไป local storage — กัน "Remember me" (เก็บใน local storage
+    //   แทน session storage) หา refreshToken ไม่เจอแล้ว refresh ล้มเหลวทั้งที่ token ยังไม่หมดอายุจริง
     private async Task<bool> DoRefreshAsync(CancellationToken cancellationToken)
     {
         try
         {
             var rtResult = await _storage.GetAsync<string>("refreshToken");
+            var refreshToken = rtResult.Success ? rtResult.Value : null;
+
+            if (string.IsNullOrWhiteSpace(refreshToken))
+            {
+                var localRtResult = await _localStorage.GetAsync<string>("refreshToken");
+                refreshToken = localRtResult.Success ? localRtResult.Value : null;
+            }
 
             Console.WriteLine($"[REFRESH] Token in storage: " +
-                $"{(rtResult.Success && !string.IsNullOrWhiteSpace(rtResult.Value) ? "FOUND" : "NOT FOUND")}");
+                $"{(!string.IsNullOrWhiteSpace(refreshToken) ? "FOUND" : "NOT FOUND")}");
 
-            if (!rtResult.Success || string.IsNullOrWhiteSpace(rtResult.Value))
+            if (string.IsNullOrWhiteSpace(refreshToken))
                 return false;
 
             var client = _factory.CreateClient("RefreshClient");
             var response = await client.PostAsJsonAsync(
                 "api/member/refresh-explicit",
-                new { RefreshToken = rtResult.Value },
+                new { RefreshToken = refreshToken },
                 cancellationToken);
 
             Console.WriteLine($"[REFRESH] Status: {response.StatusCode}");
@@ -100,7 +111,9 @@ public class AuthTokenHandler : DelegatingHandler
                 return false;
 
             _auth.Token = result.Token;
-            await _storage.SetAsync("authToken", result.Token);
+            // ★ เขียนกลับไปที่ storage เดียวกับที่ใช้อยู่ (remembered -> local, ไม่งั้น -> session)
+            var activeStorage = _auth.IsRemembered ? (ProtectedBrowserStorage)_localStorage : _storage;
+            await activeStorage.SetAsync("authToken", result.Token);
 
             Console.WriteLine("[REFRESH] Success — new token saved");
             return true;

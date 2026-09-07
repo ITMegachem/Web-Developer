@@ -16,6 +16,11 @@ namespace Mgt.Lit.Core.Data
         public DbSet<MsCompany> MsCompanies { get; set; }
         public DbSet<MsUserCompany> MsUserCompanies { get; set; }
         public DbSet<MGT_Sale> MGT_Sale { get; set; }
+        public DbSet<MGT_Deal> MGT_Deal { get; set; }
+        public DbSet<MGT_DealProduct> MGT_DealProduct { get; set; }
+        public DbSet<MGT_ForecastSnapshot> MGT_ForecastSnapshot { get; set; }
+        public DbSet<MGT_VisitReport> MGT_VisitReport { get; set; }
+        public DbSet<MGT_VisitItem> MGT_VisitItem { get; set; }
         public DbSet<View_ProductLastPrice> View_ProductLastPrice { get; set; }
 
         // 📊 View สำหรับรายงานการขาย

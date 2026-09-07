@@ -34,6 +34,9 @@ builder.Services.AddScoped<IUserRepository, UserService>();
 //SAP//
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<SapService>();
+builder.Services.AddSingleton<ZohoAuthTokenProvider>();
+builder.Services.AddHttpClient<ZohoDealSyncService>();
+builder.Services.AddHttpClient<ZohoVisitSyncService>();
 
 // =======================
 // JWT Authentication
@@ -106,6 +109,15 @@ builder.Services.AddScoped<IProductOverviewService, ProductOverviewService>();
 builder.Services.AddScoped<IProductMovementService, ProductMovementService>();
 builder.Services.AddScoped<ICustomerOverviewService, CustomerOverviewService>(); 
 builder.Services.AddScoped<IBillingDailyService, BillingDailyService>();
+builder.Services.AddScoped<IPricingMarginPerformanceService, PricingMarginPerformanceService>();
+builder.Services.AddScoped<ICustomerChurnAnalysisService, CustomerChurnAnalysisService>();
+builder.Services.AddScoped<IOpportunityWinRateService, OpportunityWinRateService>();
+builder.Services.AddScoped<IAverageDaysToCloseService, AverageDaysToCloseService>();
+builder.Services.AddScoped<ICrossSellUpsellGainsService, CrossSellUpsellGainsService>();
+builder.Services.AddScoped<ISalesForecastAccuracyService, SalesForecastAccuracyService>();
+builder.Services.AddScoped<IVisitDailyReportService, VisitDailyReportService>();
+builder.Services.AddScoped<ISalesProductivityService, SalesProductivityService>();
+builder.Services.AddScoped<IForecastMonthlyReportService, ForecastMonthlyReportService>();
 builder.Services.AddHttpClient();
 // =======================
 // CORS

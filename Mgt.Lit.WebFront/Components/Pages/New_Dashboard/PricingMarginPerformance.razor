@@ -1,0 +1,653 @@
+@page "/pricing-margin-performance"
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@layout AppLayout
+@rendermode InteractiveServer
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+@using System.Linq
+@using ClosedXML.Excel
+@using Microsoft.JSInterop
+@using Mgt.Lit.Core.DTOs.DashBoard
+@using Mgt.Lit.WebFront.Services.DashBoard
+@using Mgt.Lit.WebFront.Components
+@inject DashPricingMarginPerformanceApiService MarginApi
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<style>
+    /* ── Margin Discipline Report — สไตล์เฉพาะหน้านี้ ───────────────────────── */
+    .mdp-top-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .mdp-target-pill {
+        background: var(--brand);
+        color: #fff;
+        font-weight: 700;
+        font-size: 13px;
+        padding: 10px 18px;
+        border-radius: 10px;
+        white-space: nowrap;
+        border: none;
+    }
+
+    .mdp-reset-btn {
+        background: #fff;
+        border: 1px solid var(--card-border);
+        color: var(--neutral-700);
+        font-weight: 600;
+        font-size: 13px;
+        padding: 9px 16px;
+        border-radius: 10px;
+        white-space: nowrap;
+    }
+
+    .mdp-reset-btn:hover { background: var(--neutral-100); }
+
+    .mdp-kpi-row {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 14px;
+        margin-bottom: 16px;
+    }
+
+    .mdp-kpi {
+        background: var(--surface);
+        border: 1px solid var(--card-border);
+        border-radius: 12px;
+        padding: 14px 16px;
+    }
+
+    .mdp-kpi-label {
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--neutral-700);
+        margin-bottom: 6px;
+    }
+
+    .mdp-kpi-value {
+        font-size: 24px;
+        font-weight: 800;
+        color: var(--brand-dark);
+        line-height: 1.2;
+        margin-bottom: 8px;
+    }
+
+    .mdp-kpi-value.mdp-value-ok { color: #15803d; }
+    .mdp-kpi-value.mdp-value-bad { color: #b91c1c; }
+
+    .mdp-kpi-compare {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: 11.5px;
+    }
+
+    .mdp-kpi-na { color: var(--muted); }
+
+    .mdp-chart-row {
+        display: grid;
+        grid-template-columns: 1.4fr 1.2fr 1fr;
+        gap: 16px;
+        margin-bottom: 16px;
+        align-items: stretch;
+    }
+
+    .mdp-table-row {
+        display: grid;
+        grid-template-columns: 1fr 1.3fr 1fr;
+        gap: 16px;
+        margin-bottom: 16px;
+        align-items: start;
+    }
+
+    .mdp-split {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+
+    .mdp-split-head {
+        font-size: 12.5px;
+        font-weight: 700;
+        margin-bottom: 4px;
+    }
+
+    .mdp-split-head.top { color: #15803d; }
+    .mdp-split-head.bottom { color: #b91c1c; }
+
+    .mdp-status {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 11.5px;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .mdp-status.ok { background: #dcfce7; color: #15803d; }
+    .mdp-status.bad { background: #fee2e2; color: #b91c1c; }
+
+    .mdp-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+    .mdp-dot.ok { background: #22c55e; }
+    .mdp-dot.bad { background: #ef4444; }
+
+    .mdp-diff-pos { color: #15803d; font-weight: 600; }
+    .mdp-diff-neg { color: #b91c1c; font-weight: 600; }
+
+    .mdp-view-all {
+        background: none;
+        border: none;
+        color: var(--brand-dark);
+        font-weight: 600;
+        font-size: 12.5px;
+        padding: 8px 0 0;
+        width: 100%;
+        text-align: center;
+    }
+
+    .mdp-view-all:hover { text-decoration: underline; }
+
+    .mdp-export-btn {
+        background: var(--brand);
+        color: #fff;
+        border: none;
+        font-weight: 600;
+        font-size: 13px;
+        padding: 8px 16px;
+        border-radius: 8px;
+    }
+
+    .mdp-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    @@media (max-width: 1400px) {
+        .mdp-kpi-row { grid-template-columns: repeat(3, 1fr); }
+        .mdp-chart-row { grid-template-columns: 1fr; }
+        .mdp-table-row { grid-template-columns: 1fr; }
+    }
+
+    @@media (max-width: 640px) {
+        .mdp-kpi-row { grid-template-columns: 1fr 1fr; }
+        .mdp-split { grid-template-columns: 1fr; }
+    }
+</style>
+
+<div class="dash-bg">
+    <div class="dash-page">
+        @if (_loading)
+        {
+            <div class="dash-overlay"><span class="dash-spinner"></span></div>
+        }
+        <div class="dash-top">
+            <div>
+                <div class="dash-eyebrow">Management Report</div>
+                <div class="dash-title">Pricing & Margin Performance Report</div>
+                <div class="dash-subtitle">Gross Margin by Salesperson / Customer / Product &nbsp;|&nbsp; Target Margin = @_targetMargin.ToString("0.#")%</div>
+            </div>
+            <div class="mdp-top-actions">
+                <div class="mdp-target-pill">Target Margin @_targetMargin.ToString("0.#")%</div>
+            </div>
+        </div>
+
+        <div class="dash-filters dash-filter-panel">
+            <div class="dash-field">
+                <div class="dash-field-label">Year</div>
+                <DashSelect @bind-Value="_selectedYear" @bind-Value:after="ReloadAsync"
+                            Placeholder="All Years" Options="@_years.Select(y => y.ToString())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Period</div>
+                <DashSelect @bind-Value="_selectedPeriod" @bind-Value:after="ReloadAsync"
+                            Placeholder="Full Year (Jan-Dec)" Options="@PeriodMap.Keys.Where(k => k != "")" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Salesperson</div>
+                <DashSelect @bind-Value="_selectedSalesperson" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableSalesEmployees ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Customer Group</div>
+                <DashSelect @bind-Value="_selectedCustomerGroup" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableCustomerGroups ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Product Category</div>
+                <DashSelect @bind-Value="_selectedProductCategory" @bind-Value:after="ReloadAsync"
+                            Placeholder="All" Options="@(_data?.AvailableProductCategories ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Target Margin (%)</div>
+                <input type="number" class="dash-input" min="0" max="100" step="0.5"
+                       value="@_targetMargin" @onchange="OnTargetMarginChangedAsync" />
+            </div>
+            <div class="dash-field" style="align-self:flex-end">
+                <button type="button" class="mdp-reset-btn" @onclick="ResetAsync">↺ Reset</button>
+            </div>
+        </div>
+
+        @if (_data is null)
+        {
+            <div class="dash-loading" role="status">
+                <span class="dash-spinner" aria-hidden="true"></span>
+                <span>Loading margin performance data</span>
+            </div>
+        }
+        else
+        {
+            <div class="mdp-kpi-row">
+                @RenderKpi("Net Sales", FormatCompact(_data.NetSales.Value), _data.NetSales.VsLastYearPercent)
+                @RenderKpi("Gross Profit", FormatCompact(_data.GrossProfit.Value), _data.GrossProfit.VsLastYearPercent)
+                @RenderKpi("Gross Margin %", _data.GrossMarginPercent.ToString("0.0") + "%", _data.GrossMarginVsLastYearPoint, _data.GrossMarginVsTargetPoint, "pp", _data.GrossMarginPercent >= _data.TargetMarginPercent)
+                @RenderKpi("Average Selling Price", _data.AverageSellingPrice.Value.ToString("N2"), _data.AverageSellingPrice.VsLastYearPercent)
+                @RenderKpi("Sales Volume", FormatCompact(_data.SalesVolume.Value), _data.SalesVolume.VsLastYearPercent)
+                @RenderKpi("# Customers", _data.CustomerCount.Value.ToString("N0"), _data.CustomerCount.VsLastYearPercent)
+            </div>
+
+            <div class="mdp-chart-row">
+                <div class="dash-card">
+                    <div class="dash-card-header">Gross Margin % Trend</div>
+                    <div class="dash-card-body">
+                        <div id="@TrendChartId" class="echarts-host" role="img" aria-label="Gross margin percent monthly trend"></div>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Sales Bridge (Impact to Margin %) — YoY, same period</div>
+                    <div class="dash-card-body">
+                        @if (_data.MarginBridge.Count == 0)
+                        {
+                            <div class="dash-table-empty">Select a Year to view the Sales Bridge vs last year</div>
+                        }
+                        else
+                        {
+                            <div id="@BridgeChartId" class="echarts-host" role="img" aria-label="Margin bridge waterfall chart"></div>
+                        }
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="dash-card-header">Sales by BU</div>
+                    <div class="dash-card-body">
+                        <div id="@DonutChartId" class="echarts-host" role="img" aria-label="Sales share by business unit"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mdp-table-row">
+                @RenderGroupTable("Margin by Salesperson", "Salesperson", _data.BySalesperson, _showAllSalesperson, () => _showAllSalesperson = !_showAllSalesperson)
+
+                <div class="dash-card">
+                    <div class="dash-card-header">Margin by Customer (Top 5 | Bottom 5)</div>
+                    <div class="dash-card-body">
+                        <div class="mdp-split">
+                            <div>
+                                <div class="mdp-split-head top">Top 5 Customers</div>
+                                @RenderMiniTable(_data.TopCustomers)
+                            </div>
+                            <div>
+                                <div class="mdp-split-head bottom">Bottom 5 Customers</div>
+                                @RenderMiniTable(_data.BottomCustomers)
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                @RenderGroupTable("Margin by Product Category", "Category", _data.ByProductCategory, _showAllProductCategory, () => _showAllProductCategory = !_showAllProductCategory)
+            </div>
+
+            <div class="dash-card">
+                <div class="dash-card-header d-flex justify-content-between align-items-center">
+                    <span>Product Performance Overview</span>
+                    <button type="button" class="mdp-export-btn" @onclick="ExportProductPerformanceAsync">⬇ Export</button>
+                </div>
+                <div class="dash-card-body">
+                    <div class="table-scroll dash-table-tall">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Product Category</th>
+                                    <th>Product Group</th>
+                                    <th>Product / SKU</th>
+                                    <th>Net Sales</th>
+                                    <th>Sales Volume</th>
+                                    <th>ASP</th>
+                                    <th>Cost/Unit</th>
+                                    <th>Gross Profit</th>
+                                    <th>Margin %</th>
+                                    <th>vs LY (pp)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (_data.ProductPerformance.Count == 0)
+                                {
+                                    <tr><td colspan="10" class="dash-table-empty">No data found</td></tr>
+                                }
+                                else
+                                {
+                                    @foreach (var row in _data.ProductPerformance)
+                                    {
+                                        <tr>
+                                            <td>@row.ProductCategory</td>
+                                            <td>@row.ProductGroup</td>
+                                            <td>@row.Material — @row.MaterialName</td>
+                                            <td>@row.NetAmount.ToString("N0")</td>
+                                            <td>@row.SalesVolume.ToString("N0") @row.Unit</td>
+                                            <td>@row.AverageSellingPrice.ToString("N2")</td>
+                                            <td>@row.CostPerUnit.ToString("N2")</td>
+                                            <td>@row.GrossProfit.ToString("N0")</td>
+                                            <td class="@(row.MarginPercent >= _targetMargin ? "mdp-diff-pos" : "mdp-diff-neg")">@row.MarginPercent.ToString("0.0")%</td>
+                                            <td class="@(row.VsLastYearMarginPointDiff is null ? "mdp-kpi-na" : row.VsLastYearMarginPointDiff >= 0 ? "mdp-diff-pos" : "mdp-diff-neg")">
+                                                @(row.VsLastYearMarginPointDiff is null ? "N/A" : (row.VsLastYearMarginPointDiff >= 0 ? "+" : "") + row.VsLastYearMarginPointDiff.Value.ToString("0.0"))
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mdp-note">
+                Note: Gross Margin (%) = (Net Sales − Cost) / Net Sales × 100 | "Sales by BU" uses SalesGroup in place of Sales Channel, since the source data has no sales-channel field |
+                Sales Bridge estimates the impact on Margin% as Price / Volume-Mix / Cost (matched at SKU level, year over year) — Mix is not separated from Volume in detail | Data from SAP Billing Document
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private PricingMarginPerformanceDto? _data;
+    private bool _loading;
+
+    private string _selectedYear = DateTime.Now.Year.ToString();
+    private string _selectedPeriod = "";
+    private string _selectedSalesperson = "";
+    private string _selectedCustomerGroup = "";
+    private string _selectedProductCategory = "";
+    private decimal _targetMargin = 30m;
+
+    private bool _showAllSalesperson;
+    private bool _showAllProductCategory;
+
+    private const string TrendChartId = "mdp-trend";
+    private const string BridgeChartId = "mdp-bridge";
+    private const string DonutChartId = "mdp-donut";
+    private bool _chartsNeedRender;
+
+    private readonly List<int> _years =
+        Enumerable.Range(DateTime.Now.Year - 5, 6).OrderByDescending(y => y).ToList();
+
+    private static readonly Dictionary<string, (int? From, int? To)> PeriodMap = new()
+    {
+        [""] = (null, null),
+        ["Q1 (Jan-Mar)"] = (1, 3),
+        ["Q2 (Apr-Jun)"] = (4, 6),
+        ["Q3 (Jul-Sep)"] = (7, 9),
+        ["Q4 (Oct-Dec)"] = (10, 12),
+        ["H1 (Jan-Jun)"] = (1, 6),
+        ["H2 (Jul-Dec)"] = (7, 12),
+    };
+
+    private PricingMarginPerformanceFilter BuildFilter()
+    {
+        var range = PeriodMap.TryGetValue(_selectedPeriod, out var r) ? r : (null, null);
+        return new PricingMarginPerformanceFilter
+        {
+            Year = int.TryParse(_selectedYear, out var y) ? y : (int?)null,
+            MonthFrom = range.Item1,
+            MonthTo = range.Item2,
+            SalesEmployeeBP = string.IsNullOrWhiteSpace(_selectedSalesperson) ? null : _selectedSalesperson,
+            CustomerGroup = string.IsNullOrWhiteSpace(_selectedCustomerGroup) ? null : _selectedCustomerGroup,
+            ProductCategory = string.IsNullOrWhiteSpace(_selectedProductCategory) ? null : _selectedProductCategory,
+            TargetMarginPercent = _targetMargin
+            // SalesGroup: server บังคับตาม BU ของ user
+        };
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            if (string.IsNullOrWhiteSpace(AuthState.Token))
+                await AuthState.InitializeAsync();
+
+            _data = await MarginApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (_chartsNeedRender && _data is not null)
+        {
+            _chartsNeedRender = false;
+            await RenderChartsAsync();
+        }
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+
+    private async Task ResetAsync()
+    {
+        _selectedYear = DateTime.Now.Year.ToString();
+        _selectedPeriod = "";
+        _selectedSalesperson = "";
+        _selectedCustomerGroup = "";
+        _selectedProductCategory = "";
+        _targetMargin = 30m;
+        await LoadAsync();
+    }
+
+    private async Task OnTargetMarginChangedAsync(ChangeEventArgs e)
+    {
+        if (decimal.TryParse(e.Value?.ToString(), out var v) && v >= 0)
+            _targetMargin = v;
+        await LoadAsync();
+    }
+
+    // ⚠️ ห้ามยิง JS interop (RenderChartsAsync) ต่อจาก StateHasChanged ในเมธอดนี้ทันที —
+    // StateHasChanged แค่ mark ให้ re-render ไม่ได้การันตีว่า DOM อัปเดตแล้วจริง
+    // ต้องรอ OnAfterRenderAsync(firstRender:false) ที่ Blazor เรียกตามหลัง render จริงเท่านั้น
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try
+        {
+            _data = await MarginApi.GetAsync(BuildFilter());
+            _chartsNeedRender = _data is not null;
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        if (_data is null) return;
+
+        var trendPoints = _data.MarginTrend
+            .Select(m => new { monthName = m.MonthName, marginPercent = m.MarginPercent })
+            .ToArray();
+        await JS.InvokeVoidAsync("dashboardECharts.renderMarginTrend", TrendChartId, trendPoints, _data.TargetMarginPercent);
+
+        if (_data.MarginBridge.Count > 0)
+        {
+            var steps = _data.MarginBridge
+                .Select(s => new { label = s.Label, value = s.Value, isTotal = s.IsTotal })
+                .ToArray();
+            await JS.InvokeVoidAsync("dashboardECharts.renderMarginBridge", BridgeChartId, steps);
+        }
+
+        var buPoints = _data.SalesByBu
+            .Select(b => new { name = b.Name, value = b.NetAmount })
+            .ToArray();
+        await JS.InvokeVoidAsync("dashboardECharts.renderShareDonut", DonutChartId, buPoints, "Net Sales");
+    }
+
+    private static string FormatCompact(decimal value) => Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter.FormatCompact(value);
+
+    private RenderFragment RenderKpi(string label, string valueText, decimal? vsLastYear, decimal? vsTarget = null, string vsLastYearSuffix = "%", bool? aboveTarget = null) => __builder =>
+    {
+        var valueClass = aboveTarget is null ? "" : aboveTarget.Value ? "mdp-value-ok" : "mdp-value-bad";
+        <div class="mdp-kpi">
+            <div class="mdp-kpi-label">@label</div>
+            <div class="mdp-kpi-value @valueClass">@valueText</div>
+            <div class="mdp-kpi-compare">
+                @if (vsLastYear.HasValue)
+                {
+                    <span class="@(vsLastYear.Value >= 0 ? "mdp-diff-pos" : "mdp-diff-neg")">
+                        vs LY @(vsLastYear.Value >= 0 ? "+" : "")@vsLastYear.Value.ToString("0.0")@vsLastYearSuffix
+                    </span>
+                }
+                else
+                {
+                    <span class="mdp-kpi-na">vs LY: N/A</span>
+                }
+                @if (vsTarget.HasValue)
+                {
+                    <span class="@(vsTarget.Value >= 0 ? "mdp-diff-pos" : "mdp-diff-neg")">
+                        vs Target @(vsTarget.Value >= 0 ? "+" : "")@vsTarget.Value.ToString("0.0")pp
+                    </span>
+                }
+            </div>
+        </div>
+    };
+
+    private RenderFragment RenderMiniTable(List<MarginGroupRowDto> rows) => __builder =>
+    {
+        <div class="table-scroll">
+            <table class="table table-sm table-striped">
+                <thead>
+                    <tr><th>Customer</th><th>Net Sales</th><th>Margin %</th></tr>
+                </thead>
+                <tbody>
+                    @if (rows.Count == 0)
+                    {
+                        <tr><td colspan="3" class="dash-table-empty">No data</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var row in rows)
+                        {
+                            <tr>
+                                <td>@row.GroupName</td>
+                                <td>@FormatCompact(row.NetAmount)</td>
+                                <td class="@(row.MeetsTarget ? "mdp-diff-pos" : "mdp-diff-neg")">@row.MarginPercent.ToString("0.0")%</td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    };
+
+    private RenderFragment RenderGroupTable(string title, string keyLabel, List<MarginGroupRowDto> rows, bool showAll, Action onToggle) => __builder =>
+    {
+        var visibleRows = showAll ? rows : rows.Take(5).ToList();
+
+        <div class="dash-card">
+            <div class="dash-card-header">@title</div>
+            <div class="dash-card-body">
+                <div class="table-scroll">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>@keyLabel</th>
+                                <th>Net Sales</th>
+                                <th>Margin %</th>
+                                <th>vs Target @_targetMargin.ToString("0.#")%</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (visibleRows.Count == 0)
+                            {
+                                <tr><td colspan="5" class="dash-table-empty">No data found</td></tr>
+                            }
+                            else
+                            {
+                                @foreach (var row in visibleRows)
+                                {
+                                    <tr>
+                                        <td>@row.GroupName</td>
+                                        <td>@FormatCompact(row.NetAmount)</td>
+                                        <td class="@(row.MeetsTarget ? "mdp-diff-pos" : "mdp-diff-neg")">@row.MarginPercent.ToString("0.0")</td>
+                                        <td class="@(row.DiffFromTargetPercent >= 0 ? "mdp-diff-pos" : "mdp-diff-neg")">
+                                            @(row.DiffFromTargetPercent >= 0 ? "+" : "")@row.DiffFromTargetPercent.ToString("0.0")
+                                        </td>
+                                        <td>
+                                            <span class="mdp-status @(row.MeetsTarget ? "ok" : "bad")">
+                                                @(row.MeetsTarget ? "On Target" : "Below Target")
+                                            </span>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @if (rows.Count > 5)
+                {
+                    <button type="button" class="mdp-view-all" @onclick="() => onToggle()">
+                        @(showAll ? "Show Less" : $"View All ({rows.Count})")
+                    </button>
+                }
+            </div>
+        </div>
+    };
+
+    private IJSObjectReference? _jsModule;
+
+    private async Task ExportProductPerformanceAsync()
+    {
+        if (_data is null || _data.ProductPerformance.Count == 0) return;
+
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Product Performance");
+
+        string[] headers = { "Product Category", "Product Group", "Material", "Material Name", "Net Sales", "Sales Volume", "Unit", "ASP", "Cost/Unit", "Gross Profit", "Margin %", "vs LY (pp)" };
+        for (var i = 0; i < headers.Length; i++)
+            ws.Cell(1, i + 1).Value = headers[i];
+        ws.Row(1).Style.Font.Bold = true;
+
+        var row = 2;
+        foreach (var r in _data.ProductPerformance)
+        {
+            ws.Cell(row, 1).Value = r.ProductCategory;
+            ws.Cell(row, 2).Value = r.ProductGroup;
+            ws.Cell(row, 3).Value = r.Material;
+            ws.Cell(row, 4).Value = r.MaterialName;
+            ws.Cell(row, 5).Value = r.NetAmount;
+            ws.Cell(row, 6).Value = r.SalesVolume;
+            ws.Cell(row, 7).Value = r.Unit;
+            ws.Cell(row, 8).Value = r.AverageSellingPrice;
+            ws.Cell(row, 9).Value = r.CostPerUnit;
+            ws.Cell(row, 10).Value = r.GrossProfit;
+            ws.Cell(row, 11).Value = r.MarginPercent;
+            ws.Cell(row, 12).Value = r.VsLastYearMarginPointDiff;
+            row++;
+        }
+        ws.Columns().AdjustToContents();
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        var base64 = Convert.ToBase64String(ms.ToArray());
+
+        _jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+        await _jsModule.InvokeVoidAsync("downloadFileFromBytes",
+            $"ProductPerformance_{_selectedYear}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            base64);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_jsModule is not null)
+        {
+            try { await _jsModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+    }
+}

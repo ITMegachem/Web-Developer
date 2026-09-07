@@ -14,6 +14,53 @@ public class SapService
         _httpClientFactory = httpClientFactory;
     }
 
+    // Material Stock (On Hand Qty) — SAP standard API_MATERIAL_STOCK_SRV, entity A_MatlStkInAcctMod
+    // ★ ใช้สำหรับ Forecast Monthly Report — ยังไม่เคยยืนยัน field name จริงกับ tenant นี้โดยตรง (ต่างจาก Zoho ที่เรียก
+    //   live API ได้เอง) จึงลอง parse หลายชื่อ field ที่เป็นไปได้ใน GetOnHandQtyAsync ฝั่ง reporting service แทน
+    public async Task<string> GetMaterialStockAsync(string material)
+    {
+        var baseUrl = _configuration["SapConfig:MaterialStock:BaseUrl"];
+        var authHeader = _configuration["SapConfig:MaterialStock:AuthHeader"];
+
+        var client = _httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        var url = $"{baseUrl.TrimEnd('/')}/A_MatlStkInAcctMod?$filter=Material eq '{material}'&$format=json";
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception(result);
+
+        return result;
+    }
+
+    // ★★★ Performance tuning (2026-09) ★★★ — Forecast Monthly Report เดิมเรียก GetMaterialStockAsync ทีละ Material Code
+    // (พบจริงมากถึง ~70 ครั้งต่อการโหลด 1 ครั้ง แต่ละครั้งเปิด HttpClient ใหม่ + round trip ไป SAP แยกกัน) รวม batch
+    // เป็นการยิง 1 request ต่อ material ~25 ตัว (OData รองรับ "or" ใน $filter) ลดจำนวน round trip ไป SAP ลงหลายสิบเท่า
+    public async Task<string> GetMaterialStockBatchAsync(IEnumerable<string> materials)
+    {
+        var baseUrl = _configuration["SapConfig:MaterialStock:BaseUrl"];
+        var authHeader = _configuration["SapConfig:MaterialStock:AuthHeader"];
+
+        var client = _httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        var filter = string.Join(" or ", materials.Select(m => $"Material eq '{m}'"));
+        var url = $"{baseUrl.TrimEnd('/')}/A_MatlStkInAcctMod?$filter={Uri.EscapeDataString(filter)}&$format=json";
+
+        var response = await client.GetAsync(url);
+        var result = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception(result);
+
+        return result;
+    }
+
     public async Task<string> GetStockRequirementAsync(string material, string plant)
     {
         var baseUrl = _configuration["SapConfig:StockRequirement:BaseUrl"];

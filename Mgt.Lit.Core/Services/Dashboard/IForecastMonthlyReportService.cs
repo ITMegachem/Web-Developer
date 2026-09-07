@@ -1,0 +1,11 @@
+using System.Threading;
+using System.Threading.Tasks;
+using Mgt.Lit.Core.DTOs.DashBoard;
+
+namespace Mgt.Lit.Core.Services.Dashboard
+{
+    public interface IForecastMonthlyReportService
+    {
+        Task<ForecastMonthlyDto> GetAsync(ForecastMonthlyFilter filter, CancellationToken ct = default);
+    }
+}

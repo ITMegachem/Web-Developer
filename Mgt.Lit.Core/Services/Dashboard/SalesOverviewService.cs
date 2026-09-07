@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Mgt.Lit.Core.DTOs.DashBoard;
@@ -11,22 +10,41 @@ using Mgt.Lit.Core.Data;
 
 namespace Mgt.Lit.Core.Services.Dashboard
 {
+    // ★★★ Performance tuning (2026-09) ★★★ — MGT_Sale เป็น VIEW ที่ index ไม่ได้ (ดู comment เดียวกันใน
+    // CrossSellUpsellGainsService/PricingMarginPerformanceService/CustomerChurnAnalysisService) เดิม service นี้ยิง
+    // query แยกไปที่ MGT_Sale 8 ครั้งต่อการโหลด 1 ครั้ง (Summary 3 query, Breakdown 4 field แยกกัน 4 query, Monthly 1 query)
+    // ทั้งที่ทุกตัวใช้ scope/filter เดียวกันเป๊ะ แค่ group คนละแบบ — เพจนี้เป็นหน้า Dashboard หลักที่โหลดถี่ที่สุด
+    // จึงคุ้มที่จะรวมเหลือ query เดียว โดยดึง raw rows มาครั้งเดียวแล้ว group/sum ทุกแบบในหน่วยความจำแทน
     public class SalesOverviewService : ISalesOverviewService
     {
         private readonly AppDbContext _db;
 
         public SalesOverviewService(AppDbContext db) => _db = db;
 
+        private sealed record RawSaleRow(
+            string? SalesEmployeeBP, string? MaterialGroupName, string? AffiliateCustomerName, string? IndustryName,
+            string? SalesGroup, string? Material, string? CustomerFullName, int? Month,
+            decimal NetAmount, decimal CostAmount, decimal GrossProfit);
+
         public async Task<SalesOverviewDto> GetOverviewAsync(SalesOverviewFilter filter, CancellationToken ct = default)
         {
             // สำคัญ: EF Core DbContext ไม่ thread-safe ห้ามยิงหลาย query พร้อมกันด้วย Task.WhenAll
-            // บน DbContext ตัวเดียวกัน ต้อง await ทีละตัวแบบนี้เท่านั้น
-            var summary = await GetSummaryAsync(filter, ct);
-            var bySalesman = await GetBreakdownAsync(filter, x => x.SalesEmployeeBP, ct);
-            var byMaterialGroup = await GetBreakdownAsync(filter, x => x.MaterialGroupName, ct);
-            var byAffiliate = await GetBreakdownAsync(filter, x => x.AffiliateCustomerName, ct);
-            var byIndustry = await GetBreakdownAsync(filter, x => x.IndustryName, ct);
-            var monthly = await GetMonthlyRevenueAsync(filter, ct);
+            var query = ApplyFilter(_db.MGT_Sale.AsNoTracking(), filter);
+            var raw = await GetRawRowsAsync(query, ct);
+
+            var summary = BuildSummary(raw);
+            var bySalesman = BuildBreakdown(raw, x => x.SalesEmployeeBP);
+            var byMaterialGroup = BuildBreakdown(raw, x => x.MaterialGroupName);
+            var byAffiliate = BuildBreakdown(raw, x => x.AffiliateCustomerName);
+            var byIndustry = BuildBreakdown(raw, x => x.IndustryName);
+
+            var selectedYear = filter.Year ?? DateTime.Now.Year;
+            var maxMonth = selectedYear == DateTime.Now.Year ? DateTime.Now.Month : 12;
+            var months = await _db.MsMonths.AsNoTracking()
+                .Where(m => m.MonthId <= maxMonth)
+                .OrderBy(m => m.MonthId)
+                .ToListAsync(ct);
+            var monthly = BuildMonthlyRevenue(raw, months);
 
             return new SalesOverviewDto
             {
@@ -39,103 +57,83 @@ namespace Mgt.Lit.Core.Services.Dashboard
             };
         }
 
-        private async Task<List<BreakdownRowDto>> GetBreakdownAsync(
-            SalesOverviewFilter filter,
-            Expression<Func<MGT_Sale, string?>> keySelector,
-            CancellationToken ct)
+        // ── query เดียวที่ยิงไปที่ MGT_Sale — ดึงทุกคอลัมน์ที่ Summary/Breakdown/Monthly ต้องใช้มาในครั้งเดียว ──
+        private static async Task<List<RawSaleRow>> GetRawRowsAsync(IQueryable<MGT_Sale> query, CancellationToken ct)
         {
-            var query = ApplyFilter(_db.MGT_Sale.AsNoTracking(), filter);
-
             var rows = await query
+                .Select(x => new
+                {
+                    x.SalesEmployeeBP,
+                    x.MaterialGroupName,
+                    x.AffiliateCustomerName,
+                    x.IndustryName,
+                    x.SalesGroup,
+                    x.Material,
+                    x.CustomerFullName,
+                    Month = x.BillingDocumentDate.HasValue ? (int?)x.BillingDocumentDate.Value.Month : null,
+                    NetAmount = x.NetAmount ?? 0,
+                    CostAmount = x.CostAmount ?? 0,
+                    GrossProfit = x.GrossProfit ?? 0
+                })
+                .ToListAsync(ct);
+
+            return rows.Select(r => new RawSaleRow(
+                r.SalesEmployeeBP, r.MaterialGroupName, r.AffiliateCustomerName, r.IndustryName,
+                r.SalesGroup, r.Material, r.CustomerFullName, r.Month, r.NetAmount, r.CostAmount, r.GrossProfit)).ToList();
+        }
+
+        private static SalesSummaryDto BuildSummary(List<RawSaleRow> rows)
+        {
+            var totalRevenue = rows.Sum(x => x.NetAmount);
+            var totalCogs = rows.Sum(x => x.CostAmount);
+            var totalGrossProfit = rows.Sum(x => x.GrossProfit);
+
+            return new SalesSummaryDto
+            {
+                TotalRevenue = totalRevenue,
+                TotalCogs = totalCogs,
+                TotalGrossProfit = totalGrossProfit,
+                GrossProfitMarginPercent = totalRevenue == 0 ? 0 : Math.Round(totalGrossProfit / totalRevenue * 100, 2),
+                TotalProduct = rows.Select(x => x.Material).Distinct().Count(),
+                TotalCustomer = rows.Select(x => x.CustomerFullName).Distinct().Count(),
+                TotalBU1 = rows.Where(x => x.SalesGroup == "BU1").Sum(x => x.NetAmount),
+                TotalBU2 = rows.Where(x => x.SalesGroup == "BU2").Sum(x => x.NetAmount),
+                TotalBU3 = rows.Where(x => x.SalesGroup == "BU3").Sum(x => x.NetAmount),
+                TotalBU4 = rows.Where(x => x.SalesGroup == "BU4").Sum(x => x.NetAmount),
+                TotalOther = rows.Where(x => x.SalesGroup != "BU1" && x.SalesGroup != "BU2" && x.SalesGroup != "BU3" && x.SalesGroup != "BU4")
+                    .Sum(x => x.NetAmount)
+            };
+        }
+
+        private static List<BreakdownRowDto> BuildBreakdown(List<RawSaleRow> rows, Func<RawSaleRow, string?> keySelector)
+        {
+            return rows
                 .GroupBy(keySelector)
                 .Select(g => new
                 {
                     Key = g.Key,
-                    NetAmount = g.Sum(x => x.NetAmount ?? 0),
-                    CostAmount = g.Sum(x => x.CostAmount ?? 0),
-                    GrossProfit = g.Sum(x => x.GrossProfit ?? 0)
+                    NetAmount = g.Sum(x => x.NetAmount),
+                    CostAmount = g.Sum(x => x.CostAmount),
+                    GrossProfit = g.Sum(x => x.GrossProfit)
                 })
-                .ToListAsync(ct);
-
-            return rows.Select(r => new BreakdownRowDto
-            {
-                Key = r.Key,
-                NetAmount = r.NetAmount,
-                CostAmount = r.CostAmount,
-                GrossProfit = r.GrossProfit,
-                MarginPercent = r.NetAmount == 0 ? 0 : Math.Round(r.GrossProfit / r.NetAmount * 100, 2)
-            }).ToList();
+                .Select(r => new BreakdownRowDto
+                {
+                    Key = r.Key,
+                    NetAmount = r.NetAmount,
+                    CostAmount = r.CostAmount,
+                    GrossProfit = r.GrossProfit,
+                    MarginPercent = r.NetAmount == 0 ? 0 : Math.Round(r.GrossProfit / r.NetAmount * 100, 2)
+                })
+                .ToList();
         }
 
-        private async Task<SalesSummaryDto> GetSummaryAsync(SalesOverviewFilter filter, CancellationToken ct)
+        private static List<MonthlyRevenueDto> BuildMonthlyRevenue(List<RawSaleRow> rows, List<MsMonth> months)
         {
-            var query = ApplyFilter(_db.MGT_Sale.AsNoTracking(), filter);
-
-            var totals = await query
-                .GroupBy(x => 1)
-                .Select(g => new
-                {
-                    TotalRevenue = g.Sum(x => x.NetAmount ?? 0),
-                    TotalCogs = g.Sum(x => x.CostAmount ?? 0),
-                    TotalGrossProfit = g.Sum(x => x.GrossProfit ?? 0),
-                    TotalBU1 = g.Sum(x => x.SalesGroup == "BU1" ? (x.NetAmount ?? 0) : 0),
-                    TotalBU2 = g.Sum(x => x.SalesGroup == "BU2" ? (x.NetAmount ?? 0) : 0),
-                    TotalBU3 = g.Sum(x => x.SalesGroup == "BU3" ? (x.NetAmount ?? 0) : 0),
-                    TotalBU4 = g.Sum(x => x.SalesGroup == "BU4" ? (x.NetAmount ?? 0) : 0),
-                    TotalOther = g.Sum(x =>
-                        x.SalesGroup != "BU1" && x.SalesGroup != "BU2" &&
-                        x.SalesGroup != "BU3" && x.SalesGroup != "BU4"
-                        ? (x.NetAmount ?? 0) : 0)
-                })
-                .FirstOrDefaultAsync(ct);
-
-            // COUNT(DISTINCT ...) แยกออกมาต่างหาก เพราะรวมกับ conditional-sum ด้านบนในคำสั่งเดียวจะซับซ้อนและเสี่ยงแปลง SQL ไม่ผ่าน
-            var totalProduct = await query.Select(x => x.Material).Distinct().CountAsync(ct);
-            var totalCustomer = await query.Select(x => x.CustomerFullName).Distinct().CountAsync(ct);
-
-            if (totals is null) return new SalesSummaryDto();
-
-            return new SalesSummaryDto
-            {
-                TotalRevenue = totals.TotalRevenue,
-                TotalCogs = totals.TotalCogs,
-                TotalGrossProfit = totals.TotalGrossProfit,
-                GrossProfitMarginPercent = totals.TotalRevenue == 0 ? 0 : Math.Round(totals.TotalGrossProfit / totals.TotalRevenue * 100, 2),
-                TotalProduct = totalProduct,
-                TotalCustomer = totalCustomer,
-                TotalBU1 = totals.TotalBU1,
-                TotalBU2 = totals.TotalBU2,
-                TotalBU3 = totals.TotalBU3,
-                TotalBU4 = totals.TotalBU4,
-                TotalOther = totals.TotalOther
-            };
-        }
-
-
-
-        private async Task<List<MonthlyRevenueDto>> GetMonthlyRevenueAsync(SalesOverviewFilter filter, CancellationToken ct)
-        {
-            var query = ApplyFilter(_db.MGT_Sale.AsNoTracking(), filter);
-
-            var byMonth = await query
-                .Where(x => x.BillingDocumentDate.HasValue)
-                .GroupBy(x => x.BillingDocumentDate!.Value.Month)
-                .Select(g => new
-                {
-                    MonthId = g.Key,
-                    Revenue = g.Sum(x => x.NetAmount ?? 0),
-                    GrossProfit = g.Sum(x => x.GrossProfit ?? 0)
-                })
-                .ToListAsync(ct);
-
-            var selectedYear = filter.Year ?? DateTime.Now.Year;
-
-            var maxMonth = selectedYear == DateTime.Now.Year ? DateTime.Now.Month : 12;
-
-            var months = await _db.MsMonths.AsNoTracking()
-                .Where(m => m.MonthId <= maxMonth)
-                .OrderBy(m => m.MonthId)
-                .ToListAsync(ct);
+            var byMonth = rows
+                .Where(x => x.Month.HasValue)
+                .GroupBy(x => x.Month!.Value)
+                .Select(g => new { MonthId = g.Key, Revenue = g.Sum(x => x.NetAmount), GrossProfit = g.Sum(x => x.GrossProfit) })
+                .ToList();
 
             return months.Select(m =>
             {
@@ -152,6 +150,7 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 };
             }).ToList();
         }
+
         private static IQueryable<MGT_Sale> ApplyFilter(IQueryable<MGT_Sale> query, SalesOverviewFilter filter)
         {
             // ★ กรองตาม BU (SalesGroup) — ค่านี้ controller เป็นคน resolve จาก permission/DataScope มาแล้ว
