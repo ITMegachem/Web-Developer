@@ -92,6 +92,21 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
         public string? LostReason { get; set; }
     }
 
+    // 1 แถว = 1 Deal ที่ยังไม่ปิดผล (ทุกสถานะที่ไม่ใช่ Won/Lost เช่น Draft/Qualification, Sales Order Created)
+    public class OpenOpportunityRowDto
+    {
+        public string DealId { get; set; } = string.Empty;
+        public string OpportunityName { get; set; } = string.Empty;
+        public string CustomerName { get; set; } = string.Empty;
+        public string SalesEmployeeBP { get; set; } = string.Empty;
+        public string Product { get; set; } = string.Empty;
+        public string IndustryName { get; set; } = string.Empty;
+        public decimal DealAmount { get; set; }
+        public DateTime? ExpectedCloseDate { get; set; }   // ClosingDate ที่คาดไว้ (ยังไม่ปิดจริง ไม่มี ActualClosedDate)
+        public DateTime? DeliveryDate { get; set; }        // Zoho field "Delivery_Date" บน Deal เอง
+        public string Stage { get; set; } = string.Empty;
+    }
+
     public class WinRateSummaryDto
     {
         public int TotalOpportunities { get; set; }
@@ -113,8 +128,8 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
         public List<WinRateGroupRowDto> ByProduct { get; set; } = new();
         public List<WinRateGroupRowDto> ByIndustry { get; set; } = new();
         public List<StageFunnelRowDto> PipelineByStage { get; set; } = new();
-        public List<LostReasonRowDto> LostReasons { get; set; } = new();
         public List<ClosedOpportunityRowDto> RecentClosedOpportunities { get; set; } = new();
+        public List<OpenOpportunityRowDto> OpenOpportunities { get; set; } = new();
         public WinRateSummaryDto Summary { get; set; } = new();
 
         // ── ตัวเลือก dropdown (scope ตาม BU) ────────────────────────────────

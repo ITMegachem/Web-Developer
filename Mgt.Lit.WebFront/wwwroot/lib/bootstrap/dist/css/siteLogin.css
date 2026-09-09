@@ -148,7 +148,8 @@ body {
 .login-title-em {
     font-style: normal;
     color: #16a34a;
-    display: block;
+    display: inline;
+    white-space: nowrap;
 }
 
 .login-sub {

@@ -497,7 +497,7 @@
             },
             legend: {
                 top: 0,
-                textStyle: { fontSize: 12, color: colors.text }
+                textStyle: { fontSize: 18, color: colors.text }
             },
             grid: { left: 12, right: 18, top: 40, bottom: 28, containLabel: true },
             xAxis: {
@@ -505,11 +505,11 @@
                 boundaryGap: false,
                 data: categories,
                 axisLine: { lineStyle: { color: "#b9c2bd" } },
-                axisLabel: { color: colors.muted, fontSize: 12 }
+                axisLabel: { color: colors.muted, fontSize: 18 }
             },
             yAxis: {
                 type: "value",
-                axisLabel: { color: colors.muted, fontSize: 12, formatter: function (v) { return v + "%"; } },
+                axisLabel: { color: colors.muted, fontSize: 18, formatter: function (v) { return v + "%"; } },
                 splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
             },
             series: [
@@ -523,7 +523,7 @@
                     markLine: {
                         symbol: "none",
                         silent: true,
-                        label: { formatter: "Target " + target + "%", color: colors.muted, fontSize: 11 },
+                        label: { formatter: "Target " + target + "%", color: colors.muted, fontSize: 18 },
                         lineStyle: { color: colors.muted, type: "dashed" },
                         data: [{ yAxis: target, name: "Target" }]
                     }
@@ -586,24 +586,24 @@
                 type: "category",
                 data: categories,
                 axisLine: { lineStyle: { color: "#b9c2bd" } },
-                axisLabel: { color: colors.muted, fontSize: 11, interval: 0 }
+                axisLabel: { color: colors.muted, fontSize: 18, interval: 0 }
             },
             yAxis: {
                 type: "value",
-                axisLabel: { color: colors.muted, fontSize: 12, formatter: function (v) { return v + "pp"; } },
+                axisLabel: { color: colors.muted, fontSize: 18, formatter: function (v) { return v + "pp"; } },
                 splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
             },
             series: [
                 { name: "base", type: "bar", stack: "bridge", itemStyle: { color: "transparent" }, emphasis: { itemStyle: { color: "transparent" } }, data: base, silent: true },
-                { name: "Increase", type: "bar", stack: "bridge", barMaxWidth: 46, itemStyle: { borderRadius: [4, 4, 0, 0] }, data: increase, label: { show: true, position: "top", formatter: function (p) { return "+" + formatPercent(p.value); }, fontSize: 11, color: colors.text } },
-                { name: "Decrease", type: "bar", stack: "bridge", barMaxWidth: 46, color: colors.red, itemStyle: { borderRadius: [4, 4, 0, 0] }, data: decrease, label: { show: true, position: "top", formatter: function (p) { return "-" + formatPercent(p.value); }, fontSize: 11, color: colors.text } },
-                { name: "Total", type: "bar", stack: "bridge", barMaxWidth: 46, color: colors.blue, itemStyle: { borderRadius: [4, 4, 0, 0] }, data: total, label: { show: true, position: "top", formatter: function (p) { return formatPercent(p.value); }, fontSize: 11, color: colors.text } }
+                { name: "Increase", type: "bar", stack: "bridge", barMaxWidth: 46, itemStyle: { borderRadius: [4, 4, 0, 0] }, data: increase, label: { show: true, position: "top", formatter: function (p) { return "+" + formatPercent(p.value); }, fontSize: 18, color: colors.text } },
+                { name: "Decrease", type: "bar", stack: "bridge", barMaxWidth: 46, color: colors.red, itemStyle: { borderRadius: [4, 4, 0, 0] }, data: decrease, label: { show: true, position: "top", formatter: function (p) { return "-" + formatPercent(p.value); }, fontSize: 18, color: colors.text } },
+                { name: "Total", type: "bar", stack: "bridge", barMaxWidth: 46, color: colors.blue, itemStyle: { borderRadius: [4, 4, 0, 0] }, data: total, label: { show: true, position: "top", formatter: function (p) { return formatPercent(p.value); }, fontSize: 18, color: colors.text } }
             ],
             graphic: emptyGraphic(safeSteps.length > 0)
         });
     }
 
-    function renderShareDonut(elementId, points, centerLabel) {
+    function renderShareDonut(elementId, points, centerLabel, dotNetRef) {
         const safePoints = Array.isArray(points) ? points : [];
         const total = safePoints.reduce(function (sum, point) { return sum + asNumber(point.value); }, 0);
 
@@ -620,7 +620,7 @@
                 top: "middle",
                 itemWidth: 10,
                 itemHeight: 10,
-                textStyle: { fontSize: 12, color: colors.text }
+                textStyle: { fontSize: 18, color: colors.text }
             },
             series: [
                 {
@@ -642,7 +642,7 @@
                     style: {
                         text: formatCompact(total),
                         fill: colors.text,
-                        font: "700 18px Segoe UI, Arial, sans-serif",
+                        font: "700 20px Segoe UI, Arial, sans-serif",
                         textAlign: "center"
                     }
                 },
@@ -653,12 +653,26 @@
                     style: {
                         text: String(centerLabel || ""),
                         fill: colors.muted,
-                        font: "500 11px Segoe UI, Arial, sans-serif",
+                        font: "500 18px Segoe UI, Arial, sans-serif",
                         textAlign: "center"
                     }
                 }
             ] : emptyGraphic(false)
         });
+
+        const chart = charts.get(elementId);
+        if (!chart) {
+            return;
+        }
+
+        chart.off("click");
+        if (dotNetRef) {
+            chart.on("click", function (params) {
+                if (params.componentType === "series" && params.seriesType === "pie") {
+                    dotNetRef.invokeMethodAsync("OnDonutSliceClicked", params.name);
+                }
+            });
+        }
     }
 
     // ── Customer Churn Analysis Report — 2 กราฟใหม่ ────────────────────────────
@@ -684,11 +698,11 @@
                 boundaryGap: false,
                 data: categories,
                 axisLine: { lineStyle: { color: "#b9c2bd" } },
-                axisLabel: { color: colors.muted, fontSize: 12 }
+                axisLabel: { color: colors.muted, fontSize: 18 }
             },
             yAxis: {
                 type: "value",
-                axisLabel: { color: colors.muted, fontSize: 12, formatter: function (v) { return v + "%"; } },
+                axisLabel: { color: colors.muted, fontSize: 18, formatter: function (v) { return v + "%"; } },
                 splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
             },
             series: [
@@ -727,7 +741,7 @@
             grid: { left: 12, right: 24, top: 18, bottom: 28, containLabel: true },
             xAxis: {
                 type: "value",
-                axisLabel: { color: colors.muted, fontSize: 12, formatter: function (v) { return v + "%"; } },
+                axisLabel: { color: colors.muted, fontSize: 18, formatter: function (v) { return v + "%"; } },
                 splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
             },
             yAxis: {
@@ -735,7 +749,7 @@
                 data: categories,
                 inverse: true,
                 axisLine: { lineStyle: { color: "#b9c2bd" } },
-                axisLabel: { color: colors.muted, fontSize: 12 }
+                axisLabel: { color: colors.muted, fontSize: 18 }
             },
             series: [
                 {
@@ -744,11 +758,11 @@
                     barMaxWidth: 22,
                     itemStyle: { borderRadius: [0, 4, 4, 0] },
                     data: safeRows.map(function (row) { return asNumber(row.churnRatePercent); }),
-                    label: { show: true, position: "right", formatter: function (p) { return formatPercent(p.value); }, fontSize: 11, color: colors.text },
+                    label: { show: true, position: "right", formatter: function (p) { return formatPercent(p.value); }, fontSize: 18, color: colors.text },
                     markLine: overall > 0 ? {
                         symbol: "none",
                         silent: true,
-                        label: { formatter: "Overall " + overall + "%", color: colors.muted, fontSize: 11 },
+                        label: { formatter: "Overall " + overall + "%", color: colors.muted, fontSize: 18 },
                         lineStyle: { color: colors.muted, type: "dashed" },
                         data: [{ xAxis: overall, name: "Overall" }]
                     } : undefined
@@ -777,20 +791,20 @@
                     return String(p.periodLabel || "") + "\nWin Rate: " + wr + "\nClosed Deals: " + asNumber(p.closedDeals);
                 }
             },
-            legend: { top: 0, textStyle: { fontSize: 12, color: colors.text } },
+            legend: { top: 0, textStyle: { fontSize: 18, color: colors.text } },
             grid: { left: 12, right: 18, top: 40, bottom: 28, containLabel: true },
             xAxis: {
                 type: "category",
                 data: categories,
                 axisLine: { lineStyle: { color: "#b9c2bd" } },
-                axisLabel: { color: colors.muted, fontSize: 11 }
+                axisLabel: { color: colors.muted, fontSize: 18 }
             },
             yAxis: [
                 {
                     type: "value",
                     name: "Closed Deals",
-                    nameTextStyle: { color: colors.muted, fontSize: 11 },
-                    axisLabel: { color: colors.muted, fontSize: 12 },
+                    nameTextStyle: { color: colors.muted, fontSize: 18 },
+                    axisLabel: { color: colors.muted, fontSize: 18 },
                     splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
                 },
                 {
@@ -798,7 +812,7 @@
                     name: "Win Rate",
                     position: "right",
                     scale: true,
-                    axisLabel: { color: colors.muted, fontSize: 12, formatter: function (v) { return v + "%"; } },
+                    axisLabel: { color: colors.muted, fontSize: 18, formatter: function (v) { return v + "%"; } },
                     splitLine: { show: false }
                 }
             ],
@@ -845,7 +859,7 @@
             xAxis: {
                 type: "value",
                 max: 100,
-                axisLabel: { color: colors.muted, fontSize: 12, formatter: function (v) { return v + "%"; } },
+                axisLabel: { color: colors.muted, fontSize: 18, formatter: function (v) { return v + "%"; } },
                 splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
             },
             yAxis: {
@@ -853,7 +867,7 @@
                 data: categories,
                 inverse: true,
                 axisLine: { lineStyle: { color: "#b9c2bd" } },
-                axisLabel: { color: colors.muted, fontSize: 12 }
+                axisLabel: { color: colors.muted, fontSize: 18 }
             },
             series: [
                 {
@@ -873,7 +887,7 @@
                     label: {
                         show: true,
                         position: "right",
-                        fontSize: 11,
+                        fontSize: 18,
                         color: colors.text,
                         formatter: function (p) {
                             const row = safeRows[p.dataIndex] || {};
@@ -902,7 +916,7 @@
                 top: "middle",
                 itemWidth: 10,
                 itemHeight: 10,
-                textStyle: { fontSize: 12, color: colors.text }
+                textStyle: { fontSize: 18, color: colors.text }
             },
             series: [
                 {
@@ -927,7 +941,7 @@
                     type: "text",
                     left: "27%",
                     top: "58%",
-                    style: { text: String(centerLabel || ""), fill: colors.muted, font: "500 11px Segoe UI, Arial, sans-serif", textAlign: "center" }
+                    style: { text: String(centerLabel || ""), fill: colors.muted, font: "500 18px Segoe UI, Arial, sans-serif", textAlign: "center" }
                 }
             ] : emptyGraphic(false)
         });
@@ -954,8 +968,89 @@
                     max: safeRows.reduce(function (m, r) { return Math.max(m, asNumber(r.dealCount)); }, 1),
                     sort: "none",
                     gap: 3,
-                    label: { show: true, position: "inside", formatter: function (p) { return p.name + "\n" + p.value; }, fontSize: 11, color: "#fff" },
+                    label: { show: true, position: "inside", formatter: function (p) { return p.name + "\n" + p.value; }, fontSize: 18, color: "#fff" },
                     itemStyle: { borderColor: "#fff", borderWidth: 1 },
+                    data: safeRows.map(function (row) { return { name: String(row.stage || ""), value: asNumber(row.dealCount) }; })
+                }
+            ],
+            graphic: emptyGraphic(safeRows.length > 0)
+        });
+    }
+
+    function renderStageBar(elementId, rows) {
+        const safeRows = Array.isArray(rows) ? rows : [];
+        const categories = safeRows.map(function (row) { return String(row.stage || ""); });
+
+        render(elementId, {
+            color: colors.donut,
+            tooltip: {
+                trigger: "axis",
+                axisPointer: { type: "shadow" },
+                confine: true,
+                formatter: function (params) {
+                    const items = Array.isArray(params) ? params : [params];
+                    const row = safeRows[items[0].dataIndex] || {};
+                    return String(row.stage || "") + ": " + asNumber(row.dealCount) + " deals";
+                }
+            },
+            grid: { left: 12, right: 34, top: 10, bottom: 22, containLabel: true },
+            xAxis: {
+                type: "value",
+                minInterval: 1,
+                axisLabel: { color: colors.muted, fontSize: 18 },
+                splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
+            },
+            yAxis: {
+                type: "category",
+                data: categories,
+                inverse: true,
+                axisLine: { lineStyle: { color: "#b9c2bd" } },
+                axisLabel: { color: colors.muted, fontSize: 18 }
+            },
+            series: [
+                {
+                    name: "Deals",
+                    type: "bar",
+                    barMaxWidth: 20,
+                    itemStyle: {
+                        borderRadius: [0, 4, 4, 0],
+                        color: function (p) { return colors.donut[p.dataIndex % colors.donut.length]; }
+                    },
+                    data: safeRows.map(function (row) { return asNumber(row.dealCount); }),
+                    label: { show: true, position: "right", fontSize: 18, color: colors.text }
+                }
+            ],
+            graphic: emptyGraphic(safeRows.length > 0)
+        });
+    }
+
+    function renderStagePie(elementId, rows) {
+        const safeRows = Array.isArray(rows) ? rows : [];
+
+        render(elementId, {
+            color: colors.donut,
+            tooltip: {
+                trigger: "item",
+                confine: true,
+                formatter: function (p) { return p.name + ": " + asNumber(p.value) + " deals (" + p.percent + "%)"; }
+            },
+            legend: {
+                orient: "vertical",
+                right: 4,
+                top: "middle",
+                itemWidth: 10,
+                itemHeight: 10,
+                textStyle: { fontSize: 18, color: colors.text }
+            },
+            series: [
+                {
+                    name: "Sales Pipeline",
+                    type: "pie",
+                    radius: "72%",
+                    center: ["38%", "50%"],
+                    avoidLabelOverlap: true,
+                    label: { show: true, formatter: function (p) { return p.name + "\n" + p.value; }, fontSize: 18, color: colors.text },
+                    labelLine: { show: true },
                     data: safeRows.map(function (row) { return { name: String(row.stage || ""), value: asNumber(row.dealCount) }; })
                 }
             ],
@@ -989,20 +1084,20 @@
                     return String(p.periodLabel || "") + "\nAvg Days to Close: " + avg + "\nClosed Won Deals: " + asNumber(p.closedWonDeals);
                 }
             },
-            legend: { top: 0, textStyle: { fontSize: 12, color: colors.text } },
+            legend: { top: 0, textStyle: { fontSize: 18, color: colors.text } },
             grid: { left: 12, right: 18, top: 40, bottom: 28, containLabel: true },
             xAxis: {
                 type: "category",
                 data: categories,
                 axisLine: { lineStyle: { color: "#b9c2bd" } },
-                axisLabel: { color: colors.muted, fontSize: 11 }
+                axisLabel: { color: colors.muted, fontSize: 18 }
             },
             yAxis: [
                 {
                     type: "value",
                     name: "Closed Won Deals",
-                    nameTextStyle: { color: colors.muted, fontSize: 11 },
-                    axisLabel: { color: colors.muted, fontSize: 12 },
+                    nameTextStyle: { color: colors.muted, fontSize: 18 },
+                    axisLabel: { color: colors.muted, fontSize: 18 },
                     splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
                 },
                 {
@@ -1010,7 +1105,7 @@
                     name: "Avg Days",
                     position: "right",
                     scale: true,
-                    axisLabel: { color: colors.muted, fontSize: 12 },
+                    axisLabel: { color: colors.muted, fontSize: 18 },
                     splitLine: { show: false }
                 }
             ],
@@ -1056,7 +1151,7 @@
             grid: { left: 12, right: 34, top: 10, bottom: 22, containLabel: true },
             xAxis: {
                 type: "value",
-                axisLabel: { color: colors.muted, fontSize: 12, formatter: function (v) { return v + "d"; } },
+                axisLabel: { color: colors.muted, fontSize: 18, formatter: function (v) { return v + "d"; } },
                 splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
             },
             yAxis: {
@@ -1064,7 +1159,7 @@
                 data: categories,
                 inverse: true,
                 axisLine: { lineStyle: { color: "#b9c2bd" } },
-                axisLabel: { color: colors.muted, fontSize: 12 }
+                axisLabel: { color: colors.muted, fontSize: 18 }
             },
             series: [
                 {
@@ -1076,7 +1171,7 @@
                         color: function (p) { return dayBandColor((safeRows[p.dataIndex] || {}).avgDays); }
                     },
                     data: safeRows.map(function (row) { return asNumber(row.avgDays); }),
-                    label: { show: true, position: "right", fontSize: 11, color: colors.text, formatter: function (p) { return asNumber(p.value) + "d"; } }
+                    label: { show: true, position: "right", fontSize: 18, color: colors.text, formatter: function (p) { return asNumber(p.value) + "d"; } }
                 }
             ],
             graphic: emptyGraphic(safeRows.length > 0)
@@ -1104,20 +1199,20 @@
                     return [title].concat(lines).join("\n");
                 }
             },
-            legend: { top: 0, textStyle: { fontSize: 12, color: colors.text } },
+            legend: { top: 0, textStyle: { fontSize: 18, color: colors.text } },
             grid: { left: 12, right: 18, top: 40, bottom: 28, containLabel: true },
             xAxis: {
                 type: "category",
                 data: categories,
                 axisLine: { lineStyle: { color: "#b9c2bd" } },
-                axisLabel: { color: colors.muted, fontSize: 11 }
+                axisLabel: { color: colors.muted, fontSize: 18 }
             },
             yAxis: [
                 {
                     type: "value",
                     name: "Revenue",
-                    nameTextStyle: { color: colors.muted, fontSize: 11 },
-                    axisLabel: { color: colors.muted, fontSize: 12, formatter: formatCompact },
+                    nameTextStyle: { color: colors.muted, fontSize: 18 },
+                    axisLabel: { color: colors.muted, fontSize: 18, formatter: formatCompact },
                     splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
                 },
                 {
@@ -1125,7 +1220,7 @@
                     name: "Expansion Rate",
                     position: "right",
                     scale: true,
-                    axisLabel: { color: colors.muted, fontSize: 12, formatter: function (v) { return v + "%"; } },
+                    axisLabel: { color: colors.muted, fontSize: 18, formatter: function (v) { return v + "%"; } },
                     splitLine: { show: false }
                 }
             ],
@@ -1158,7 +1253,7 @@
             grid: { left: 12, right: 24, top: 10, bottom: 22, containLabel: true },
             xAxis: {
                 type: "value",
-                axisLabel: { color: colors.muted, fontSize: 12, formatter: function (v) { return v + "%"; } },
+                axisLabel: { color: colors.muted, fontSize: 18, formatter: function (v) { return v + "%"; } },
                 splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
             },
             yAxis: {
@@ -1166,7 +1261,7 @@
                 data: categories,
                 inverse: true,
                 axisLine: { lineStyle: { color: "#b9c2bd" } },
-                axisLabel: { color: colors.muted, fontSize: 12 }
+                axisLabel: { color: colors.muted, fontSize: 18 }
             },
             series: [
                 {
@@ -1180,7 +1275,7 @@
                     label: {
                         show: true,
                         position: function (p) { return p.value >= 0 ? "right" : "left"; },
-                        fontSize: 11,
+                        fontSize: 18,
                         color: colors.text,
                         formatter: function (p) { return (p.value >= 0 ? "+" : "") + formatPercent(p.value); }
                     }
@@ -1360,17 +1455,17 @@
                     return [title].concat(lines).join("\n");
                 }
             },
-            legend: { top: 0, textStyle: { fontSize: 12, color: colors.text } },
+            legend: { top: 0, textStyle: { fontSize: 18, color: colors.text } },
             grid: { left: 12, right: 18, top: 40, bottom: 28, containLabel: true },
             xAxis: {
                 type: "category",
                 data: categories,
                 axisLine: { lineStyle: { color: "#b9c2bd" } },
-                axisLabel: { color: colors.muted, fontSize: 11 }
+                axisLabel: { color: colors.muted, fontSize: 18 }
             },
             yAxis: {
                 type: "value",
-                axisLabel: { color: colors.muted, fontSize: 12, formatter: formatCompact },
+                axisLabel: { color: colors.muted, fontSize: 18, formatter: formatCompact },
                 splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
             },
             series: [
@@ -1508,18 +1603,18 @@
                         "\nWon: " + asNumber(p.wonDeals) + "\nLost: " + asNumber(p.lostDeals);
                 }
             },
-            legend: { top: 0, textStyle: { fontSize: 12, color: colors.text } },
+            legend: { top: 0, textStyle: { fontSize: 18, color: colors.text } },
             grid: { left: 12, right: 18, top: 40, bottom: 28, containLabel: true },
             xAxis: {
                 type: "category",
                 data: categories,
                 axisLine: { lineStyle: { color: "#b9c2bd" } },
-                axisLabel: { color: colors.muted, fontSize: 11 }
+                axisLabel: { color: colors.muted, fontSize: 18 }
             },
             yAxis: {
                 type: "value",
                 minInterval: 1,
-                axisLabel: { color: colors.muted, fontSize: 12 },
+                axisLabel: { color: colors.muted, fontSize: 18 },
                 splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
             },
             series: [
@@ -1553,7 +1648,7 @@
             grid: { left: 12, right: 34, top: 10, bottom: 22, containLabel: true },
             xAxis: {
                 type: "value",
-                axisLabel: { color: colors.muted, fontSize: 12, formatter: function (v) { return v + "%"; } },
+                axisLabel: { color: colors.muted, fontSize: 18, formatter: function (v) { return v + "%"; } },
                 splitLine: { lineStyle: { color: colors.grid, type: "dashed" } }
             },
             yAxis: {
@@ -1561,7 +1656,7 @@
                 data: categories,
                 inverse: true,
                 axisLine: { lineStyle: { color: "#b9c2bd" } },
-                axisLabel: { color: colors.muted, fontSize: 12 }
+                axisLabel: { color: colors.muted, fontSize: 18 }
             },
             series: [
                 {
@@ -1570,7 +1665,7 @@
                     barMaxWidth: 20,
                     itemStyle: { borderRadius: [0, 4, 4, 0] },
                     data: safeRows.map(function (row) { return asNumber(row.sharePercent); }),
-                    label: { show: true, position: "right", fontSize: 11, color: colors.text, formatter: function (p) { return formatPercent(p.value); } }
+                    label: { show: true, position: "right", fontSize: 18, color: colors.text, formatter: function (p) { return formatPercent(p.value); } }
                 }
             ],
             graphic: emptyGraphic(safeRows.length > 0)
@@ -1612,6 +1707,8 @@
         renderWinRateBar: renderWinRateBar,
         renderDonutWithCenterMetric: renderDonutWithCenterMetric,
         renderStageFunnel: renderStageFunnel,
+        renderStageBar: renderStageBar,
+        renderStagePie: renderStagePie,
         renderDaysToCloseTrend: renderDaysToCloseTrend,
         renderAvgDaysBar: renderAvgDaysBar,
         renderExpansionTrend: renderExpansionTrend,

@@ -66,6 +66,7 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
         public string MaterialName { get; set; } = string.Empty;
         public string ProductCategory { get; set; } = string.Empty;   // MaterialGroupName
         public string ProductGroup { get; set; } = string.Empty;
+        public string SalesEmployeeBP { get; set; } = string.Empty;   // salesperson จากรายการขายล่าสุดของ material นี้
         public decimal NetAmount { get; set; }
         public decimal SalesVolume { get; set; }
         public string Unit { get; set; } = string.Empty;

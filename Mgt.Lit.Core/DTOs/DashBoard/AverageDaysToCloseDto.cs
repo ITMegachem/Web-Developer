@@ -36,6 +36,10 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
         public string? LongestSalespersonName { get; set; }
         public double? LongestSalespersonAvgDays { get; set; }
 
+        // ★ Variance = Closing Date (วันที่คาดว่าจะปิด) - Actual Closing Date (วันที่ปิดจริง) เฉลี่ยเป็นวัน
+        // บวก = ปิดเร็วกว่าที่วางแผนไว้, ลบ = ปิดช้ากว่าแผน — คำนวณเฉพาะ Deal ที่มี Actual Closing Date จริง (ไม่ fallback)
+        public double? AvgVarianceDays { get; set; }
+
         // ── เทียบกับช่วงก่อนหน้า (ความยาวช่วงเวลาเท่ากัน ต่อท้ายกันทันที ก่อน DateFrom) ─────
         // ทุกตัวเป็น % เปลี่ยนแปลงเทียบช่วงก่อนหน้า (Current-Previous)/Previous*100 ยกเว้นที่ระบุหน่วยไว้ชัดเจน
         public double? AvgDaysChangeVsPrevious { get; set; }        // ผลต่างเป็น "วัน" (ติดลบ = เร็วขึ้น) — ตามสเปคข้อ 16
@@ -84,6 +88,9 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
         public DateTime? ClosedWonDate { get; set; }
         public int? DaysToClose { get; set; }
         public string Status { get; set; } = string.Empty;
+
+        // ★ Variance = Closing Date - Actual Closing Date (null ถ้าไม่มี Actual Closing Date จริง)
+        public int? VarianceDays { get; set; }
     }
 
     public class AverageDaysToCloseDto

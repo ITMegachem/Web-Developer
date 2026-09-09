@@ -4,6 +4,7 @@
     {
         public int? Year { get; set; }
         public string? SalesGroup { get; set; }          // BU — server บังคับตาม permission
+        public string? SalesEmployeeBP { get; set; }      // server บังคับ (ล็อกเป็นของตัวเองถ้า UserRole เป็นพนักงานขายทั่วไป)
         public string? CustomerFullName { get; set; }     // Company / ลูกค้า
         public string? IndustryName { get; set; }         // [Industry Name]
     }

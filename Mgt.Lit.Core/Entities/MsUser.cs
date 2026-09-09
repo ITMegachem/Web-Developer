@@ -15,10 +15,13 @@ namespace Mgt.Lit.Core.Entities
         public string? Password { get; set; }
         public string? FullName { get; set; }
         public string? UserRole { get; set; }
+        public string? Position { get; set; }
         public bool IsActive { get; set; }
         public string? Division { get; set; }
         public string? TokenVersion { get; set; }
         public string? Email { get; set; }
+        public string? Department { get; set; }
+        public string? SalesOrganization { get; set; }
     }
     [Table("Ms_Company")]
     public class MsCompany

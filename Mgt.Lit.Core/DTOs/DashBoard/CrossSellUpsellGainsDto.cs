@@ -76,6 +76,7 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
     public class TopCustomerExpansionRowDto
     {
         public string CustomerName { get; set; } = string.Empty;
+        public string SalesEmployeeBP { get; set; } = string.Empty;   // ชื่อ salesperson จากรายการขายล่าสุดของ customer นี้ (ดู pattern เดียวกันใน CustomerChurnAnalysisService)
         public decimal ExistingRevenue { get; set; }
         public decimal CrossSellRevenue { get; set; }
         public decimal UpsellRevenue { get; set; }
@@ -89,6 +90,17 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
         public int CustomerCount { get; set; }
         public decimal SharePercent { get; set; }
         public string Priority { get; set; } = string.Empty;          // High / Medium / Develop
+
+        // ★ รายชื่อลูกค้าในกลุ่มนี้ — สำหรับ popup รายละเอียดตอน Click แถวในตาราง
+        public List<ProductGroupCountCustomerDto> Customers { get; set; } = new();
+    }
+
+    public class ProductGroupCountCustomerDto
+    {
+        public string CustomerName { get; set; } = string.Empty;
+        public int GroupCount { get; set; }
+        public decimal Revenue { get; set; }
+        public List<string> ProductGroups { get; set; } = new();
     }
 
     public class CrossSellByProductGroupRowDto
@@ -98,6 +110,15 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
         public decimal CrossSellRevenue { get; set; }
         public int CrossSellCustomers { get; set; }
         public decimal SharePercent { get; set; }
+
+        // ★ รายชื่อลูกค้าที่ Cross-Sell กลุ่มสินค้านี้ — สำหรับ popup รายละเอียดตอน Click แถวในตาราง
+        public List<ProductGroupRevenueCustomerDto> Customers { get; set; } = new();
+    }
+
+    public class ProductGroupRevenueCustomerDto
+    {
+        public string CustomerName { get; set; } = string.Empty;
+        public decimal Revenue { get; set; }
     }
 
     public class UpsellByProductGroupRowDto

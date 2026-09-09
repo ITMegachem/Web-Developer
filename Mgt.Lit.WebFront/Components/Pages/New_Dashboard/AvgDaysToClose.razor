@@ -2,14 +2,16 @@
 @using Mgt.Lit.WebFront.Components.Layout.MainLay
 @layout AppLayout
 @rendermode InteractiveServer
-<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css?v=20260909a" />
 @using System.Linq
 @using Microsoft.JSInterop
 @using Mgt.Lit.Core.DTOs.DashBoard
 @using Mgt.Lit.WebFront.Services.DashBoard
 @using Mgt.Lit.WebFront.Components
+@using ClosedXML.Excel
 @inject DashAverageDaysToCloseApiService DaysToCloseApi
 @inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject DownloadLogService DownloadLogSvc
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
@@ -27,25 +29,30 @@
     }
     .adc-reset-btn:hover { background: var(--neutral-100); }
 
-    .adc-kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 12px; }
+    .adc-toolbar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 14px; }
+    .adc-btn-export { background: #15803d; color: #fff; border: 1px solid #15803d; font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 10px; white-space: nowrap; }
+    .adc-btn-export:hover { opacity: 0.92; }
+    .adc-btn-export:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .adc-kpi-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 14px; margin-bottom: 12px; }
 
     .adc-kpi { background: var(--surface); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px 16px; }
-    .adc-kpi-label { font-size: 12.5px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
-    .adc-kpi-value { font-size: 24px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
+    .adc-kpi-label { font-size: 15px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
+    .adc-kpi-value { font-size: 30px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
     .adc-kpi-value.danger { color: #be123c; }
-    .adc-kpi-sub { font-size: 11.5px; color: var(--muted); margin-bottom: 4px; }
-    .adc-kpi-compare { font-size: 11.5px; }
+    .adc-kpi-sub { font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+    .adc-kpi-compare { font-size: 14px; }
 
-    .adc-legend { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; font-size: 12.5px; color: var(--neutral-700); margin-bottom: 16px; }
+    .adc-legend { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; font-size: 18px; color: var(--neutral-700); margin-bottom: 16px; }
     .adc-legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
 
     .adc-insight {
         display: flex; align-items: center; gap: 12px;
         background: #eef6fb; border: 1px solid #cfe4f2; border-radius: 12px;
-        padding: 12px 18px; margin-bottom: 16px; font-size: 13px; color: #1f2933;
+        padding: 12px 18px; margin-bottom: 16px; font-size: 18px; color: #1f2933;
     }
     .adc-insight-badge {
-        background: #2f7cb0; color: #fff; font-weight: 700; font-size: 12px;
+        background: #2f7cb0; color: #fff; font-weight: 700; font-size: 18px;
         padding: 6px 14px; border-radius: 999px; white-space: nowrap;
     }
 
@@ -61,11 +68,14 @@
     .adc-diff-pos { color: #15803d; font-weight: 600; }
     .adc-diff-neg { color: #b91c1c; font-weight: 600; }
 
-    .adc-summary-row { display: flex; justify-content: space-between; font-size: 12.5px; padding: 4px 0; }
-    .adc-summary-row.total { font-weight: 700; border-top: 1px solid var(--card-border); margin-top: 6px; padding-top: 8px; }
+    .adc-summary-row { display: flex; justify-content: space-between; font-size: 14px; padding: 8px 0; }
+    .adc-summary-row.total { font-weight: 700; border-top: 1px solid var(--card-border); margin-top: 8px; padding-top: 12px; }
 
-    .adc-empty-panel { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 180px; color: var(--muted); font-size: 12.5px; text-align: center; padding: 12px; }
-    .adc-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    /* ★ ให้ตรงกับ Opportunity Win Rate Report (18px) */
+    .table-scroll th, .table-scroll td { font-size: 18px !important; }
+
+    .adc-empty-panel { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 180px; color: var(--muted); font-size: 18px; text-align: center; padding: 12px; }
+    .adc-note { font-size: 18px; color: var(--muted); margin-top: 4px; }
 
     @@media (max-width: 1400px) {
         .adc-kpi-row { grid-template-columns: repeat(3, 1fr); }
@@ -89,6 +99,13 @@
             </div>
         </div>
 
+        @if (CanExport)
+        {
+            <div class="adc-toolbar">
+                <button type="button" class="adc-btn-export" @onclick="ExportToExcelAsync" disabled="@(_data is null || _data.RecentClosedWonOpportunities.Count == 0)">⬇ Export Excel</button>
+            </div>
+        }
+
         <div class="dash-filters dash-filter-panel">
             <div class="dash-field">
                 <div class="dash-field-label">Closed Won Date Range</div>
@@ -100,7 +117,7 @@
                             Placeholder="All" Options="@(_data?.AvailableSalesEmployees ?? new())" />
             </div>
             <div class="dash-field">
-                <div class="dash-field-label">Product</div>
+                <div class="dash-field-label">Material</div>
                 <DashSelect @bind-Value="_selectedProduct" @bind-Value:after="ReloadAsync"
                             Placeholder="All" Options="@(_data?.AvailableProducts ?? new())" />
             </div>
@@ -110,7 +127,7 @@
                             Placeholder="All" Options="@(_data?.AvailableIndustries ?? new())" />
             </div>
             <div class="dash-field">
-                <div class="dash-field-label">Customer</div>
+                <div class="dash-field-label">Sold-to Party</div>
                 <DashSelect @bind-Value="_selectedCustomer" @bind-Value:after="ReloadAsync"
                             Placeholder="All" Options="@(_data?.AvailableCustomers ?? new())" />
             </div>
@@ -138,12 +155,12 @@
                     @RenderPercentCompare(kpi.AvgDaysImprovementPercent, invert: false)
                 </div>
                 <div class="adc-kpi">
-                    <div class="adc-kpi-label">Fastest Customer</div>
+                    <div class="adc-kpi-label">Fastest Sold-to Party</div>
                     <div class="adc-kpi-value">@(kpi.FastestCustomerDays?.ToString() ?? "N/A")</div>
                     <div class="adc-kpi-sub">@(kpi.FastestCustomerName ?? "—")</div>
                 </div>
                 <div class="adc-kpi">
-                    <div class="adc-kpi-label">Slowest Customer</div>
+                    <div class="adc-kpi-label">Slowest Sold-to Party</div>
                     <div class="adc-kpi-value danger">@(kpi.SlowestCustomerDays?.ToString() ?? "N/A")</div>
                     <div class="adc-kpi-sub">@(kpi.SlowestCustomerName ?? "—")</div>
                 </div>
@@ -163,6 +180,11 @@
                     <div class="adc-kpi-value danger">@kpi.DealsOver90Days (@kpi.DealsOver90DaysPercent.ToString("0.0")%)</div>
                     <div class="adc-kpi-sub">Deals that took too long</div>
                     @RenderPercentCompare(kpi.DealsOver90DaysRateChangePercent, invert: false)
+                </div>
+                <div class="adc-kpi">
+                    <div class="adc-kpi-label">Avg. Variance</div>
+                    <div class="adc-kpi-value @(kpi.AvgVarianceDays is < 0 ? "danger" : "")">@(kpi.AvgVarianceDays?.ToString("0.0") ?? "N/A")</div>
+                    <div class="adc-kpi-sub">Closing Date − Actual Closing Date (+early / −late)</div>
                 </div>
             </div>
 
@@ -215,7 +237,7 @@
 
             <div class="adc-chart-row">
                 <div class="dash-card">
-                    <div class="dash-card-header">Avg Days to Close by Product (Top 10)</div>
+                    <div class="dash-card-header">Avg Days to Close by Material (Top 10)</div>
                     <div class="dash-card-body">
                         @if (_data.ByProduct.Count == 0)
                         {
@@ -229,7 +251,7 @@
                 </div>
 
                 @RenderDaysTable("Avg Days to Close by Salesperson", "Salesperson", _data.BySalesperson, showMinMax: false)
-                @RenderDaysTable("Avg Days to Close by Customer (Top 8)", "Customer", _data.ByCustomer.Take(8).ToList(), showMinMax: true)
+                @RenderDaysTable("Avg Days to Close by Sold-to Party (Top 8)", "Sold-to Party", _data.ByCustomer.Take(8).ToList(), showMinMax: true)
             </div>
 
             <div class="adc-table-row">
@@ -240,16 +262,16 @@
                             <table class="table table-striped table-hover">
                                 <thead>
                                     <tr>
-                                        <th>Deal ID</th>
                                         <th>Opportunity Name</th>
-                                        <th>Customer</th>
+                                        <th>Sold-to Party</th>
                                         <th>Salesperson</th>
-                                        <th>Product</th>
+                                        <th>Material</th>
                                         <th>Industry</th>
                                         <th>Amount (THB)</th>
                                         <th>Created Date</th>
                                         <th>Closed Won Date</th>
                                         <th>Days to Close</th>
+                                        <th>Variance</th>
                                         <th>Status</th>
                                     </tr>
                                 </thead>
@@ -263,7 +285,6 @@
                                         @foreach (var row in _data.RecentClosedWonOpportunities)
                                         {
                                             <tr>
-                                                <td>@row.DealId</td>
                                                 <td>@row.OpportunityName</td>
                                                 <td>@row.CustomerName</td>
                                                 <td>@row.SalesEmployeeBP</td>
@@ -273,6 +294,7 @@
                                                 <td>@(row.CreatedDate?.ToString("dd MMM yyyy") ?? "")</td>
                                                 <td>@(row.ClosedWonDate?.ToString("dd MMM yyyy") ?? "")</td>
                                                 <td>@(row.DaysToClose?.ToString() ?? "N/A")</td>
+                                                <td class="@(row.VarianceDays is < 0 ? "adc-diff-neg" : "")">@(row.VarianceDays?.ToString() ?? "N/A")</td>
                                                 <td>@RenderStatusBadge(row.Status)</td>
                                             </tr>
                                         }
@@ -316,6 +338,8 @@
     private string _selectedProduct = "";
     private string _selectedIndustry = "";
     private string _selectedCustomer = "";
+
+    private bool CanExport => Mgt.Lit.WebFront.Auth.ReportAccessHelper.CanExportReport(AuthState.User, "AverageDaysToClose");
 
     private const string TrendChartId = "adc-trend";
     private const string StatusChartId = "adc-status";
@@ -551,6 +575,67 @@
                 .ToArray();
             await JS.InvokeVoidAsync("dashboardECharts.renderAvgDaysBar", ProductChartId, rows);
         }
+    }
+
+    private async Task ExportToExcelAsync()
+    {
+        if (_data is null || _data.RecentClosedWonOpportunities.Count == 0) return;
+
+        try
+        {
+            var username = AuthState.Permission?.Username;
+            var fileName = $"AverageDaysToClose_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await DownloadLogSvc.LogDownloadAsync(username ?? "", fileName);
+
+            _jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Closed Won Opportunity Detail");
+
+            var headers = new[]
+            {
+                "Opportunity Name", "Sold-to Party", "Salesperson", "Material", "Industry", "Amount (THB)",
+                "Created Date", "Closed Won Date", "Days to Close", "Variance", "Status"
+            };
+            for (var i = 0; i < headers.Length; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+            var headerRow = ws.Row(1);
+            headerRow.Style.Font.Bold = true;
+            headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+
+            var row = 2;
+            foreach (var r in _data.RecentClosedWonOpportunities)
+            {
+                var col = 1;
+                ws.Cell(row, col++).Value = r.OpportunityName;
+                ws.Cell(row, col++).Value = r.CustomerName;
+                ws.Cell(row, col++).Value = r.SalesEmployeeBP;
+                ws.Cell(row, col++).Value = r.Product;
+                ws.Cell(row, col++).Value = r.IndustryName;
+                ws.Cell(row, col++).Value = r.DealAmount;
+                ws.Cell(row, col++).Value = r.CreatedDate?.ToString("yyyy-MM-dd") ?? "";
+                ws.Cell(row, col++).Value = r.ClosedWonDate?.ToString("yyyy-MM-dd") ?? "";
+                if (r.DaysToClose.HasValue) ws.Cell(row, col).Value = r.DaysToClose.Value;
+                col++;
+                if (r.VarianceDays.HasValue) ws.Cell(row, col).Value = r.VarianceDays.Value;
+                col++;
+                ws.Cell(row, col++).Value = r.Status;
+                row++;
+            }
+
+            ws.Columns().AdjustToContents();
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+
+            await _jsModule.InvokeVoidAsync(
+                "downloadFileFromBytes",
+                fileName,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                base64);
+        }
+        catch (JSDisconnectedException) { }
     }
 
     public async ValueTask DisposeAsync()

@@ -94,7 +94,6 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
         public SalesProductivityKpiDto Kpi { get; set; } = new();
         public List<SalesProductivityTrendPointDto> Trend { get; set; } = new();
         public List<StageFunnelRowDto> PipelineByStage { get; set; } = new();
-        public List<ProductGroupRowDto> ByProduct { get; set; } = new();
         public List<SalesProductivityRowDto> BySalesperson { get; set; } = new();
         public List<LostReasonRowDto> LostReasons { get; set; } = new();
         public List<ClosedOpportunityRowDto> RecentClosedWon { get; set; } = new();

@@ -64,8 +64,21 @@ builder.Services
         };
 
         // 🔹 เพิ่มส่วนนี้เพื่อเช็ก "Single Session" (ล็อคอินใหม่แล้วของเก่าใช้ไม่ได้)
+        // ★ Diagnostic logging (2026-09) — 401 เกิดขึ้นซ้ำๆ ข้ามหลายรายงานพร้อมกันแม้ refresh/re-login แล้ว
+        // เพิ่ม log ทั้ง 3 จุดเพื่อดูสาเหตุจริงจาก Output/Console ของ WebApi ครั้งถัดไปที่เกิด — แทนการเดา
         options.Events = new JwtBearerEvents
         {
+            OnAuthenticationFailed = context =>
+            {
+                Console.WriteLine($"[JWT] Authentication FAILED: {context.Exception.GetType().Name} - {context.Exception.Message}");
+                return Task.CompletedTask;
+            },
+            OnChallenge = context =>
+            {
+                if (!context.Handled)
+                    Console.WriteLine($"[JWT] Challenge (no valid token reached pipeline): error={context.Error}, description={context.ErrorDescription}");
+                return Task.CompletedTask;
+            },
             OnTokenValidated = async context =>
             {
                 // ✅ ข้าม TokenVersion check สำหรับ API role (เช่น Zoho)
@@ -95,13 +108,17 @@ builder.Services
                 }
 
                 if (cachedVersion != tokenVersion)
+                {
+                    Console.WriteLine($"[JWT] Session invalidated: user={username}, cachedVersion={cachedVersion ?? "(null)"}, tokenVersion={tokenVersion ?? "(null)"}");
                     context.Fail("Session invalidated.");
+                }
             }
         };
     });
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
 builder.Services.AddScoped<ActivityLogFilter>();
+builder.Services.AddScoped<ISalesEmployeeNameResolver, SalesEmployeeNameResolver>();
 builder.Services.AddScoped<ISalesOverviewService, SalesOverviewService>();
 builder.Services.AddScoped<IYearlyComparisonService, YearlyComparisonService>();
 builder.Services.AddScoped<ISalePerformanceService, SalePerformanceService>();

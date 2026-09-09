@@ -3,7 +3,8 @@
     public class ProductMovementFilter
     {
         public int? Year { get; set; }
-        public string? SalesGroup { get; set; }        
+        public string? SalesGroup { get; set; }
+        public string? SalesEmployeeBP { get; set; }      // server บังคับ (ล็อกเป็นของตัวเองถ้า UserRole เป็นพนักงานขายทั่วไป)
         public string? CustomerFullName { get; set; }
         public string? MaterialName { get; set; }
         public int? MonthId { get; set; }              

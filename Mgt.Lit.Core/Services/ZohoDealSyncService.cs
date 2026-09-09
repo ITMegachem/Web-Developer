@@ -63,8 +63,12 @@ namespace Mgt.Lit.Core.Services
             var dealAmountField = _config["ZohoConfig:FieldMap:DealAmountField"] ?? "Amount";
             // "Forecast_Status" (picklist: -None-/Yes/No) — Sales ทำเครื่องหมายเองว่า deal นี้นับเข้า forecast รอบนี้หรือไม่
             var forecastStatusField = _config["ZohoConfig:FieldMap:ForecastStatusField"] ?? "Forecast_Status";
+            // ★ Salesperson ให้ยึดตาม Owner ของ Account (ลูกค้า) เป็นหลัก ไม่ใช่ Owner ของ Deal เอง — ยืนยันแล้วว่า
+            // นี่คือ field ที่องค์กรตั้งใจให้เป็น "เจ้าของบัญชีลูกค้ารายนี้อย่างเป็นทางการ" (แม้บาง Account จะยังไม่ได้ตั้ง
+            // เจ้าของจริง แสดงเป็น "Department" ก็ตาม — เป็นข้อมูลที่ถูกต้องตามระบบ ไม่ใช่ปัญหาคุณภาพข้อมูล)
+            var salesOwnerField = _config["ZohoConfig:FieldMap:SalesOwnerField"] ?? "Account_Name.Owner";
 
-            var selectFields = new List<string> { "id", "Deal_Name", "Created_Time", "Closing_Date", "Stage", dealAmountField, "Owner", "Account_Name", lostReasonField, industryExpr, salesGroupExpr, forecastStatusField };
+            var selectFields = new List<string> { "id", "Deal_Name", "Created_Time", "Closing_Date", "Delivery_Date", "Stage", dealAmountField, "Owner", salesOwnerField, "Account_Name", lostReasonField, industryExpr, salesGroupExpr, forecastStatusField };
             if (!string.IsNullOrWhiteSpace(actualClosedField)) selectFields.Add(actualClosedField);
 
             var syncedCount = 0;
@@ -110,11 +114,20 @@ namespace Mgt.Lit.Core.Services
                     deal.OpportunityName = GetString(item, "Deal_Name");
                     deal.CreatedDate = GetDateTime(item, "Created_Time");
                     deal.ClosingDate = GetDateTime(item, "Closing_Date");
+                    deal.DeliveryDate = GetDateTime(item, "Delivery_Date");
                     deal.ActualClosedDate = !string.IsNullOrWhiteSpace(actualClosedField) ? GetDateTime(item, actualClosedField) : null;
                     deal.Stage = stage;
                     deal.ForecastCategory = stage != null && stageForecastMap.TryGetValue(stage, out var fc) ? fc : null;
                     deal.SalesGroup = GetString(item, salesGroupExpr);
-                    deal.SalesEmployeeBP = GetLookupName(item, "Owner");
+                    // ★ ยึดตาม Account Owner ("Sales Employee" ใน Ownership section ของ Account) เป็นหลัก แต่ fallback
+                    // ไป Deal Owner เองใน 2 กรณี: (1) Deal ไม่ได้ผูก Account เลย (Account_Name ว่าง) หรือ (2) Account
+                    // เป็นลูกค้าใหม่ที่ยังไม่ได้ระบุพนักงานขายจริง (Owner ยังเป็นค่า default ทั่วไป "Department" ของระบบ)
+                    // — ยืนยันจากข้อมูลจริงแล้วว่ากรณีนี้เกิดขึ้นบ่อย (39/179 ตัวอย่าง) และ Deal เองมักมีชื่อพนักงานขายจริง
+                    // อยู่แล้วแม้ Account จะยังไม่ได้ assign ให้ใครก็ตาม
+                    var accountOwnerName = GetLookupName(item, salesOwnerField);
+                    var accountOwnerIsUnassigned = string.IsNullOrWhiteSpace(accountOwnerName)
+                        || string.Equals(accountOwnerName, "Department", StringComparison.OrdinalIgnoreCase);
+                    deal.SalesEmployeeBP = accountOwnerIsUnassigned ? GetLookupName(item, "Owner") : accountOwnerName;
                     deal.CustomerCode = GetLookupId(item, "Account_Name");
                     deal.CustomerName = GetLookupName(item, "Account_Name");
                     deal.IndustryName = GetString(item, industryExpr);

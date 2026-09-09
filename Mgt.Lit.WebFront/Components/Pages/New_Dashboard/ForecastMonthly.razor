@@ -2,7 +2,7 @@
 @using Mgt.Lit.WebFront.Components.Layout.MainLay
 @layout AppLayout
 @rendermode InteractiveServer
-<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css?v=20260909a" />
 @using System.Linq
 @using ClosedXML.Excel
 @using Microsoft.JSInterop
@@ -36,10 +36,10 @@
 
     .fmr-kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
     .fmr-kpi { background: var(--surface); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px 16px; }
-    .fmr-kpi-label { font-size: 12.5px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
-    .fmr-kpi-value { font-size: 24px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
+    .fmr-kpi-label { font-size: 15px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
+    .fmr-kpi-value { font-size: 30px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
     .fmr-kpi-value.danger { color: #b91c1c; }
-    .fmr-kpi-sub { font-size: 11.5px; color: var(--muted); }
+    .fmr-kpi-sub { font-size: 14px; color: var(--muted); }
 
     .fmr-table-wrap table { border-collapse: separate; border-spacing: 0; }
     .fmr-table-wrap th, .fmr-table-wrap td { white-space: nowrap; text-align: right; }
@@ -52,8 +52,6 @@
     .fmr-onhand-cell { background: #fffbeb; }
     .fmr-shortage { color: #b91c1c; font-weight: 700; }
     .fmr-total-row td { font-weight: 700; border-top: 2px solid var(--card-border); background: #eef6fb; }
-
-    .fmr-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
     @@media (max-width: 1400px) { .fmr-kpi-row { grid-template-columns: repeat(2, 1fr); } }
 </style>
@@ -74,8 +72,12 @@
 
         <div class="dash-filters dash-filter-panel">
             <div class="dash-field">
-                <div class="dash-field-label">Customer</div>
-                <DashSelect @bind-Value="_selectedCustomer" Placeholder="All Customers" Options="@(_data?.AvailableCustomers ?? new())" />
+                <div class="dash-field-label">Salesperson</div>
+                <DashSelect @bind-Value="_selectedSalesperson" Placeholder="All" Options="@(_data?.AvailableSalesEmployees ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Sold-to Party</div>
+                <DashSelect @bind-Value="_selectedCustomer" Placeholder="All Sold-to Parties" Options="@(_data?.AvailableCustomers ?? new())" />
             </div>
             <div class="dash-field">
                 <div class="dash-field-label">Material Group</div>
@@ -102,7 +104,10 @@
         <div class="fmr-toolbar">
             <button type="button" class="fmr-btn fmr-btn-secondary" @onclick="ResetAsync">↺ Reset</button>
             <button type="button" class="fmr-btn fmr-btn-primary" @onclick="SearchAsync">🔍 Search</button>
-            <button type="button" class="fmr-btn fmr-btn-export" @onclick="ExportToExcelAsync" disabled="@(_data is null || _data.Rows.Count == 0)">⬇ Export Excel</button>
+            @if (CanExport)
+            {
+                <button type="button" class="fmr-btn fmr-btn-export" @onclick="ExportToExcelAsync" disabled="@(_data is null || _data.Rows.Count == 0)">⬇ Export Excel</button>
+            }
         </div>
 
         @if (_data is null)
@@ -142,7 +147,7 @@
             <div class="dash-card">
                 <div class="dash-card-header">Forecast vs Stock by Material</div>
                 <div class="dash-card-body">
-                    <div class="table-scroll fmr-table-wrap">
+                    <div class="table-scroll fmr-table-wrap dash-table-tall">
                         <table class="table table-striped table-hover">
                             <thead>
                                 <tr>
@@ -203,14 +208,6 @@
                 </div>
             </div>
 
-            <div class="fmr-note">
-                Note: 1. Forecast data from Zoho CRM (Deal_Items). Forecast month uses the line's own Required Date when set —
-                most lines don't have it filled in, so the opportunity's expected Closing Date is used as a fallback.
-                2. On Hand Qty is a live lookup from SAP (API_MATERIAL_STOCK_SRV) per Material Code — "N/A" means the material
-                could not be matched in SAP, not that stock is zero. 3. Incoming PO / incoming shipments are not yet wired to a
-                confirmed data source and are not included in this report or the Shortage calculation. 4. Qty unit = KG.
-                Generated on @DateTime.Now.ToString("dd MMM yyyy HH:mm").
-            </div>
         }
     </div>
 </div>
@@ -219,6 +216,7 @@
     private ForecastMonthlyDto? _data;
     private bool _loading;
 
+    private string _selectedSalesperson = "";
     private string _selectedCustomer = "";
     private string _selectedMaterialGroup = "";
     private string _selectedMaterial = "";
@@ -226,12 +224,14 @@
     private string _fromMonthText = DateTime.Now.ToString("yyyy-MM");
     private string _toMonthText = DateTime.Now.AddMonths(5).ToString("yyyy-MM");
 
+    private bool CanExport => Mgt.Lit.WebFront.Auth.ReportAccessHelper.CanExportReport(AuthState.User, "ForecastMonthly");
     private IJSObjectReference? _jsModule;
 
     private ForecastMonthlyFilter BuildFilter() => new()
     {
         FromMonth = ParseMonth(_fromMonthText),
         ToMonth = ParseMonth(_toMonthText),
+        SalesEmployeeBP = string.IsNullOrWhiteSpace(_selectedSalesperson) ? null : _selectedSalesperson,
         CustomerName = string.IsNullOrWhiteSpace(_selectedCustomer) ? null : _selectedCustomer,
         MaterialGroup = string.IsNullOrWhiteSpace(_selectedMaterialGroup) ? null : _selectedMaterialGroup,
         // ตัวเลือกในดรอปดาวน์แสดงเป็น "Code - Description" แต่ filter ต้องส่งแค่ Material Code
@@ -267,6 +267,7 @@
 
     private async Task ResetAsync()
     {
+        _selectedSalesperson = "";
         _selectedCustomer = "";
         _selectedMaterialGroup = "";
         _selectedMaterial = "";

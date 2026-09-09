@@ -115,7 +115,9 @@
     }
 
     /* COMPACT — หน้าตาเหมือนเมนูย่อยใต้ Management (.sub-pill-link) ทุกอย่าง
-       ต้องระบุ .modern-link-item.link-compact (2 คลาส) เพื่อชนะ .active-dash ที่ติดมากับ markup */
+       ต้องระบุ .modern-link-item.link-compact (2 คลาส) เพื่อชนะ .active-dash ที่ติดมากับ markup
+       ★ margin ต้องเท่ากับตำแหน่งของ .sub-pill-link จริงๆ (margin: 4px 26px ของตัวมันเอง + ms-2 ของ <ul> ที่ครอบอยู่
+       = ระยะซ้ายรวม 34px) ไม่งั้นไอคอน/ข้อความของเมนู Sales Intelligence Matrix จะเยื้องซ้ายมากกว่าเมนูย่อยใต้ Management */
     .modern-link-item.link-compact {
         padding: 12px 18px;
         border-radius: 12px;
@@ -123,6 +125,7 @@
         color: #475569;
         font-size: 14px;
         font-weight: 400;
+        margin: 4px 26px 4px 34px;
     }
 
         .modern-link-item.link-compact:hover {

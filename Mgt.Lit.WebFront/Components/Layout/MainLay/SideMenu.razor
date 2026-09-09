@@ -295,6 +295,9 @@
     private bool IsLeader =>
         string.Equals(Role, "leader", StringComparison.OrdinalIgnoreCase);
 
+    private bool IsRegularUserRole =>
+        string.Equals(Role, "user", StringComparison.OrdinalIgnoreCase);
+
     // ── Dashboard permissions ─────────────────────────────────────────────────
     private List<DashboardNavItem> DashboardMenu => new()
 {
@@ -302,21 +305,22 @@
     new("/sales-overview", "DB2", "/images/chart-histogram.png", () => CanViewDB2),
     new("/sales-overview", "DB3", "/images/chart-histogram.png", () => CanViewDB3),
     new("/sales-overview", "DB4", "/images/chart-histogram.png", () => CanViewDB4),
-    new("/opportunity-win-rate", "OpportunityWinRate", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
-    new("/avg-days-to-close", "AvgDaysToClose", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
-    new("/cross-sell-upsell-gains", "CrossSellUpsellGains", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
-    new("/pricing-margin-performance", "PricingMarginPerformance", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
-    new("/sales-forecast-accuracy", "SalesForecastAccuracy", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
-    new("/sales-productivity", "SalesProductivity", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
-    new("/customer-churn-analysis", "CustomerChurnAnalysis", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
-    new("/forecast-monthly", "ForecastMonthly", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
-    new("/visit-report", "VisitReport", "/images/chart-pie-alt.png", () => CanViewOpportunityWinRate, "link-compact"),
+    new("/opportunity-win-rate", "OpportunityWinRate", "/images/chart-pie-alt.png", () => CanViewReport("OpportunityWinRate"), "link-compact"),
+    new("/avg-days-to-close", "AvgDaysToClose", "/images/chart-pie-alt.png", () => CanViewReport("AverageDaysToClose"), "link-compact"),
+    new("/cross-sell-upsell-gains", "CrossSellUpsellGains", "/images/chart-pie-alt.png", () => CanViewReport("CrossSellUpsellGains"), "link-compact"),
+    new("/pricing-margin-performance", "PricingMarginPerformance", "/images/chart-pie-alt.png", () => CanViewReport("PricingMarginPerformance"), "link-compact"),
+    new("/sales-forecast-accuracy", "SalesForecastAccuracy", "/images/chart-pie-alt.png", () => CanViewReport("SalesForecastAccuracy"), "link-compact"),
+    new("/sales-productivity", "SalesProductivity", "/images/chart-pie-alt.png", () => CanViewReport("SalesProductivity"), "link-compact"),
+    new("/customer-churn-analysis", "CustomerChurnAnalysis", "/images/chart-pie-alt.png", () => CanViewReport("CustomerChurnAnalysis"), "link-compact"),
+    new("/forecast-monthly", "ForecastMonthly", "/images/chart-pie-alt.png", () => CanViewReport("ForecastMonthly"), "link-compact"),
+    new("/visit-report", "VisitReport", "/images/chart-pie-alt.png", () => CanViewReport("VisitDailyReport"), "link-compact"),
 };
+
+    // ★ Sales Intelligence Matrix permissions — mirror ของ DashboardController.CanAccessReport ฝั่ง WebApi
+    // (ดู Auth/ReportAccessHelper.cs) ใช้ซ่อนเมนูเท่านั้น การบังคับจริงอยู่ที่ backend
+    private bool CanViewReport(string reportKey) => ReportAccessHelper.CanAccessReport(AuthState.User, reportKey);
     private bool HasAnyDashboard => DashboardMenu.Any(d => d.CanView());
 
-    /// Opportunity Win Rate Report : ใครที่เห็น dashboard ใดก็ได้ ให้เห็นรายงานนี้ด้วย
-    private bool CanViewOpportunityWinRate =>
-        CanViewDB1 || CanViewDB2 || CanViewDB3 || CanViewDB4;
     /// DB1 : Admin หรือ Manager ของ companyID = 1 ที่ไม่ใช่ Purchase
     private string? Department =>
      AuthState.Permission?.Department;
@@ -325,26 +329,27 @@
     private bool IsPurchaseDept =>
         string.Equals(Department, "purchase", StringComparison.OrdinalIgnoreCase);
 
+    // ★ Admin/Manager เห็นได้เสมอ (ไม่ผูก Division เดิม) เพิ่มเงื่อนไข: Department=Sales + UserRole=User ที่ Division=BU1
+    // ให้เห็น "BU1 Dashboard" ของตัวเองได้เช่นกัน (ข้อมูลถูกล็อกเหลือแค่ของตัวเองที่ backend อยู่แล้ว)
     private bool CanViewDB1 =>
         PrimaryCompanyID == 1 &&
-        (IsAdmin || IsManager) &&
-        !IsPurchaseDept;
-    /// DB2 : Leader ของ companyID = 1 และ division = BU2
-    private bool CanViewDB2 =>
+        ((IsAdmin || IsManager) && !IsPurchaseDept
+            || (IsRegularUserRole && IsSalesDept && string.Equals(Division, "BU1", StringComparison.OrdinalIgnoreCase)));
+    // ★ Leader เห็น Dashboard ของ Division ตัวเองได้เสมอ ส่วน Department=Sales + UserRole=User (พนักงานขายทั่วไป)
+    // ก็ให้เห็น Dashboard ของ Division ตัวเองได้เช่นกัน (ข้อมูลจะถูกล็อกเหลือแค่ของตัวเองที่ backend อยู่แล้วผ่าน
+    // ResolveEffectiveSalesEmployeeFilter — ดู DashboardController.cs)
+    private bool CanViewOwnDivisionDashboard(string division) =>
         PrimaryCompanyID == 1 &&
-        IsLeader &&
-        string.Equals(Division, "BU2", StringComparison.OrdinalIgnoreCase);
+        (IsLeader || (IsRegularUserRole && IsSalesDept)) &&
+        string.Equals(Division, division, StringComparison.OrdinalIgnoreCase);
 
-    /// DB3 : Leader ของ companyID = 1 และ division = BU3
-    private bool CanViewDB3 =>
-        PrimaryCompanyID == 1 &&
-        IsLeader &&
-        string.Equals(Division, "BU3", StringComparison.OrdinalIgnoreCase);
+    /// DB2 : Leader หรือพนักงานขาย (Department=Sales, UserRole=User) ของ companyID = 1 และ division = BU2
+    private bool CanViewDB2 => CanViewOwnDivisionDashboard("BU2");
 
-    private bool CanViewDB4 =>
-        PrimaryCompanyID == 1 && 
-        IsLeader &&
-        string.Equals(Division, "BU4", StringComparison.OrdinalIgnoreCase);
+    /// DB3 : Leader หรือพนักงานขาย (Department=Sales, UserRole=User) ของ companyID = 1 และ division = BU3
+    private bool CanViewDB3 => CanViewOwnDivisionDashboard("BU3");
+
+    private bool CanViewDB4 => CanViewOwnDivisionDashboard("BU4");
 
     // private bool HasAnyDashboard => CanViewDB1 || CanViewDB2 || CanViewDB3;
 

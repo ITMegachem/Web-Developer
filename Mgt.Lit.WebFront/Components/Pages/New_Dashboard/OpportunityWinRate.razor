@@ -2,14 +2,16 @@
 @using Mgt.Lit.WebFront.Components.Layout.MainLay
 @layout AppLayout
 @rendermode InteractiveServer
-<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css?v=20260909a" />
 @using System.Linq
 @using Microsoft.JSInterop
 @using Mgt.Lit.Core.DTOs.DashBoard
 @using Mgt.Lit.WebFront.Services.DashBoard
 @using Mgt.Lit.WebFront.Components
+@using ClosedXML.Excel
 @inject DashOpportunityWinRateApiService WinRateApi
 @inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject DownloadLogService DownloadLogSvc
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
@@ -27,18 +29,25 @@
     }
     .owr-reset-btn:hover { background: var(--neutral-100); }
 
-    .owr-kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 16px; }
+    .owr-toolbar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 14px; }
+    .owr-btn-export { background: #15803d; color: #fff; border: 1px solid #15803d; font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 10px; white-space: nowrap; }
+    .owr-btn-export:hover { opacity: 0.92; }
+    .owr-btn-export:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .owr-kpi-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 14px; margin-bottom: 16px; }
 
     .owr-kpi { background: var(--surface); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px 16px; }
-    .owr-kpi-label { font-size: 12.5px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
-    .owr-kpi-value { font-size: 24px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
+    .owr-kpi-label { font-size: 15px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
+    .owr-kpi-value { font-size: 30px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
     .owr-kpi-value.danger { color: #be123c; }
     .owr-kpi-value.warn { color: #b45309; }
-    .owr-kpi-sub { font-size: 11.5px; color: var(--muted); margin-bottom: 4px; }
-    .owr-kpi-compare { font-size: 11.5px; }
+    .owr-kpi-sub { font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+    .owr-kpi-compare { font-size: 14px; }
 
     .owr-chart-row { display: grid; grid-template-columns: 1.1fr 1.1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: stretch; }
+    .owr-chart-row-2 { grid-template-columns: 1fr 1fr; }
     .owr-table-row { display: grid; grid-template-columns: 1.7fr 1fr; gap: 16px; margin-bottom: 16px; align-items: start; }
+    .owr-open-detail { margin-bottom: 16px; }
 
     .owr-diff-pos { color: #15803d; font-weight: 600; }
     .owr-diff-neg { color: #b91c1c; font-weight: 600; }
@@ -51,12 +60,15 @@
     .owr-view-all { background: none; border: none; color: var(--brand-dark); font-weight: 600; font-size: 12.5px; padding: 8px 0 0; width: 100%; text-align: center; }
     .owr-view-all:hover { text-decoration: underline; }
 
-    .owr-summary-row { display: flex; justify-content: space-between; font-size: 12.5px; padding: 4px 0; }
-    .owr-summary-row.total { font-weight: 700; border-top: 1px solid var(--card-border); margin-top: 6px; padding-top: 8px; }
-    .owr-summary-title { font-size: 12px; font-weight: 700; color: var(--neutral-700); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .02em; }
+    .owr-summary-row { display: flex; justify-content: space-between; font-size: 18px; padding: 8px 0; }
+    .owr-summary-row.total { font-weight: 700; border-top: 1px solid var(--card-border); margin-top: 6px; padding-top: 12px; }
+    .owr-summary-title { font-size: 18px; font-weight: 700; color: var(--neutral-700); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .02em; }
 
     .owr-empty-panel { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 180px; color: var(--muted); font-size: 12.5px; text-align: center; padding: 12px; }
     .owr-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    /* ★ override ขนาด font ของตาราง .table-scroll ให้เป็น 18px เฉพาะหน้านี้ */
+    .table-scroll th, .table-scroll td { font-size: 18px !important; }
 
     @@media (max-width: 1400px) {
         .owr-kpi-row { grid-template-columns: repeat(3, 1fr); }
@@ -80,6 +92,13 @@
             </div>
         </div>
 
+        @if (CanExport)
+        {
+            <div class="owr-toolbar">
+                <button type="button" class="owr-btn-export" @onclick="ExportToExcelAsync" disabled="@(_data is null || _data.RecentClosedOpportunities.Count == 0)">⬇ Export Excel</button>
+            </div>
+        }
+
         <div class="dash-filters dash-filter-panel">
             <div class="dash-field">
                 <div class="dash-field-label">Closed Date Range</div>
@@ -91,7 +110,7 @@
                             Placeholder="All" Options="@(_data?.AvailableSalesEmployees ?? new())" />
             </div>
             <div class="dash-field">
-                <div class="dash-field-label">Product</div>
+                <div class="dash-field-label">Material</div>
                 <DashSelect @bind-Value="_selectedProduct" @bind-Value:after="ReloadAsync"
                             Placeholder="All" Options="@(_data?.AvailableProducts ?? new())" />
             </div>
@@ -117,6 +136,11 @@
             var kpi = _data.Kpi;
 
             <div class="owr-kpi-row">
+                <div class="owr-kpi">
+                    <div class="owr-kpi-label">Total Deals</div>
+                    <div class="owr-kpi-value">@_data.Summary.TotalOpportunities</div>
+                    <div class="owr-kpi-sub">Open @_data.Summary.OpenOpportunities / Closed @_data.Summary.ClosedOpportunities</div>
+                </div>
                 <div class="owr-kpi">
                     <div class="owr-kpi-label">Win Rate (Deal Count)</div>
                     <div class="owr-kpi-value">@(kpi.WinRatePercent.HasValue ? kpi.WinRatePercent.Value.ToString("0.0") + "%" : "N/A")</div>
@@ -192,9 +216,9 @@
                 </div>
             </div>
 
-            <div class="owr-chart-row">
+            <div class="owr-chart-row owr-chart-row-2">
                 <div class="dash-card">
-                    <div class="dash-card-header">Win Rate by Product (Top 8 by Deal Count)</div>
+                    <div class="dash-card-header">Win Rate by Material (Top 8 by Deal Count)</div>
                     <div class="dash-card-body">
                         @if (_data.ByProduct.Count == 0)
                         {
@@ -219,34 +243,20 @@
                         }
                     </div>
                 </div>
-                <div class="dash-card">
-                    <div class="dash-card-header">Top Lost Reasons</div>
-                    <div class="dash-card-body">
-                        @if (_data.LostReasons.Count == 0)
-                        {
-                            <div class="owr-empty-panel">No lost deals for this filter</div>
-                        }
-                        else
-                        {
-                            <div id="@LostReasonChartId" class="echarts-host" role="img" aria-label="Top lost reasons"></div>
-                        }
-                    </div>
-                </div>
             </div>
 
             <div class="owr-table-row">
                 <div class="dash-card">
-                    <div class="dash-card-header">Closed Opportunity Detail (Latest @Math.Min(10, _data.RecentClosedOpportunities.Count) Deals)</div>
+                    <div class="dash-card-header">Closed Opportunity Detail (@_data.RecentClosedOpportunities.Count Deals)</div>
                     <div class="dash-card-body">
                         <div class="table-scroll">
                             <table class="table table-striped table-hover">
                                 <thead>
                                     <tr>
-                                        <th>Deal ID</th>
                                         <th>Opportunity Name</th>
-                                        <th>Account / Customer</th>
+                                        <th>Account / Sold-to Party</th>
                                         <th>Salesperson</th>
-                                        <th>Product</th>
+                                        <th>Material</th>
                                         <th>Industry</th>
                                         <th>Amount (THB)</th>
                                         <th>Closed Date</th>
@@ -257,14 +267,13 @@
                                 <tbody>
                                     @if (_data.RecentClosedOpportunities.Count == 0)
                                     {
-                                        <tr><td colspan="10" class="dash-table-empty">No closed opportunities for this filter</td></tr>
+                                        <tr><td colspan="9" class="dash-table-empty">No closed opportunities for this filter</td></tr>
                                     }
                                     else
                                     {
                                         @foreach (var row in _data.RecentClosedOpportunities)
                                         {
                                             <tr>
-                                                <td>@row.DealId</td>
                                                 <td>@row.OpportunityName</td>
                                                 <td>@row.CustomerName</td>
                                                 <td>@row.SalesEmployeeBP</td>
@@ -302,6 +311,52 @@
                 </div>
             </div>
 
+            <div class="dash-card owr-open-detail">
+                <div class="dash-card-header">Open Opportunity Detail (@_data.OpenOpportunities.Count Deals)</div>
+                <div class="dash-card-body">
+                    <div class="table-scroll dash-table-tall">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Opportunity Name</th>
+                                    <th>Account / Sold-to Party</th>
+                                    <th>Salesperson</th>
+                                    <th>Material</th>
+                                    <th>Industry</th>
+                                    <th>Amount (THB)</th>
+                                    <th>Expected Close Date</th>
+                                    <th>Delivery Date</th>
+                                    <th>Stage</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (_data.OpenOpportunities.Count == 0)
+                                {
+                                    <tr><td colspan="9" class="dash-table-empty">No open opportunities for this filter</td></tr>
+                                }
+                                else
+                                {
+                                    @foreach (var row in _data.OpenOpportunities)
+                                    {
+                                        <tr>
+                                            <td>@row.OpportunityName</td>
+                                            <td>@row.CustomerName</td>
+                                            <td>@row.SalesEmployeeBP</td>
+                                            <td>@row.Product</td>
+                                            <td>@row.IndustryName</td>
+                                            <td>@row.DealAmount.ToString("N0")</td>
+                                            <td>@(row.ExpectedCloseDate?.ToString("dd MMM yyyy") ?? "")</td>
+                                            <td>@(row.DeliveryDate?.ToString("dd MMM yyyy") ?? "")</td>
+                                            <td>@row.Stage</td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <div class="owr-note">
                 Note: Win Rate = Won / (Won + Lost) × 100, counted by distinct Deal ID; open deals (Qualification/Proposal/Negotiation/etc.) are excluded.
                 Monthly figures use the Actual Closed Date, not the Created Date. "vs Previous Period" compares against the immediately preceding period of equal length.
@@ -323,12 +378,13 @@
     private string _selectedProduct = "";
     private string _selectedIndustry = "";
 
+    private bool CanExport => Mgt.Lit.WebFront.Auth.ReportAccessHelper.CanExportReport(AuthState.User, "OpportunityWinRate");
+
     private const string TrendChartId = "owr-trend";
     private const string SalespersonChartId = "owr-salesperson";
     private const string IndustryChartId = "owr-industry";
     private const string ProductChartId = "owr-product";
     private const string FunnelChartId = "owr-funnel";
-    private const string LostReasonChartId = "owr-lost-reason";
 
     private IJSObjectReference? _jsModule;
     private DotNetObjectReference<OpportunityWinRate>? _dotNetRef;
@@ -473,15 +529,65 @@
         if (_data.PipelineByStage.Count > 0)
         {
             var stageRows = _data.PipelineByStage.Select(r => new { stage = r.Stage, dealCount = r.DealCount }).ToArray();
-            await JS.InvokeVoidAsync("dashboardECharts.renderStageFunnel", FunnelChartId, stageRows);
+            await JS.InvokeVoidAsync("dashboardECharts.renderStagePie", FunnelChartId, stageRows);
         }
+    }
 
-        if (_data.LostReasons.Count > 0)
+    private async Task ExportToExcelAsync()
+    {
+        if (_data is null || _data.RecentClosedOpportunities.Count == 0) return;
+
+        try
         {
-            var reasonPoints = _data.LostReasons.Select(r => new { name = r.Reason, value = r.LostDeals }).ToArray();
-            var totalLost = _data.Kpi.LostOpportunities.ToString();
-            await JS.InvokeVoidAsync("dashboardECharts.renderDonutWithCenterMetric", LostReasonChartId, reasonPoints, totalLost, "Lost Deals");
+            var username = AuthState.Permission?.Username;
+            var fileName = $"OpportunityWinRate_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await DownloadLogSvc.LogDownloadAsync(username ?? "", fileName);
+
+            _jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Closed Opportunity Detail");
+
+            var headers = new[]
+            {
+                "Opportunity Name", "Sold-to Party", "Salesperson", "Material", "Industry",
+                "Amount (THB)", "Closed Date", "Result", "Won / Lost Reason"
+            };
+            for (var i = 0; i < headers.Length; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+            var headerRow = ws.Row(1);
+            headerRow.Style.Font.Bold = true;
+            headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+
+            var row = 2;
+            foreach (var r in _data.RecentClosedOpportunities)
+            {
+                var col = 1;
+                ws.Cell(row, col++).Value = r.OpportunityName;
+                ws.Cell(row, col++).Value = r.CustomerName;
+                ws.Cell(row, col++).Value = r.SalesEmployeeBP;
+                ws.Cell(row, col++).Value = r.Product;
+                ws.Cell(row, col++).Value = r.IndustryName;
+                ws.Cell(row, col++).Value = r.DealAmount;
+                ws.Cell(row, col++).Value = r.ClosedDate?.ToString("yyyy-MM-dd") ?? "";
+                ws.Cell(row, col++).Value = r.Result;
+                ws.Cell(row, col++).Value = r.LostReason ?? "";
+                row++;
+            }
+
+            ws.Columns().AdjustToContents();
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+
+            await _jsModule.InvokeVoidAsync(
+                "downloadFileFromBytes",
+                fileName,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                base64);
         }
+        catch (JSDisconnectedException) { }
     }
 
     public async ValueTask DisposeAsync()

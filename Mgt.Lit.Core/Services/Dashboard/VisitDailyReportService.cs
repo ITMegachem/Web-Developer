@@ -15,13 +15,23 @@ namespace Mgt.Lit.Core.Services.Dashboard
         private const int MaxTrendMonths = 36; // กันลูปยาวเกินไปถ้าไม่ได้กรอง DateFrom/DateTo
 
         private readonly AppDbContext _db;
+        private readonly ISalesEmployeeNameResolver _nameResolver;
 
-        public VisitDailyReportService(AppDbContext db) => _db = db;
+        public VisitDailyReportService(AppDbContext db, ISalesEmployeeNameResolver nameResolver)
+        {
+            _db = db;
+            _nameResolver = nameResolver;
+        }
 
         public async Task<VisitDailyReportDto> GetAsync(VisitDailyReportFilter filter, CancellationToken ct = default)
         {
+            // ★ นิยาม BU ใหม่ทั้งรายงาน — อ้างอิงจากรายชื่อพนักงานขาย Active ของ BU นั้น (Ms_User.Division + Department='Sales')
+            var lockedRawNames = string.IsNullOrWhiteSpace(filter.SalesGroup)
+                ? null
+                : await _nameResolver.GetActiveSalesEmployeeRawVisitNamesAsync(filter.SalesGroup, ct);
+
             // สำคัญ: EF Core DbContext ไม่ thread-safe ห้ามยิงหลาย query พร้อมกันด้วย Task.WhenAll
-            var visits = await ApplyScopeFilter(_db.MGT_VisitReport.AsNoTracking(), filter)
+            var visits = await ApplyScopeFilter(_db.MGT_VisitReport.AsNoTracking(), filter, lockedRawNames)
                 .OrderByDescending(v => v.VisitDate)
                 .ToListAsync(ct);
 
@@ -34,6 +44,39 @@ namespace Mgt.Lit.Core.Services.Dashboard
                     .ToListAsync(ct);
 
             var itemsByVisit = items.GroupBy(i => i.VisitReportId).ToDictionary(g => g.Key, g => g.ToList());
+
+            // ── Deal Status + ชื่อ Deal ของลูกค้าแต่ละราย (join MGT_Deal ด้วย CustomerCode = Zoho Account id เดียวกัน) ──
+            // Zoho ไม่มี field เชื่อม Visit_Reports -> Deals ตรงๆ จึงอิงจาก "ลูกค้าเดียวกัน" แทน (ดู comment ที่ DealStatus)
+            // ★ ชื่อ Deal ใช้สำหรับให้ Search กล่องค้นหาจับคู่ได้ (ไม่ใช่ Deal ของ visit นี้โดยตรง แต่เป็น Deal ของลูกค้ารายเดียวกัน)
+            var customerCodes = visits.Select(v => v.CustomerCode).Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c!).Distinct().ToList();
+            var dealsByCustomer = customerCodes.Count == 0
+                ? new List<(string CustomerCode, string? ForecastCategory, string? OpportunityName)>()
+                : (await _db.MGT_Deal.AsNoTracking()
+                    .Where(d => d.CustomerCode != null && customerCodes.Contains(d.CustomerCode))
+                    .Select(d => new { d.CustomerCode, d.ForecastCategory, d.OpportunityName })
+                    .ToListAsync(ct))
+                    .Select(d => (CustomerCode: d.CustomerCode!, d.ForecastCategory, d.OpportunityName))
+                    .ToList();
+
+            var dealCategoriesByCustomer = dealsByCustomer
+                .GroupBy(d => d.CustomerCode)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.ForecastCategory).ToList());
+
+            var dealNamesByCustomer = dealsByCustomer
+                .Where(d => !string.IsNullOrWhiteSpace(d.OpportunityName))
+                .GroupBy(d => d.CustomerCode)
+                .ToDictionary(g => g.Key, g => string.Join(", ", g.Select(x => x.OpportunityName!).Distinct()));
+
+            // "Won" = มี deal Closed อย่างน้อย 1 รายการ, "Open" = ไม่มี Won แต่มี Pipeline, "Lost" = มีแต่ Omitted ล้วนๆ,
+            // "No Deal" = ลูกค้ารายนี้ไม่มี Deal ในระบบเลย
+            string ResolveDealStatus(string? customerCode)
+            {
+                if (string.IsNullOrWhiteSpace(customerCode) || !dealCategoriesByCustomer.TryGetValue(customerCode, out var categories) || categories.Count == 0)
+                    return "No Deal";
+                if (categories.Contains("Closed")) return "Won";
+                if (categories.Contains("Pipeline")) return "Open";
+                return "Lost";
+            }
 
             // ── KPI ──────────────────────────────────────────────────────────────
             var totalVisits = visits.Count;
@@ -66,10 +109,18 @@ namespace Mgt.Lit.Core.Services.Dashboard
             // ── Trend รายเดือน ────────────────────────────────────────────────────
             var trend = BuildTrend(visits, itemsByVisit, filter.DateFrom, filter.DateTo);
 
+            // ★ SalesEmployeeBP เก็บชื่อบางส่วนจาก Zoho — map เป็น Ms_User.FullName ก่อน แล้วค่อย group เป็น "By Salesperson"
+            var availableSalesEmployeesRaw = await GetDistinctVisitFieldAsync(filter, v => v.SalesEmployeeBP, lockedRawNames, ct);
+            var salesEmployeeNameMap = await _nameResolver.BuildNameMapAsync(
+                visits.Select(v => v.SalesEmployeeBP).Concat(availableSalesEmployeesRaw), ct);
+
+            string MapSalesEmployeeName(string? raw) =>
+                !string.IsNullOrWhiteSpace(raw) && salesEmployeeNameMap.TryGetValue(raw, out var mapped) ? mapped : (raw ?? "");
+
             // ── Breakdown: Salesperson / Customer ───────────────────────────────
             var bySalesperson = visits
                 .Where(v => !string.IsNullOrWhiteSpace(v.SalesEmployeeBP))
-                .GroupBy(v => v.SalesEmployeeBP!)
+                .GroupBy(v => MapSalesEmployeeName(v.SalesEmployeeBP))
                 .Select(g => BuildGroupRow(g.Key, g.ToList(), itemsByVisit, relatedKeySelector: v => v.CustomerName))
                 .OrderByDescending(x => x.VisitCount)
                 .ToList();
@@ -106,6 +157,8 @@ namespace Mgt.Lit.Core.Services.Dashboard
                     EndDateTime = v.EndDateTime,
                     DurationMinutes = durationMinutes,
                     Status = v.EndDateTime.HasValue ? "Completed" : "In Progress",
+                    DealStatus = ResolveDealStatus(v.CustomerCode),
+                    RelatedDealNames = !string.IsNullOrWhiteSpace(v.CustomerCode) && dealNamesByCustomer.TryGetValue(v.CustomerCode, out var names) ? names : "",
                     ProductCount = visitItems.Count,
                     CompetitorCount = visitItems.Count(HasCompetitor),
                     ContactPersons = string.Join(", ", contactPersons),
@@ -127,8 +180,17 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 };
             }).ToList();
 
-            var availableSalesEmployees = await GetDistinctVisitFieldAsync(filter, v => v.SalesEmployeeBP, ct);
-            var availableCustomers = await GetDistinctVisitFieldAsync(filter, v => v.CustomerName, ct);
+            var availableCustomers = await GetDistinctVisitFieldAsync(filter, v => v.CustomerName, lockedRawNames, ct);
+
+            var availableSalesEmployeesMapped = availableSalesEmployeesRaw
+                .Select(MapSalesEmployeeName)
+                .Where(v => !string.IsNullOrWhiteSpace(v) && !string.Equals(v, "Department", StringComparison.OrdinalIgnoreCase))
+                .Distinct()
+                .OrderBy(v => v)
+                .ToList();
+            var availableSalesEmployees = await _nameResolver.FilterToDivisionAsync(availableSalesEmployeesMapped, filter.SalesGroup, ct);
+
+            foreach (var row in visitRows) row.SalesEmployeeBP = MapSalesEmployeeName(row.SalesEmployeeBP);
 
             return new VisitDailyReportDto
             {
@@ -206,12 +268,14 @@ namespace Mgt.Lit.Core.Services.Dashboard
             return trend;
         }
 
+        // ★ จับคู่ชื่อดิบจาก Zoho (SalesEmployeeBP) กับชื่อเต็มใน Ms_User — ดู comment จุดที่เรียกใช้ด้านบนสำหรับข้อจำกัด
+
         private async Task<List<string>> GetDistinctVisitFieldAsync(
-            VisitDailyReportFilter filter, System.Linq.Expressions.Expression<Func<MGT_VisitReport, string?>> keySelector, CancellationToken ct)
+            VisitDailyReportFilter filter, System.Linq.Expressions.Expression<Func<MGT_VisitReport, string?>> keySelector, List<string>? lockedRawNames, CancellationToken ct)
         {
             // dropdown scope ตาม SalesGroup เท่านั้น (ไม่ใส่ filter ของตัวเอง) เพื่อให้เห็นตัวเลือกครบหลังเลือกแล้ว
             var baseFilter = new VisitDailyReportFilter { SalesGroup = filter.SalesGroup };
-            var query = ApplyScopeFilter(_db.MGT_VisitReport.AsNoTracking(), baseFilter);
+            var query = ApplyScopeFilter(_db.MGT_VisitReport.AsNoTracking(), baseFilter, lockedRawNames);
 
             return await query
                 .Select(keySelector)
@@ -222,13 +286,16 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 .ToListAsync(ct);
         }
 
-        private static IQueryable<MGT_VisitReport> ApplyScopeFilter(IQueryable<MGT_VisitReport> query, VisitDailyReportFilter filter)
+        // ★ BU กรองจากรายชื่อดิบ (Zoho partial name) ของพนักงานขาย Active ของ BU นั้น (lockedRawNames) แทน SalesGroup
+        private static IQueryable<MGT_VisitReport> ApplyScopeFilter(IQueryable<MGT_VisitReport> query, VisitDailyReportFilter filter, List<string>? lockedRawNames)
         {
-            if (!string.IsNullOrWhiteSpace(filter.SalesGroup))
-                query = query.Where(x => x.SalesGroup == filter.SalesGroup);
+            if (lockedRawNames is not null)
+                query = query.Where(x => x.SalesEmployeeBP != null && lockedRawNames.Contains(x.SalesEmployeeBP));
 
+            // ★ filter.SalesEmployeeBP อาจเป็นชื่อเต็ม (จากดรอปดาวน์ที่ map แล้ว) ขณะที่ x.SalesEmployeeBP เป็นชื่อดิบ
+            // บางส่วนจาก Zoho — เทียบแบบ "ชื่อที่ส่งมา contains ชื่อดิบใน DB" แทนเทียบเท่ากันตรงๆ (ดู OpportunityWinRateService)
             if (!string.IsNullOrWhiteSpace(filter.SalesEmployeeBP))
-                query = query.Where(x => x.SalesEmployeeBP == filter.SalesEmployeeBP);
+                query = query.Where(x => x.SalesEmployeeBP != null && filter.SalesEmployeeBP.Contains(x.SalesEmployeeBP));
 
             if (!string.IsNullOrWhiteSpace(filter.CustomerName))
                 query = query.Where(x => x.CustomerName == filter.CustomerName);

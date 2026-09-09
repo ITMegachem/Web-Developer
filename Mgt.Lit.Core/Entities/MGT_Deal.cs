@@ -19,6 +19,9 @@ namespace Mgt.Lit.Core.Entities
         // วันที่ปิดจริง (Stage เปลี่ยนเป็น Closed Won/Lost) — ควรใช้ตัวนี้เป็นหลักสำหรับ Win Rate/Sales Cycle
         public DateTime? ActualClosedDate { get; set; }
 
+        // Zoho field "Delivery_Date" บน Deal เอง (คนละฟิลด์กับ Deal_Items.Required_Date) — วันที่คาดว่าจะส่งมอบสินค้า
+        public DateTime? DeliveryDate { get; set; }
+
         // Deal Stage / Status — ค่าจริงขึ้นกับที่แต่ละองค์กรตั้งชื่อเอง (เช่น "Closed Won - Exact Match", "Close Lost - Expiry Date")
         public string? Stage { get; set; }
 

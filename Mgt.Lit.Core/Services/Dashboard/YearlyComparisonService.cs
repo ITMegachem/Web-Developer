@@ -10,23 +10,41 @@ namespace Mgt.Lit.Core.Services.Dashboard
     public class YearlyComparisonService : IYearlyComparisonService
     {
         private readonly AppDbContext _db;
+        private readonly ISalesEmployeeNameResolver _nameResolver;
 
-        public YearlyComparisonService(AppDbContext db) => _db = db;
+        public YearlyComparisonService(AppDbContext db, ISalesEmployeeNameResolver nameResolver)
+        {
+            _db = db;
+            _nameResolver = nameResolver;
+        }
 
         // จำนวนปีที่แสดง (ปีปัจจุบัน + ย้อนหลัง = 6 ปี) — อยากได้กี่ปีแก้ตรงนี้
         private const int YearsToShow = 6;
 
-        public async Task<YearlyComparisonDto> GetAsync(CancellationToken ct = default)
+        public async Task<YearlyComparisonDto> GetAsync(string? salesGroup, string? salesEmployeeBP, CancellationToken ct = default)
         {
             int currentYear = DateTime.Now.Year;
             int startYear = currentYear - (YearsToShow - 1);   // เช่น 2026 -> 2021
 
             // รวม NetAmount/GrossProfit ต่อ (ปี, เดือน) ในช่วง startYear..currentYear
             // ดึงปี/เดือนจาก BillingDocumentDate (สอดคล้องกับหน้า Sales Overview)
-            var raw = await _db.MGT_Sale.AsNoTracking()
+            var query = _db.MGT_Sale.AsNoTracking()
                 .Where(x => x.BillingDocumentDate.HasValue
                          && x.BillingDocumentDate.Value.Year >= startYear
-                         && x.BillingDocumentDate.Value.Year <= currentYear)
+                         && x.BillingDocumentDate.Value.Year <= currentYear);
+
+            // ★ salesGroup มาจาก controller (resolve จาก DataScope/Division ของ user แล้ว) — กรองจริงอิงจากรายชื่อ
+            // พนักงานขาย Active ของ BU นั้น (Ms_User.Division + Department='Sales') ไม่ใช่ SalesGroup ของธุรกรรมเอง
+            if (!string.IsNullOrWhiteSpace(salesGroup))
+            {
+                var lockedBuNames = await _nameResolver.GetActiveSalesEmployeeFullNamesAsync(salesGroup, ct);
+                query = query.Where(x => x.SalesEmployeeBP != null && lockedBuNames.Contains(x.SalesEmployeeBP));
+            }
+
+            if (!string.IsNullOrWhiteSpace(salesEmployeeBP))
+                query = query.Where(x => x.SalesEmployeeBP == salesEmployeeBP);
+
+            var raw = await query
                 .GroupBy(x => new
                 {
                     Y = x.BillingDocumentDate!.Value.Year,

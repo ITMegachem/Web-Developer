@@ -13,13 +13,24 @@ namespace Mgt.Lit.Core.Services.Dashboard
     public class CustomerOverviewService : ICustomerOverviewService
     {
         private readonly AppDbContext _db;
-        public CustomerOverviewService(AppDbContext db) => _db = db;
+        private readonly ISalesEmployeeNameResolver _nameResolver;
+
+        public CustomerOverviewService(AppDbContext db, ISalesEmployeeNameResolver nameResolver)
+        {
+            _db = db;
+            _nameResolver = nameResolver;
+        }
 
         public async Task<CustomerOverviewDto> GetAsync(CustomerOverviewFilter filter, CancellationToken ct = default)
         {
+            // ★ นิยาม BU ใหม่ทั้งหน้า — อ้างอิงจากรายชื่อพนักงานขาย Active ของ BU นั้น (Ms_User.Division + Department='Sales')
+            var lockedBuNames = string.IsNullOrWhiteSpace(filter.SalesGroup)
+                ? null
+                : await _nameResolver.GetActiveSalesEmployeeFullNamesAsync(filter.SalesGroup, ct);
+
             // ---------- matrix: Customer × เดือน ----------
             var q = _db.MGT_Sale.AsNoTracking();
-            q = ApplyYearBu(q, filter);
+            q = ApplyYearBu(q, filter, lockedBuNames);
             if (!string.IsNullOrWhiteSpace(filter.IndustryName))
                 q = q.Where(x => x.IndustryName == filter.IndustryName);
             if (!string.IsNullOrWhiteSpace(filter.CustomerFullName))
@@ -56,7 +67,7 @@ namespace Mgt.Lit.Core.Services.Dashboard
 
             // ---------- ตัวเลือก dropdown ----------
             // Industry: scope แค่ BU + Year
-            var indBase = ApplyYearBu(_db.MGT_Sale.AsNoTracking(), filter);
+            var indBase = ApplyYearBu(_db.MGT_Sale.AsNoTracking(), filter, lockedBuNames);
             var industries = await indBase
                 .Where(x => x.IndustryName != null && x.IndustryName != "")
                 .Select(x => x.IndustryName!)
@@ -65,7 +76,7 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 .ToListAsync(ct);
 
             // Customer: scope BU + Year + Industry ที่เลือก (cascade)
-            var custBase = ApplyYearBu(_db.MGT_Sale.AsNoTracking(), filter);
+            var custBase = ApplyYearBu(_db.MGT_Sale.AsNoTracking(), filter, lockedBuNames);
             if (!string.IsNullOrWhiteSpace(filter.IndustryName))
                 custBase = custBase.Where(x => x.IndustryName == filter.IndustryName);
             var customers = await custBase
@@ -108,13 +119,15 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 .ToListAsync(ct);
         }
 
-        private static IQueryable<MGT_Sale> ApplyYearBu(IQueryable<MGT_Sale> q, CustomerOverviewFilter f)
+        private static IQueryable<MGT_Sale> ApplyYearBu(IQueryable<MGT_Sale> q, CustomerOverviewFilter f, HashSet<string>? lockedBuNames)
         {
             if (f.Year.HasValue)
                 q = q.Where(x => x.BillingDocumentDate.HasValue
                               && x.BillingDocumentDate.Value.Year == f.Year.Value);
-            if (!string.IsNullOrWhiteSpace(f.SalesGroup))
-                q = q.Where(x => x.SalesGroup == f.SalesGroup);
+            if (lockedBuNames is not null)
+                q = q.Where(x => x.SalesEmployeeBP != null && lockedBuNames.Contains(x.SalesEmployeeBP));
+            if (!string.IsNullOrWhiteSpace(f.SalesEmployeeBP))
+                q = q.Where(x => x.SalesEmployeeBP == f.SalesEmployeeBP);
             return q;
         }
     }

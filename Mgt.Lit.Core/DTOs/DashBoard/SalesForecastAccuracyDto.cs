@@ -80,6 +80,21 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
         public string Outcome { get; set; } = string.Empty;   // Won / Lost / Pending
     }
 
+    // ★ เปรียบเทียบ Forecast ที่ "ล็อกไว้" ตอน Deal ยังเปิดอยู่ (MGT_ForecastSnapshot, capture ทุกครั้งที่ sync)
+    // กับ Actual ตอนนี้ — Won = DealAmount ปัจจุบัน, Lost = 0, ยังเปิดอยู่ = null (ยังไม่รู้ผล)
+    // ⚠️ เริ่มเก็บ snapshot ตั้งแต่ 2026-09 เป็นต้นไป Deal ที่ Forecast=Yes ก่อนหน้านั้นจะไม่มีแถวนี้ (ไม่มีข้อมูลย้อนหลัง)
+    public class ForecastVsActualRowDto
+    {
+        public string DealId { get; set; } = string.Empty;
+        public string OpportunityName { get; set; } = string.Empty;
+        public string CustomerName { get; set; } = string.Empty;
+        public string SalesEmployeeBP { get; set; } = string.Empty;
+        public decimal ForecastAmount { get; set; }      // จาก snapshot ล่าสุดของ deal นี้ ตอนยังเปิดอยู่
+        public decimal? ActualAmount { get; set; }        // null = ยังไม่ตัดสินผล (ยังเปิดอยู่)
+        public string Outcome { get; set; } = string.Empty;   // Won / Lost / Pending
+        public DateTime SnapshotDate { get; set; }
+    }
+
     public class SalesForecastAccuracyDto
     {
         public ForecastAccuracyKpiDto Kpi { get; set; } = new();
@@ -89,6 +104,7 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
         public List<ForecastGroupRowDto> ByIndustry { get; set; } = new();
         public List<ForecastGroupRowDto> ByProduct { get; set; } = new();
         public List<ForecastedDealRowDto> ForecastedDeals { get; set; } = new();
+        public List<ForecastVsActualRowDto> ForecastVsActual { get; set; } = new();
 
         // ── ตัวเลือก dropdown (scope ตาม BU) ────────────────────────────────
         public List<string> AvailableSalesEmployees { get; set; } = new();

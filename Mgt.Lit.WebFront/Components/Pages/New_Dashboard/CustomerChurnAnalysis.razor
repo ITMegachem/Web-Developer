@@ -2,15 +2,18 @@
 @using Mgt.Lit.WebFront.Components.Layout.MainLay
 @layout AppLayout
 @rendermode InteractiveServer
-<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css?v=20260909a" />
 @using System.Linq
 @using Microsoft.JSInterop
 @using Mgt.Lit.Core.DTOs.DashBoard
 @using Mgt.Lit.WebFront.Services.DashBoard
 @using Mgt.Lit.WebFront.Components
+@using ClosedXML.Excel
 @inject DashCustomerChurnAnalysisApiService ChurnApi
 @inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject DownloadLogService DownloadLogSvc
 @inject IJSRuntime JS
+@implements IAsyncDisposable
 
 <style>
     /* ── Customer Churn Analysis Report — สไตล์เฉพาะหน้านี้ (คำนำหน้า cca-) ─────── */
@@ -25,6 +28,10 @@
         border-radius: 10px;
         white-space: nowrap;
     }
+
+    .cca-btn-export { background: #15803d; color: #fff; border: 1px solid #15803d; font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 10px; white-space: nowrap; }
+    .cca-btn-export:hover { opacity: 0.92; }
+    .cca-btn-export:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .cca-reset-btn {
         background: #fff;
@@ -52,11 +59,11 @@
         padding: 14px 16px;
     }
 
-    .cca-kpi-label { font-size: 12.5px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
-    .cca-kpi-value { font-size: 24px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 6px; }
+    .cca-kpi-label { font-size: 15px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
+    .cca-kpi-value { font-size: 30px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 6px; }
     .cca-kpi-value.warn { color: #b45309; }
     .cca-kpi-value.danger { color: #be123c; }
-    .cca-kpi-sub { font-size: 11.5px; color: var(--muted); }
+    .cca-kpi-sub { font-size: 14px; color: var(--muted); }
 
     .cca-insight {
         display: flex;
@@ -171,9 +178,13 @@
             <div>
                 <div class="dash-eyebrow">Management Report</div>
                 <div class="dash-title">Customer Churn Analysis Report</div>
-                <div class="dash-subtitle">Customer Base / Lost Customer / Existing vs New Revenue / Existing Customer Growth</div>
+                <div class="dash-subtitle">Sold-to Party Base / Lost Sold-to Party / Existing vs New Revenue / Existing Sold-to Party Growth</div>
             </div>
             <div class="cca-top-actions">
+                @if (CanExport)
+                {
+                    <button type="button" class="cca-btn-export" @onclick="ExportToExcelAsync" disabled="@(_data is null || _data.LostCustomers.Count == 0)">⬇ Export Excel</button>
+                }
                 <div class="cca-kpi-pill">Retention KPI</div>
             </div>
         </div>
@@ -190,7 +201,7 @@
                             Placeholder="All" Options="@(_data?.AvailableSalesEmployees ?? new())" />
             </div>
             <div class="dash-field">
-                <div class="dash-field-label">Customer Group</div>
+                <div class="dash-field-label">Sold-to Party Group</div>
                 <DashSelect @bind-Value="_selectedCustomerGroup" @bind-Value:after="ReloadAsync"
                             Placeholder="All" Options="@(_data?.AvailableCustomerGroups ?? new())" />
             </div>
@@ -217,12 +228,12 @@
 
             <div class="cca-kpi-row">
                 <div class="cca-kpi">
-                    <div class="cca-kpi-label">Existing Customers</div>
+                    <div class="cca-kpi-label">Existing Sold-to Parties</div>
                     <div class="cca-kpi-value">@kpi.ExistingCustomers</div>
-                    <div class="cca-kpi-sub">Customer base at start of period</div>
+                    <div class="cca-kpi-sub">Sold-to party base at start of period</div>
                 </div>
                 <div class="cca-kpi">
-                    <div class="cca-kpi-label">Lost Customers</div>
+                    <div class="cca-kpi-label">Lost Sold-to Parties</div>
                     <div class="cca-kpi-value danger">@kpi.LostCustomers</div>
                     <div class="cca-kpi-sub">Churn @kpi.ChurnRatePercent.ToString("0.0")%</div>
                 </div>
@@ -255,9 +266,9 @@
 
             <div class="cca-chart-row">
                 <div class="dash-card">
-                    <div class="dash-card-header">Customer Base Breakdown</div>
+                    <div class="dash-card-header">Sold-to Party Base Breakdown</div>
                     <div class="dash-card-body">
-                        <div id="@BaseDonutChartId" class="echarts-host" role="img" aria-label="Customer base breakdown donut chart"></div>
+                        <div id="@BaseDonutChartId" class="echarts-host" role="img" aria-label="Sold-to party base breakdown donut chart"></div>
                     </div>
                 </div>
                 <div class="dash-card">
@@ -278,7 +289,7 @@
                     </div>
                 </div>
                 <div class="dash-card">
-                    <div class="dash-card-header">Existing Customer Growth</div>
+                    <div class="dash-card-header">Existing Sold-to Party Growth</div>
                     <div class="dash-card-body">
                         <div class="cca-growth-bars">
                             <div class="cca-growth-bar">
@@ -331,16 +342,16 @@
             <div class="cca-table-row">
                 <div class="dash-card">
                     <div class="dash-card-header d-flex justify-content-between align-items-center">
-                        <span>Lost Customers List (Churn)</span>
-                        <span style="font-weight:600;font-size:12.5px;color:var(--muted)">Total Lost Customers: @_data.LostCustomers.Count</span>
+                        <span>Lost Sold-to Parties List (Churn)</span>
+                        <span style="font-weight:600;font-size:12.5px;color:var(--muted)">Total Lost Sold-to Parties: @_data.LostCustomers.Count</span>
                     </div>
                     <div class="dash-card-body">
                         <div class="table-scroll">
                             <table class="table table-striped table-hover">
                                 <thead>
                                     <tr>
-                                        <th>Customer Code</th>
-                                        <th>Customer Name</th>
+                                        <th>Sold-to Party Code</th>
+                                        <th>Sold-to Party Name</th>
                                         <th>Industry</th>
                                         <th>Salesperson</th>
                                         <th>Last Purchase</th>
@@ -355,7 +366,7 @@
                                     @{ var visibleLost = _showAllLost ? _data.LostCustomers : _data.LostCustomers.Take(10).ToList(); }
                                     @if (visibleLost.Count == 0)
                                     {
-                                        <tr><td colspan="10" class="dash-table-empty">No lost customers for this filter</td></tr>
+                                        <tr><td colspan="10" class="dash-table-empty">No lost sold-to parties for this filter</td></tr>
                                     }
                                     else
                                     {
@@ -381,7 +392,7 @@
                         @if (_data.LostCustomers.Count > 10)
                         {
                             <button type="button" class="cca-view-all" @onclick="() => _showAllLost = !_showAllLost">
-                                @(_showAllLost ? "Show Less" : $"View All Lost Customers ({_data.LostCustomers.Count})")
+                                @(_showAllLost ? "Show Less" : $"View All Lost Sold-to Parties ({_data.LostCustomers.Count})")
                             </button>
                         }
                     </div>
@@ -414,9 +425,9 @@
             </div>
 
             <div class="cca-note">
-                Note: Existing Customer = first purchase before the start of the selected year. New Customer = first purchase within the selected year.
-                Lost/Churn Customer = Existing customer with no purchase for ≥365 days as of @_data.AsOfDate.ToString("d MMM yyyy").
-                Last 12M Revenue/GP is measured in the 12 months up to each customer's own last purchase date. Data from SAP Billing Document.
+                Note: Existing Sold-to Party = first purchase before the start of the selected year. New Sold-to Party = first purchase within the selected year.
+                Lost/Churn Sold-to Party = Existing sold-to party with no purchase for ≥365 days as of @_data.AsOfDate.ToString("d MMM yyyy").
+                Last 12M Revenue/GP is measured in the 12 months up to each sold-to party's own last purchase date. Data from SAP Billing Document.
             </div>
         }
     </div>
@@ -431,6 +442,9 @@
     private string _selectedYear = DateTime.Now.Year.ToString();
     private string _selectedSalesperson = "";
     private string _selectedCustomerGroup = "";
+
+    private bool CanExport => Mgt.Lit.WebFront.Auth.ReportAccessHelper.CanExportReport(AuthState.User, "CustomerChurnAnalysis");
+    private IJSObjectReference? _jsModule;
     private string _selectedIndustry = "";
 
     private const string BaseDonutChartId = "cca-base-donut";
@@ -534,9 +548,9 @@
         {
             new { name = "Active Existing", value = kpi.ActiveExistingCustomers },
             new { name = "Lost (Churn)", value = kpi.LostCustomers },
-            new { name = "New Customers", value = kpi.NewCustomers }
+            new { name = "New Sold-to Parties", value = kpi.NewCustomers }
         };
-        await JS.InvokeVoidAsync("dashboardECharts.renderShareDonut", BaseDonutChartId, basePoints, "Total Customer Base");
+        await JS.InvokeVoidAsync("dashboardECharts.renderShareDonut", BaseDonutChartId, basePoints, "Total Sold-to Party Base");
 
         var trendPoints = _data.ChurnTrend
             .Select(p => new { monthName = p.MonthName, churnRatePercent = p.ChurnRatePercent })
@@ -549,6 +563,69 @@
                 .Select(r => new { groupName = r.GroupName, existingCustomers = r.ExistingCustomers, lostCustomers = r.LostCustomers, churnRatePercent = r.ChurnRatePercent })
                 .ToArray();
             await JS.InvokeVoidAsync("dashboardECharts.renderChurnByGroupBar", IndustryChartId, industryRows, kpi.ChurnRatePercent);
+        }
+    }
+
+    private async Task ExportToExcelAsync()
+    {
+        if (_data is null || _data.LostCustomers.Count == 0) return;
+
+        try
+        {
+            var username = AuthState.Permission?.Username;
+            var fileName = $"CustomerChurnAnalysis_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await DownloadLogSvc.LogDownloadAsync(username ?? "", fileName);
+
+            _jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Lost Sold-to Parties");
+
+            var headers = new[] { "Sold-to Party Code", "Sold-to Party Name", "Industry", "Salesperson", "Last Purchase", "Days", "Risk Level", "Last 12M Revenue", "Last 12M GP", "Action" };
+            for (var i = 0; i < headers.Length; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+            var headerRow = ws.Row(1);
+            headerRow.Style.Font.Bold = true;
+            headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+
+            var row = 2;
+            foreach (var r in _data.LostCustomers)
+            {
+                var col = 1;
+                ws.Cell(row, col++).Value = r.CustomerCode;
+                ws.Cell(row, col++).Value = r.CustomerName;
+                ws.Cell(row, col++).Value = r.IndustryName;
+                ws.Cell(row, col++).Value = r.SalesEmployeeBP;
+                ws.Cell(row, col++).Value = r.LastPurchaseDate.ToString("yyyy-MM-dd");
+                ws.Cell(row, col++).Value = r.DaysSinceLastPurchase;
+                ws.Cell(row, col++).Value = r.RiskLevel;
+                ws.Cell(row, col++).Value = r.Last12MRevenue;
+                ws.Cell(row, col++).Value = r.Last12MGrossProfit;
+                ws.Cell(row, col++).Value = r.Action;
+                row++;
+            }
+
+            ws.Columns().AdjustToContents();
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+
+            await _jsModule.InvokeVoidAsync(
+                "downloadFileFromBytes",
+                fileName,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                base64);
+        }
+        catch (JSDisconnectedException) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_jsModule is not null)
+        {
+            try { await _jsModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
         }
     }
 }

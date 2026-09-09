@@ -2,7 +2,8 @@
 @using Mgt.Lit.WebFront.Components.Layout.MainLay
 @layout AppLayout
 @rendermode InteractiveServer
-<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css?v=20260909a" />
+@using ClosedXML.Excel
 @using System.Linq
 @using Microsoft.JSInterop
 @using Mgt.Lit.Core.DTOs.DashBoard
@@ -10,47 +11,54 @@
 @using Mgt.Lit.WebFront.Components
 @inject DashVisitDailyReportApiService VisitApi
 @inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject DownloadLogService DownloadLogSvc
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
 <style>
     /* ── Visit Daily Report — สไตล์เฉพาะหน้านี้ (คำนำหน้า vdr-) ───── */
-    .vdr-reset-btn {
-        background: #fff;
-        border: 1px solid var(--card-border);
-        color: var(--neutral-700);
-        font-weight: 600;
-        font-size: 13px;
-        padding: 9px 16px;
-        border-radius: 10px;
-        white-space: nowrap;
-    }
+    .vdr-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-bottom: 14px; }
+    .vdr-btn { font-weight: 600; font-size: 14.5px; padding: 10px 20px; border-radius: 10px; white-space: nowrap; border: 1px solid var(--card-border); background: #fff; color: var(--neutral-700); }
+    .vdr-btn:hover { background: var(--neutral-100); }
+    .vdr-btn-export { background: #15803d; color: #fff; border-color: #15803d; }
+    .vdr-btn-export:hover { opacity: .92; }
+    .vdr-reset-btn { background: #fff; border: 1px solid var(--card-border); color: var(--neutral-700); font-weight: 600; font-size: 14.5px; padding: 10px 18px; border-radius: 10px; white-space: nowrap; }
     .vdr-reset-btn:hover { background: var(--neutral-100); }
 
-    .vdr-kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 16px; }
-
-    .vdr-kpi { background: var(--surface); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px 16px; }
-    .vdr-kpi-label { font-size: 12.5px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
-    .vdr-kpi-value { font-size: 24px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
-    .vdr-kpi-sub { font-size: 11.5px; color: var(--muted); }
-
-    .vdr-chart-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: stretch; }
-    .vdr-table-row { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 16px; }
-
-    .vdr-status-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+    .vdr-status-badge { display: inline-block; padding: 5px 13px; border-radius: 999px; font-size: 14px; font-weight: 700; white-space: nowrap; }
     .vdr-status-badge.completed { background: #dcfce7; color: #15803d; }
     .vdr-status-badge.inprogress { background: #ffedd5; color: #c2410c; }
 
-    .vdr-potential-badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; background: #dbeafe; color: #1d4ed8; white-space: nowrap; }
-    .vdr-empty-panel { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 180px; color: var(--muted); font-size: 12.5px; text-align: center; padding: 12px; }
-    .vdr-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
-    .vdr-muted-cell { color: var(--muted); }
+    .vdr-potential-badge { display: inline-block; padding: 4px 11px; border-radius: 999px; font-size: 14px; font-weight: 700; background: #dbeafe; color: #1d4ed8; white-space: nowrap; }
+    .vdr-sub { display: block; font-size: 14px; color: var(--muted); margin-top: 3px; }
 
-    @@media (max-width: 1400px) {
-        .vdr-kpi-row { grid-template-columns: repeat(3, 1fr); }
-        .vdr-chart-row { grid-template-columns: 1fr; }
+    /* ── ตารางรวม Visit + Product/Competitor แบบ grouped header 3 กลุ่ม ─────
+       ★ .table-scroll table/td มี font-size ของตัวเองใน dash-theme.css (เปลี่ยนค่าไปตาม breakpoint ด้วย) ต้องเจาะจง
+       กว่าและใส่ !important กันโดนทับ เหมือนปัญหาสีที่เจอตอนแก้ Sales Overview */
+    .vdr-combined-table { border-collapse: separate; border-spacing: 0; width: 100%; }
+    .table-scroll .vdr-combined-table th, .table-scroll .vdr-combined-table td {
+        padding: 13px 16px; vertical-align: top; font-size: 17px !important; line-height: 1.55; border-bottom: 1px solid var(--card-border);
     }
-    @@media (max-width: 640px) { .vdr-kpi-row { grid-template-columns: 1fr 1fr; } }
+    .table-scroll .vdr-combined-table thead th {
+        position: sticky; top: 0; background: #fff; z-index: 1; color: #33443a; font-weight: 700; font-size: 16px !important;
+    }
+    /* ★ Customer/Contact (col 4), Product (col 6), Remark (col 12) ใช้ rowspan ข้ามหลายแถว — บังคับ font-size ตรงๆ
+       กันกรณี browser render cell ที่ merge หลายแถวด้วยขนาดต่างจาก cell ปกติ */
+    .table-scroll .vdr-combined-table td:nth-child(4),
+    .table-scroll .vdr-combined-table td:nth-child(6),
+    .table-scroll .vdr-combined-table td:nth-child(12) {
+        font-size: 17px !important;
+    }
+    .vdr-group-visit { background: #eef6fb; }
+    .vdr-group-product { background: #fdecea; }
+    .vdr-group-followup { background: #eef7ee; }
+    .vdr-visit-first-row td { border-top: 2px solid var(--card-border); }
+    .vdr-combined-table tbody tr:hover td { background: #f7faf5; }
+
+    @@media print {
+        .dash-sidebar, .vdr-toolbar, .dash-filters, .app-topbar, .app-sidebar { display: none !important; }
+        .table-scroll { max-height: none !important; overflow: visible !important; }
+    }
 </style>
 
 <div class="dash-bg">
@@ -63,8 +71,16 @@
             <div>
                 <div class="dash-eyebrow">Management Report</div>
                 <div class="dash-title">Visit Daily Report</div>
-                <div class="dash-subtitle">Customer visit activity, products discussed, and competitor intelligence captured by the sales team</div>
+                <div class="dash-subtitle">All visit details in one view</div>
             </div>
+        </div>
+
+        <div class="vdr-toolbar">
+            @if (CanExport)
+            {
+                <button type="button" class="vdr-btn vdr-btn-export" @onclick="ExportToExcelAsync" disabled="@(_data is null || _data.Visits.Count == 0)">⬇ Export Excel</button>
+            }
+            <button type="button" class="vdr-btn" @onclick="PrintAsync">🖶 Print</button>
         </div>
 
         <div class="dash-filters dash-filter-panel">
@@ -78,9 +94,17 @@
                             Placeholder="All" Options="@(_data?.AvailableSalesEmployees ?? new())" />
             </div>
             <div class="dash-field">
-                <div class="dash-field-label">Customer</div>
+                <div class="dash-field-label">Sold-to Party</div>
                 <DashSelect @bind-Value="_selectedCustomer" @bind-Value:after="ReloadAsync"
                             Placeholder="All" Options="@(_data?.AvailableCustomers ?? new())" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Deal Status</div>
+                <DashSelect @bind-Value="_selectedDealStatus" Placeholder="All" Options="@(new List<string> { "Won", "Open", "Lost", "No Deal" })" />
+            </div>
+            <div class="dash-field">
+                <div class="dash-field-label">Search</div>
+                <input class="dash-input" placeholder="Search visit no., customer, deal name, material..." @bind="_searchText" @bind:event="oninput" />
             </div>
             <div class="dash-field" style="align-self:flex-end">
                 <button type="button" class="vdr-reset-btn" @onclick="ResetAsync">↺ Reset</button>
@@ -96,189 +120,87 @@
         }
         else
         {
-            var kpi = _data.Kpi;
-
-            <div class="vdr-kpi-row">
-                <div class="vdr-kpi">
-                    <div class="vdr-kpi-label">Total Visits</div>
-                    <div class="vdr-kpi-value">@kpi.TotalVisits</div>
-                    <div class="vdr-kpi-sub">Visit reports logged</div>
-                </div>
-                <div class="vdr-kpi">
-                    <div class="vdr-kpi-label">Customers Visited</div>
-                    <div class="vdr-kpi-value">@kpi.TotalCustomersVisited</div>
-                    <div class="vdr-kpi-sub">Unique customers</div>
-                </div>
-                <div class="vdr-kpi">
-                    <div class="vdr-kpi-label">Salespeople Active</div>
-                    <div class="vdr-kpi-value">@kpi.TotalSalespeople</div>
-                    <div class="vdr-kpi-sub">Unique sales reps</div>
-                </div>
-                <div class="vdr-kpi">
-                    <div class="vdr-kpi-label">Avg Products / Visit</div>
-                    <div class="vdr-kpi-value">@kpi.AvgProductsPerVisit.ToString("0.0")</div>
-                    <div class="vdr-kpi-sub">@kpi.TotalProductItemsDiscussed total product lines (@kpi.DistinctProductsDiscussed distinct)</div>
-                </div>
-                <div class="vdr-kpi">
-                    <div class="vdr-kpi-label">Competitors Found</div>
-                    <div class="vdr-kpi-value">@kpi.TotalCompetitorsFound</div>
-                    <div class="vdr-kpi-sub">Product lines with competitor info</div>
-                </div>
-                <div class="vdr-kpi">
-                    <div class="vdr-kpi-label">Potential Items</div>
-                    <div class="vdr-kpi-value">@kpi.TotalPotentialItems</div>
-                    <div class="vdr-kpi-sub">Avg duration: @(kpi.AvgVisitDurationMinutes?.ToString("0") ?? "N/A") min</div>
-                </div>
-            </div>
-
-            <div class="vdr-chart-row">
-                <div class="dash-card">
-                    <div class="dash-card-header">Visit Activity Trend (Monthly)</div>
-                    <div class="dash-card-body">
-                        <div id="@TrendChartId" class="echarts-host" role="img" aria-label="Monthly visit activity trend"></div>
-                    </div>
-                </div>
-                <div class="dash-card">
-                    <div class="dash-card-header">Visits by Salesperson</div>
-                    <div class="dash-card-body">
-                        @if (_data.BySalesperson.Count == 0)
-                        {
-                            <div class="vdr-empty-panel">No data for this filter</div>
-                        }
-                        else
-                        {
-                            <div id="@SalespersonChartId" class="echarts-host" role="img" aria-label="Visits by salesperson"></div>
-                        }
-                    </div>
-                </div>
-                <div class="dash-card">
-                    <div class="dash-card-header">Visits by Customer (Top 10)</div>
-                    <div class="dash-card-body">
-                        @if (_data.ByCustomer.Count == 0)
-                        {
-                            <div class="vdr-empty-panel">No data for this filter</div>
-                        }
-                        else
-                        {
-                            <div id="@CustomerChartId" class="echarts-host" role="img" aria-label="Visits by customer"></div>
-                        }
-                    </div>
-                </div>
-            </div>
-
-            <div class="vdr-table-row">
-                <div class="dash-card">
-                    <div class="dash-card-header">Visit Log (@_data.Visits.Count)</div>
-                    <div class="dash-card-body">
-                        <div class="table-scroll">
-                            <table class="table table-striped table-hover">
-                                <thead>
-                                    <tr>
-                                        <th>Visit No.</th>
-                                        <th>Date</th>
-                                        <th>Salesperson</th>
-                                        <th>Customer</th>
-                                        <th>Start</th>
-                                        <th>End</th>
-                                        <th>Duration</th>
-                                        <th>Status</th>
-                                        <th>Products</th>
-                                        <th>Competitors</th>
-                                        <th>Contact Person(s)</th>
-                                        <th>Remark</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @if (_data.Visits.Count == 0)
+            <div class="dash-card">
+                <div class="dash-card-header">Visit Details</div>
+                <div class="dash-card-body">
+                    <div class="table-scroll" style="max-height:700px;">
+                        <table class="table table-striped table-hover vdr-combined-table">
+                            <thead>
+                                <tr>
+                                    <th class="vdr-group-visit" colspan="5">Visit details</th>
+                                    <th class="vdr-group-product" colspan="6">Materials &amp; competitors</th>
+                                    <th class="vdr-group-followup" colspan="1">Follow-up</th>
+                                </tr>
+                                <tr>
+                                    <th>Visit No.</th>
+                                    <th>Date</th>
+                                    <th>Salesperson</th>
+                                    <th>Sold-to Party / Contact</th>
+                                    <th>Status</th>
+                                    <th>Material</th>
+                                    <th>Price</th>
+                                    <th>Consumption</th>
+                                    <th>Competitor</th>
+                                    <th>Notes</th>
+                                    <th>Potential</th>
+                                    <th>Remark</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (FilteredVisits.Count == 0)
+                                {
+                                    <tr><td colspan="12" class="dash-table-empty">No visit reports for this filter</td></tr>
+                                }
+                                else
+                                {
+                                    @foreach (var visit in FilteredVisits)
                                     {
-                                        <tr><td colspan="12" class="dash-table-empty">No visit reports for this filter</td></tr>
-                                    }
-                                    else
-                                    {
-                                        @foreach (var row in _data.Visits)
+                                        var rowCount = Math.Max(1, visit.Items.Count);
+                                        @for (var i = 0; i < rowCount; i++)
                                         {
-                                            <tr>
-                                                <td>@row.VisitNumber</td>
-                                                <td>@(row.VisitDate?.ToString("dd MMM yyyy") ?? "")</td>
-                                                <td>@row.SalesEmployeeBP</td>
-                                                <td>@row.CustomerName</td>
-                                                <td>@(row.StartDateTime?.ToString("HH:mm") ?? "")</td>
-                                                <td>@(row.EndDateTime?.ToString("HH:mm") ?? "")</td>
-                                                <td>@(row.DurationMinutes.HasValue ? $"{row.DurationMinutes} min" : "N/A")</td>
-                                                <td>@RenderStatusBadge(row.Status)</td>
-                                                <td>@row.ProductCount</td>
-                                                <td>@row.CompetitorCount</td>
-                                                <td>@(string.IsNullOrWhiteSpace(row.ContactPersons) ? "—" : row.ContactPersons)</td>
-                                                <td class="vdr-muted-cell">@row.DescriptionRemark</td>
+                                            var item = i < visit.Items.Count ? visit.Items[i] : null;
+                                            <tr class="@(i == 0 ? "vdr-visit-first-row" : "")">
+                                                @if (i == 0)
+                                                {
+                                                    <td rowspan="@rowCount">@visit.VisitNumber</td>
+                                                    <td rowspan="@rowCount">@(visit.VisitDate?.ToString("yyyy-MM-dd") ?? "")</td>
+                                                    <td rowspan="@rowCount">@visit.SalesEmployeeBP</td>
+                                                    <td rowspan="@rowCount">
+                                                        @visit.CustomerName
+                                                        @if (!string.IsNullOrWhiteSpace(visit.ContactPersons))
+                                                        {
+                                                            <span class="vdr-sub">@visit.ContactPersons</span>
+                                                        }
+                                                    </td>
+                                                    <td rowspan="@rowCount">@RenderStatusBadge(visit.Status)</td>
+                                                }
+                                                @if (item is not null)
+                                                {
+                                                    <td>@(item.MaterialName ?? "—")</td>
+                                                    <td>@(item.Price ?? "—")</td>
+                                                    <td>@(item.Consumption ?? "—")</td>
+                                                    <td>@CompetitorCell(item)</td>
+                                                    <td>@(string.IsNullOrWhiteSpace(item.StatusNote) ? "—" : item.StatusNote)</td>
+                                                    <td>@RenderPotentialBadge(item.Potential)</td>
+                                                }
+                                                else
+                                                {
+                                                    <td colspan="6" class="dash-table-empty">No products discussed</td>
+                                                }
+                                                @if (i == 0)
+                                                {
+                                                    <td rowspan="@rowCount">@(string.IsNullOrWhiteSpace(visit.DescriptionRemark) ? "—" : visit.DescriptionRemark)</td>
+                                                }
                                             </tr>
                                         }
                                     }
-                                </tbody>
-                            </table>
-                        </div>
+                                }
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
 
-            <div class="vdr-table-row">
-                <div class="dash-card">
-                    <div class="dash-card-header">Product & Competitor Intelligence (@IntelRows.Count line item@(IntelRows.Count == 1 ? "" : "s"))</div>
-                    <div class="dash-card-body">
-                        <div class="table-scroll">
-                            <table class="table table-striped table-hover">
-                                <thead>
-                                    <tr>
-                                        <th>Visit No.</th>
-                                        <th>Date</th>
-                                        <th>Customer</th>
-                                        <th>Product</th>
-                                        <th>Contact / Position</th>
-                                        <th>Competitor</th>
-                                        <th>Competitor Supplier</th>
-                                        <th>Price</th>
-                                        <th>Consumption</th>
-                                        <th>Origin</th>
-                                        <th>Potential</th>
-                                        <th>Notes</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @if (IntelRows.Count == 0)
-                                    {
-                                        <tr><td colspan="12" class="dash-table-empty">No competitor or pricing intelligence captured for this filter</td></tr>
-                                    }
-                                    else
-                                    {
-                                        @foreach (var (visit, item) in IntelRows)
-                                        {
-                                            <tr>
-                                                <td>@visit.VisitNumber</td>
-                                                <td>@(visit.VisitDate?.ToString("dd MMM yyyy") ?? "")</td>
-                                                <td>@visit.CustomerName</td>
-                                                <td>@(item.MaterialName ?? "—")</td>
-                                                <td>@ContactCell(item)</td>
-                                                <td>@(item.CompetitorName ?? "—")</td>
-                                                <td>@(item.CompetitorSupplier ?? "—")</td>
-                                                <td>@(item.Price ?? "—")</td>
-                                                <td>@(item.Consumption ?? "—")</td>
-                                                <td>@(item.MakerOrigin ?? "—")</td>
-                                                <td>@RenderPotentialBadge(item.Potential)</td>
-                                                <td class="vdr-muted-cell">@(item.StatusNote ?? "")</td>
-                                            </tr>
-                                        }
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="vdr-note">
-                Note: Status is derived — "Completed" when an End Time is recorded, "In Progress" otherwise (Zoho has no explicit visit-status field).
-                "Competitors Found" and "Potential Items" count product lines in Visit_Items where the Sales rep filled in competitor or potential info — most lines are left blank in practice.
-                Data source: Zoho CRM (crm/v8/Visit_Reports + Visit_Items subform).
-            </div>
         }
     </div>
 </div>
@@ -286,16 +208,15 @@
 @code {
     private VisitDailyReportDto? _data;
     private bool _loading;
-    private bool _chartsNeedRender;
 
     private DateTime? _dateFrom;
     private DateTime? _dateTo;
     private string _selectedSalesperson = "";
     private string _selectedCustomer = "";
+    private string _selectedDealStatus = "";   // client-side quick filter — ไม่ยิง API ใหม่
+    private string _searchText = "";        // client-side quick filter — ไม่ยิง API ใหม่
 
-    private const string TrendChartId = "vdr-trend";
-    private const string SalespersonChartId = "vdr-salesperson";
-    private const string CustomerChartId = "vdr-customer";
+    private bool CanExport => Mgt.Lit.WebFront.Auth.ReportAccessHelper.CanExportReport(AuthState.User, "VisitDailyReport");
 
     private IJSObjectReference? _jsModule;
     private DotNetObjectReference<VisitDailyReport>? _dotNetRef;
@@ -309,29 +230,33 @@
         // SalesGroup: server บังคับตาม BU ของ user
     };
 
-    // แถวที่มีข้อมูลคู่แข่ง/ราคา/ศักยภาพจริง (ตัด line item ที่ว่างเปล่าทั้งหมดออก) เรียงตามวันที่ล่าสุดก่อน
-    private List<(VisitRowDto Visit, VisitItemDetailDto Item)> IntelRows =>
+    // ★ Status/Search กรองในหน่วยความจำเท่านั้น (ไม่กระทบ KPI ที่มาจาก server เสมอ) — ให้ตอบสนองทันทีไม่ต้องรอ round trip
+    private List<VisitRowDto> FilteredVisits =>
         (_data?.Visits ?? new())
-            .SelectMany(v => v.Items.Select(i => (Visit: v, Item: i)))
-            .Where(x => !string.IsNullOrWhiteSpace(x.Item.CompetitorName)
-                     || !string.IsNullOrWhiteSpace(x.Item.CompetitorSupplier)
-                     || !string.IsNullOrWhiteSpace(x.Item.Price)
-                     || !string.IsNullOrWhiteSpace(x.Item.Consumption)
-                     || !string.IsNullOrWhiteSpace(x.Item.Potential))
+            .Where(v => string.IsNullOrWhiteSpace(_selectedDealStatus) || v.DealStatus == _selectedDealStatus)
+            .Where(v => string.IsNullOrWhiteSpace(_searchText) || MatchesSearch(v, _searchText.Trim()))
             .ToList();
 
-    private RenderFragment ContactCell(VisitItemDetailDto item) => __builder =>
+    private static bool MatchesSearch(VisitRowDto v, string search) =>
+        v.VisitNumber.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || v.CustomerName.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || v.SalesEmployeeBP.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || v.DescriptionRemark.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || v.RelatedDealNames.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || v.Items.Any(i => (i.MaterialName ?? "").Contains(search, StringComparison.OrdinalIgnoreCase));
+
+    private RenderFragment CompetitorCell(VisitItemDetailDto item) => __builder =>
     {
-        if (string.IsNullOrWhiteSpace(item.ContactPerson))
+        if (string.IsNullOrWhiteSpace(item.CompetitorName) && string.IsNullOrWhiteSpace(item.CompetitorSupplier))
         {
             @:—
         }
         else
         {
-            @item.ContactPerson
-            if (!string.IsNullOrWhiteSpace(item.Position))
+            @(item.CompetitorName ?? item.CompetitorSupplier)
+            @if (!string.IsNullOrWhiteSpace(item.CompetitorName) && !string.IsNullOrWhiteSpace(item.CompetitorSupplier) && item.CompetitorName != item.CompetitorSupplier)
             {
-                <span class="vdr-note"> (@item.Position)</span>
+                <span class="vdr-sub">@item.CompetitorSupplier</span>
             }
         }
     };
@@ -354,7 +279,6 @@
         }
     };
 
-    // ⚠️ ห้ามยิง JS interop ต่อจาก StateHasChanged ในเมธอดเดียวกันทันที — ต้องรอ OnAfterRenderAsync(firstRender:false)
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -370,15 +294,7 @@
             _dateTo = DateTime.Now.Date;
 
             _data = await VisitApi.GetAsync(BuildFilter());
-            _chartsNeedRender = _data is not null;
             await InvokeAsync(StateHasChanged);
-            return;
-        }
-
-        if (_chartsNeedRender && _data is not null)
-        {
-            _chartsNeedRender = false;
-            await RenderChartsAsync();
         }
     }
 
@@ -403,6 +319,8 @@
     {
         _selectedSalesperson = "";
         _selectedCustomer = "";
+        _selectedDealStatus = "";
+        _searchText = "";
         _dateFrom = DateTime.Now.Date.AddMonths(-2);
         _dateTo = DateTime.Now.Date;
         await LoadAsync();
@@ -414,7 +332,6 @@
         try
         {
             _data = await VisitApi.GetAsync(BuildFilter());
-            _chartsNeedRender = _data is not null;
         }
         finally
         {
@@ -423,30 +340,77 @@
         }
     }
 
-    private async Task RenderChartsAsync()
+    private async Task PrintAsync() => await JS.InvokeVoidAsync("eval", "window.print()");
+
+    private async Task ExportToExcelAsync()
     {
-        if (_data is null) return;
+        if (_data is null || _data.Visits.Count == 0) return;
 
-        var trendPoints = _data.Trend
-            .Select(p => new { periodLabel = p.PeriodLabel, visitCount = p.VisitCount, competitorFindings = p.CompetitorFindings })
-            .ToArray();
-        await JS.InvokeVoidAsync("dashboardECharts.renderVisitTrend", TrendChartId, trendPoints);
-
-        if (_data.BySalesperson.Count > 0)
+        try
         {
-            var rows = _data.BySalesperson.Take(10)
-                .Select(r => new { groupName = r.GroupName, visitCount = r.VisitCount, productCount = r.ProductCount, competitorCount = r.CompetitorCount })
-                .ToArray();
-            await JS.InvokeVoidAsync("dashboardECharts.renderVisitGroupBar", SalespersonChartId, rows);
-        }
+            var username = AuthState.Permission?.Username;
+            var fileName = $"VisitDailyReport_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await DownloadLogSvc.LogDownloadAsync(username ?? "", fileName);
 
-        if (_data.ByCustomer.Count > 0)
-        {
-            var rows = _data.ByCustomer.Take(10)
-                .Select(r => new { groupName = r.GroupName, visitCount = r.VisitCount, productCount = r.ProductCount, competitorCount = r.CompetitorCount })
-                .ToArray();
-            await JS.InvokeVoidAsync("dashboardECharts.renderVisitGroupBar", CustomerChartId, rows);
+            _jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Visit Daily Report");
+
+            var headers = new[]
+            {
+                "Visit No.", "Date", "Salesperson", "Sold-to Party", "Contact Person(s)", "Start", "End", "Duration (min)", "Status",
+                "Material", "Price", "Consumption", "Competitor", "Competitor Supplier", "Potential", "Notes", "Remark"
+            };
+            for (var i = 0; i < headers.Length; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+
+            var headerRow = ws.Row(1);
+            headerRow.Style.Font.Bold = true;
+            headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+
+            var row = 2;
+            foreach (var visit in FilteredVisits)
+            {
+                var items = visit.Items.Count == 0 ? new List<VisitItemDetailDto> { new() } : visit.Items;
+                foreach (var item in items)
+                {
+                    var col = 1;
+                    ws.Cell(row, col++).Value = visit.VisitNumber;
+                    ws.Cell(row, col++).Value = visit.VisitDate?.ToString("yyyy-MM-dd") ?? "";
+                    ws.Cell(row, col++).Value = visit.SalesEmployeeBP;
+                    ws.Cell(row, col++).Value = visit.CustomerName;
+                    ws.Cell(row, col++).Value = visit.ContactPersons;
+                    ws.Cell(row, col++).Value = visit.StartDateTime?.ToString("HH:mm") ?? "";
+                    ws.Cell(row, col++).Value = visit.EndDateTime?.ToString("HH:mm") ?? "";
+                    if (visit.DurationMinutes.HasValue) ws.Cell(row, col).Value = visit.DurationMinutes.Value;
+                    col++;
+                    ws.Cell(row, col++).Value = visit.Status;
+                    ws.Cell(row, col++).Value = item.MaterialName ?? "";
+                    ws.Cell(row, col++).Value = item.Price ?? "";
+                    ws.Cell(row, col++).Value = item.Consumption ?? "";
+                    ws.Cell(row, col++).Value = item.CompetitorName ?? "";
+                    ws.Cell(row, col++).Value = item.CompetitorSupplier ?? "";
+                    ws.Cell(row, col++).Value = item.Potential ?? "";
+                    ws.Cell(row, col++).Value = item.StatusNote ?? "";
+                    ws.Cell(row, col++).Value = visit.DescriptionRemark ?? "";
+                    row++;
+                }
+            }
+
+            ws.Columns().AdjustToContents();
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+
+            await _jsModule.InvokeVoidAsync(
+                "downloadFileFromBytes",
+                fileName,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                base64);
         }
+        catch (JSDisconnectedException) { }
     }
 
     public async ValueTask DisposeAsync()

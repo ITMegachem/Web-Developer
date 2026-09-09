@@ -2,14 +2,16 @@
 @using Mgt.Lit.WebFront.Components.Layout.MainLay
 @layout AppLayout
 @rendermode InteractiveServer
-<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css" />
+<link rel="stylesheet" href="/lib/bootstrap/dist/css/dash-theme.css?v=20260909a" />
 @using System.Linq
 @using Microsoft.JSInterop
 @using Mgt.Lit.Core.DTOs.DashBoard
 @using Mgt.Lit.WebFront.Services.DashBoard
 @using Mgt.Lit.WebFront.Components
+@using ClosedXML.Excel
 @inject DashCrossSellUpsellGainsApiService ExpansionApi
 @inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject DownloadLogService DownloadLogSvc
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
@@ -21,12 +23,17 @@
     }
     .csu-reset-btn:hover { background: var(--neutral-100); }
 
+    .csu-toolbar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 14px; }
+    .csu-btn-export { background: #15803d; color: #fff; border: 1px solid #15803d; font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 10px; white-space: nowrap; }
+    .csu-btn-export:hover { opacity: 0.92; }
+    .csu-btn-export:disabled { opacity: 0.5; cursor: not-allowed; }
+
     .csu-kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 12px; }
     .csu-kpi { background: var(--surface); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px 16px; }
-    .csu-kpi-label { font-size: 12px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
-    .csu-kpi-value { font-size: 21px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
-    .csu-kpi-sub { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-    .csu-kpi-compare { font-size: 11px; }
+    .csu-kpi-label { font-size: 15px; font-weight: 600; color: var(--neutral-700); margin-bottom: 6px; }
+    .csu-kpi-value { font-size: 30px; font-weight: 800; color: var(--brand-dark); line-height: 1.2; margin-bottom: 4px; }
+    .csu-kpi-sub { font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+    .csu-kpi-compare { font-size: 14px; }
 
     .csu-chart-row { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: stretch; }
     .csu-table-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: start; }
@@ -47,6 +54,27 @@
     .csu-empty-panel { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 180px; color: var(--muted); font-size: 12.5px; text-align: center; padding: 12px; }
     .csu-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
+    .csu-clickable-row { cursor: pointer; }
+    .csu-clickable-row:hover { background: var(--neutral-100); }
+
+    .csu-modal-backdrop {
+        position: fixed; inset: 0; background: rgba(15, 23, 20, 0.45); z-index: 1050;
+        display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    .csu-modal-card {
+        background: var(--surface); border-radius: 14px; width: 100%; max-width: 1040px; height: 85vh;
+        display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+    }
+    .csu-modal-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 18px 24px; border-bottom: 1px solid var(--card-border); flex: none;
+    }
+    .csu-modal-title { font-weight: 700; font-size: 17px; color: var(--brand-dark); }
+    .csu-modal-close { background: none; border: none; font-size: 24px; line-height: 1; color: var(--muted); cursor: pointer; padding: 0 4px; }
+    .csu-modal-close:hover { color: var(--neutral-700); }
+    .csu-modal-body { padding: 20px 24px; overflow-y: auto; flex: 1; font-size: 14.5px; }
+    .csu-modal-body th, .csu-modal-body td { padding: 12px 14px !important; }
+
     @@media (max-width: 1400px) {
         .csu-kpi-row { grid-template-columns: repeat(3, 1fr); }
         .csu-chart-row { grid-template-columns: 1fr; }
@@ -66,9 +94,16 @@
             <div>
                 <div class="dash-eyebrow">Management Report</div>
                 <div class="dash-title">Cross-Sell & Upsell Gains Report</div>
-                <div class="dash-subtitle">Additional revenue gained from the existing customer base via new product groups (Cross-Sell) and higher spend on existing ones (Upsell)</div>
+                <div class="dash-subtitle">Additional revenue gained from the existing sold-to party base via new material groups (Cross-Sell) and higher spend on existing ones (Upsell)</div>
             </div>
         </div>
+
+        @if (CanExport)
+        {
+            <div class="csu-toolbar">
+                <button type="button" class="csu-btn-export" @onclick="ExportToExcelAsync" disabled="@(_data is null || _data.TopCustomers.Count == 0)">⬇ Export Excel</button>
+            </div>
+        }
 
         <div class="dash-filters dash-filter-panel">
             <div class="dash-field">
@@ -81,7 +116,7 @@
                             Placeholder="All" Options="@(_data?.AvailableSalesEmployees ?? new())" />
             </div>
             <div class="dash-field">
-                <div class="dash-field-label">Product Group</div>
+                <div class="dash-field-label">Material Group</div>
                 <DashSelect @bind-Value="_selectedProductGroup" @bind-Value:after="ReloadAsync"
                             Placeholder="All" Options="@(_data?.AvailableProductGroups ?? new())" />
             </div>
@@ -112,21 +147,21 @@
             var kpi = _data.Kpi;
 
             <div class="csu-kpi-row">
-                @RenderKpi("Existing Customer Revenue", FormatCompact(kpi.ExistingCustomerRevenue), kpi.ExistingCustomerRevenueYoYPercent)
+                @RenderKpi("Existing Sold-to Party Revenue", FormatCompact(kpi.ExistingCustomerRevenue), kpi.ExistingCustomerRevenueYoYPercent)
                 @RenderKpi("Cross-Sell Revenue", FormatCompact(kpi.CrossSellRevenue), kpi.CrossSellRevenueYoYPercent)
                 @RenderKpi("Upsell Revenue (Gain)", FormatCompact(kpi.UpsellRevenue), kpi.UpsellRevenueYoYPercent)
                 @RenderKpi("Cross-Sell & Upsell Gains", FormatCompact(kpi.ExpansionRevenue), kpi.ExpansionRevenueYoYPercent)
-                @RenderKpiPlain("Active Customers", kpi.ActiveCustomers.ToString(), "Existing customers with revenue this period")
-                @RenderKpiPlain("Buy 1 Product Group", kpi.Buy1ProductGroupCustomers.ToString(), "Highest cross-sell priority")
+                @RenderKpiPlain("Active Sold-to Parties", kpi.ActiveCustomers.ToString(), "Existing sold-to parties with revenue this period")
+                @RenderKpiPlain("Buy 1 Material Group", kpi.Buy1ProductGroupCustomers.ToString(), "Highest cross-sell priority")
             </div>
 
             <div class="csu-kpi-row">
-                @RenderKpi("Cross-Sell Customers", $"{kpi.CrossSellCustomers} ({kpi.CrossSellRatePercent.ToString("0.0")}%)", kpi.CrossSellCustomersYoYChange.HasValue ? (decimal?)kpi.CrossSellCustomersYoYChange.Value : null, "", true)
-                @RenderKpi("Upsell Customers", $"{kpi.UpsellCustomers} ({kpi.UpsellRatePercent.ToString("0.0")}%)", kpi.UpsellCustomersYoYChange.HasValue ? (decimal?)kpi.UpsellCustomersYoYChange.Value : null, "", true)
-                @RenderKpi("Avg Product Groups / Customer", kpi.AvgProductGroupsPerCustomer.ToString("0.0"), kpi.AvgProductGroupsPerCustomerYoYChange.HasValue ? (decimal?)kpi.AvgProductGroupsPerCustomerYoYChange.Value : null, "", true)
-                @RenderKpi("Avg Revenue / Customer", FormatCompact(kpi.AvgRevenuePerCustomer), kpi.AvgRevenuePerCustomerYoYPercent)
+                @RenderKpi("Cross-Sell Sold-to Parties", $"{kpi.CrossSellCustomers} ({kpi.CrossSellRatePercent.ToString("0.0")}%)", kpi.CrossSellCustomersYoYChange.HasValue ? (decimal?)kpi.CrossSellCustomersYoYChange.Value : null, "", true)
+                @RenderKpi("Upsell Sold-to Parties", $"{kpi.UpsellCustomers} ({kpi.UpsellRatePercent.ToString("0.0")}%)", kpi.UpsellCustomersYoYChange.HasValue ? (decimal?)kpi.UpsellCustomersYoYChange.Value : null, "", true)
+                @RenderKpi("Avg Material Groups / Sold-to Party", kpi.AvgProductGroupsPerCustomer.ToString("0.0"), kpi.AvgProductGroupsPerCustomerYoYChange.HasValue ? (decimal?)kpi.AvgProductGroupsPerCustomerYoYChange.Value : null, "", true)
+                @RenderKpi("Avg Revenue / Sold-to Party", FormatCompact(kpi.AvgRevenuePerCustomer), kpi.AvgRevenuePerCustomerYoYPercent)
                 @RenderKpi("Expansion Revenue Rate", kpi.ExpansionRevenueRatePercent.ToString("0.0") + "%", kpi.ExpansionRevenueRateYoYPoint, "pp")
-                @RenderKpi("Customer Retention Rate", kpi.CustomerRetentionRatePercent.ToString("0.0") + "%", kpi.CustomerRetentionRateYoYPoint, "pp")
+                @RenderKpi("Sold-to Party Retention Rate", kpi.CustomerRetentionRatePercent.ToString("0.0") + "%", kpi.CustomerRetentionRateYoYPoint, "pp")
             </div>
 
             <div class="csu-chart-row">
@@ -143,15 +178,15 @@
                     </div>
                 </div>
                 <div class="dash-card">
-                    <div class="dash-card-header">Existing Customer Revenue Growth YoY</div>
+                    <div class="dash-card-header">Existing Sold-to Party Revenue Growth YoY</div>
                     <div class="dash-card-body">
                         @if (_data.CustomerGrowthYoY.Count == 0)
                         {
-                            <div class="csu-empty-panel">No comparable customers for this filter</div>
+                            <div class="csu-empty-panel">No comparable sold-to parties for this filter</div>
                         }
                         else
                         {
-                            <div id="@GrowthChartId" class="echarts-host" role="img" aria-label="Customer revenue growth year over year"></div>
+                            <div id="@GrowthChartId" class="echarts-host" role="img" aria-label="Sold-to party revenue growth year over year"></div>
                         }
                     </div>
                 </div>
@@ -159,17 +194,17 @@
 
             <div class="csu-table-row">
                 <div class="dash-card">
-                    <div class="dash-card-header">Top 10 Customers by Revenue</div>
+                    <div class="dash-card-header">Top 10 Sold-to Parties by Revenue</div>
                     <div class="dash-card-body">
                         <div class="table-scroll">
                             <table class="table table-striped table-hover">
                                 <thead>
-                                    <tr><th>Customer</th><th>Existing</th><th>Cross-Sell</th><th>Upsell</th><th>Expansion</th><th>YoY</th></tr>
+                                    <tr><th>Sold-to Party</th><th>Salesperson</th><th>Existing</th><th>Cross-Sell</th><th>Upsell</th><th>Expansion</th><th>YoY</th></tr>
                                 </thead>
                                 <tbody>
                                     @if (_data.TopCustomers.Count == 0)
                                     {
-                                        <tr><td colspan="6" class="dash-table-empty">No data found</td></tr>
+                                        <tr><td colspan="7" class="dash-table-empty">No data found</td></tr>
                                     }
                                     else
                                     {
@@ -177,6 +212,7 @@
                                         {
                                             <tr>
                                                 <td>@row.CustomerName</td>
+                                                <td>@row.SalesEmployeeBP</td>
                                                 <td>@FormatCompact(row.ExistingRevenue)</td>
                                                 <td>@FormatCompact(row.CrossSellRevenue)</td>
                                                 <td>@FormatCompact(row.UpsellRevenue)</td>
@@ -193,17 +229,17 @@
                     </div>
                 </div>
                 <div class="dash-card">
-                    <div class="dash-card-header">Customer by Product Group Count</div>
+                    <div class="dash-card-header">Sold-to Party by Material Group Count</div>
                     <div class="dash-card-body">
                         <div class="table-scroll">
                             <table class="table table-striped table-hover">
                                 <thead>
-                                    <tr><th>Groups Purchased</th><th>Customers</th><th>%</th><th>Priority</th></tr>
+                                    <tr><th>Groups Purchased</th><th>Sold-to Parties</th><th>%</th><th>Priority</th></tr>
                                 </thead>
                                 <tbody>
                                     @foreach (var row in _data.ByProductGroupCount)
                                     {
-                                        <tr>
+                                        <tr class="csu-clickable-row" @onclick="() => OpenGroupCountDetail(row)">
                                             <td>@row.GroupCountLabel</td>
                                             <td>@row.CustomerCount</td>
                                             <td>@row.SharePercent.ToString("0.0")%</td>
@@ -219,12 +255,12 @@
                     </div>
                 </div>
                 <div class="dash-card">
-                    <div class="dash-card-header">Cross-Sell Revenue by Product Group</div>
+                    <div class="dash-card-header">Cross-Sell Revenue by Material Group</div>
                     <div class="dash-card-body">
                         <div class="table-scroll">
                             <table class="table table-striped table-hover">
                                 <thead>
-                                    <tr><th>#</th><th>Product Group</th><th>Revenue</th><th>Customers</th><th>%</th></tr>
+                                    <tr><th>#</th><th>Material Group</th><th>Revenue</th><th>Sold-to Parties</th><th>%</th></tr>
                                 </thead>
                                 <tbody>
                                     @if (_data.CrossSellByProductGroup.Count == 0)
@@ -235,7 +271,7 @@
                                     {
                                         @foreach (var row in _data.CrossSellByProductGroup)
                                         {
-                                            <tr>
+                                            <tr class="csu-clickable-row" @onclick="() => OpenCrossSellGroupDetail(row)">
                                                 <td>@row.Rank</td>
                                                 <td>@row.ProductGroup</td>
                                                 <td>@FormatCompact(row.CrossSellRevenue)</td>
@@ -253,12 +289,12 @@
 
             <div class="csu-table-row-2">
                 <div class="dash-card">
-                    <div class="dash-card-header">Upsell Revenue (Gain) by Product Group</div>
+                    <div class="dash-card-header">Upsell Revenue (Gain) by Material Group</div>
                     <div class="dash-card-body">
                         <div class="table-scroll">
                             <table class="table table-striped table-hover">
                                 <thead>
-                                    <tr><th>Product Group</th><th>Prev. Revenue</th><th>Current Revenue</th><th>Gain</th><th>Growth %</th><th>Customers</th></tr>
+                                    <tr><th>Material Group</th><th>Prev. Revenue</th><th>Current Revenue</th><th>Gain</th><th>Growth %</th><th>Sold-to Parties</th></tr>
                                 </thead>
                                 <tbody>
                                     @if (_data.UpsellByProductGroup.Count == 0)
@@ -292,12 +328,12 @@
                         <div class="table-scroll">
                             <table class="table table-striped table-hover">
                                 <thead>
-                                    <tr><th>Customer</th><th>Industry</th><th>Current Groups</th><th>Not Yet Purchased</th></tr>
+                                    <tr><th>Sold-to Party</th><th>Industry</th><th>Current Groups</th><th>Not Yet Purchased</th></tr>
                                 </thead>
                                 <tbody>
                                     @if (_data.CrossSellOpportunities.Count == 0)
                                     {
-                                        <tr><td colspan="4" class="dash-table-empty">No low-penetration customers for this filter</td></tr>
+                                        <tr><td colspan="4" class="dash-table-empty">No low-penetration sold-to parties for this filter</td></tr>
                                     }
                                     else
                                     {
@@ -314,16 +350,166 @@
                                 </tbody>
                             </table>
                         </div>
-                        <div class="csu-note">⚠️ Not eligibility-checked — this list is not filtered by which products a customer's industry can actually use. Treat as candidates for Sales to screen, not confirmed opportunities.</div>
+                        <div class="csu-note">⚠️ Not eligibility-checked — this list is not filtered by which materials a sold-to party's industry can actually use. Treat as candidates for Sales to screen, not confirmed opportunities.</div>
                     </div>
                 </div>
             </div>
 
             <div class="csu-note">
-                Note: Existing Customer = first purchase before the selected period. Cross-Sell = revenue from a Product Group the customer never bought before the period.
-                Upsell Gain = MAX(Current Revenue − same-period-last-year Revenue, 0) for Product Groups the customer already bought. "vs Previous" always compares to the same period one year earlier.
+                Note: Existing Sold-to Party = first purchase before the selected period. Cross-Sell = revenue from a Material Group the sold-to party never bought before the period.
+                Upsell Gain = MAX(Current Revenue − same-period-last-year Revenue, 0) for Material Groups the sold-to party already bought. "vs Previous" always compares to the same period one year earlier.
                 Data source: SAP Billing Document (synced into the local data warehouse).
             </div>
+
+            @if (_selectedGroupCountRow is not null)
+            {
+                <div class="csu-modal-backdrop" @onclick="CloseGroupCountDetail">
+                    <div class="csu-modal-card" @onclick:stopPropagation="true">
+                        <div class="csu-modal-header">
+                            <div class="csu-modal-title">Sold-to Parties — @_selectedGroupCountRow.GroupCountLabel (@_selectedGroupCountRow.CustomerCount)</div>
+                            <button type="button" class="csu-modal-close" @onclick="CloseGroupCountDetail">&times;</button>
+                        </div>
+                        <div class="csu-modal-body">
+                            <div class="table-scroll">
+                                <table class="table table-striped table-hover">
+                                    <thead>
+                                        <tr><th>Sold-to Party</th><th>Existing Revenue</th><th>Material Groups</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        @if (_selectedGroupCountRow.Customers.Count == 0)
+                                        {
+                                            <tr><td colspan="3" class="dash-table-empty">No sold-to parties in this group</td></tr>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var customer in _selectedGroupCountRow.Customers)
+                                            {
+                                                <tr>
+                                                    <td>@customer.CustomerName</td>
+                                                    <td>@FormatCompact(customer.Revenue)</td>
+                                                    <td>@foreach (var g in customer.ProductGroups) { <span class="csu-tag">@g</span> }</td>
+                                                </tr>
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (_selectedRevenueType is not null)
+            {
+                <div class="csu-modal-backdrop" @onclick="CloseRevenueTypeDetail">
+                    <div class="csu-modal-card" @onclick:stopPropagation="true">
+                        <div class="csu-modal-header">
+                            <div class="csu-modal-title">@_selectedRevenueType by Material Group</div>
+                            <button type="button" class="csu-modal-close" @onclick="CloseRevenueTypeDetail">&times;</button>
+                        </div>
+                        <div class="csu-modal-body">
+                            @if (_selectedRevenueType == "Cross-Sell Revenue")
+                            {
+                                <div class="table-scroll">
+                                    <table class="table table-striped table-hover">
+                                        <thead>
+                                            <tr><th>#</th><th>Material Group</th><th>Revenue</th><th>Sold-to Parties</th><th>%</th></tr>
+                                        </thead>
+                                        <tbody>
+                                            @if (_data!.CrossSellByProductGroup.Count == 0)
+                                            {
+                                                <tr><td colspan="5" class="dash-table-empty">No cross-sell revenue for this filter</td></tr>
+                                            }
+                                            else
+                                            {
+                                                @foreach (var row in _data.CrossSellByProductGroup)
+                                                {
+                                                    <tr>
+                                                        <td>@row.Rank</td>
+                                                        <td>@row.ProductGroup</td>
+                                                        <td>@FormatCompact(row.CrossSellRevenue)</td>
+                                                        <td>@row.CrossSellCustomers</td>
+                                                        <td>@row.SharePercent.ToString("0.0")%</td>
+                                                    </tr>
+                                                }
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="table-scroll">
+                                    <table class="table table-striped table-hover">
+                                        <thead>
+                                            <tr><th>Material Group</th><th>Prev. Revenue</th><th>Current Revenue</th><th>Gain</th><th>Growth %</th><th>Sold-to Parties</th></tr>
+                                        </thead>
+                                        <tbody>
+                                            @if (_data!.UpsellByProductGroup.Count == 0)
+                                            {
+                                                <tr><td colspan="6" class="dash-table-empty">No upsell gain for this filter</td></tr>
+                                            }
+                                            else
+                                            {
+                                                @foreach (var row in _data.UpsellByProductGroup)
+                                                {
+                                                    <tr>
+                                                        <td>@row.ProductGroup</td>
+                                                        <td>@FormatCompact(row.PreviousRevenue)</td>
+                                                        <td>@FormatCompact(row.CurrentRevenue)</td>
+                                                        <td>@FormatCompact(row.GainRevenue)</td>
+                                                        <td class="@(row.GrowthPercent is null ? "csu-na" : row.GrowthPercent >= 0 ? "csu-diff-pos" : "csu-diff-neg")">
+                                                            @(row.GrowthPercent is null ? "N/A" : (row.GrowthPercent >= 0 ? "+" : "") + row.GrowthPercent.Value.ToString("0.0") + "%")
+                                                        </td>
+                                                        <td>@row.UpsellCustomers</td>
+                                                    </tr>
+                                                }
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (_selectedCrossSellGroup is not null)
+            {
+                <div class="csu-modal-backdrop" @onclick="CloseCrossSellGroupDetail">
+                    <div class="csu-modal-card" @onclick:stopPropagation="true">
+                        <div class="csu-modal-header">
+                            <div class="csu-modal-title">Cross-Sell Sold-to Parties — @_selectedCrossSellGroup.ProductGroup (@_selectedCrossSellGroup.CrossSellCustomers)</div>
+                            <button type="button" class="csu-modal-close" @onclick="CloseCrossSellGroupDetail">&times;</button>
+                        </div>
+                        <div class="csu-modal-body">
+                            <div class="table-scroll">
+                                <table class="table table-striped table-hover">
+                                    <thead>
+                                        <tr><th>Sold-to Party</th><th>Cross-Sell Revenue</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        @if (_selectedCrossSellGroup.Customers.Count == 0)
+                                        {
+                                            <tr><td colspan="2" class="dash-table-empty">No sold-to parties for this material group</td></tr>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var customer in _selectedCrossSellGroup.Customers)
+                                            {
+                                                <tr>
+                                                    <td>@customer.CustomerName</td>
+                                                    <td>@FormatCompact(customer.Revenue)</td>
+                                                </tr>
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
         }
     </div>
 </div>
@@ -339,6 +525,11 @@
     private string _selectedProductGroup = "";
     private string _selectedIndustry = "";
     private string _selectedCustomerGroup = "";
+
+    private bool CanExport => Mgt.Lit.WebFront.Auth.ReportAccessHelper.CanExportReport(AuthState.User, "CrossSellUpsellGains");
+    private ProductGroupCountRowDto? _selectedGroupCountRow;
+    private string? _selectedRevenueType;
+    private CrossSellByProductGroupRowDto? _selectedCrossSellGroup;
 
     private const string TrendChartId = "csu-trend";
     private const string DonutChartId = "csu-donut";
@@ -359,6 +550,21 @@
     };
 
     private static string FormatCompact(decimal value) => Mgt.Lit.WebFront.Helpers.DashboardNumberFormatter.FormatCompact(value);
+
+    private void OpenGroupCountDetail(ProductGroupCountRowDto row) => _selectedGroupCountRow = row;
+    private void CloseGroupCountDetail() => _selectedGroupCountRow = null;
+
+    [JSInvokable]
+    public void OnDonutSliceClicked(string name)
+    {
+        _selectedRevenueType = name;
+        StateHasChanged();
+    }
+
+    private void CloseRevenueTypeDetail() => _selectedRevenueType = null;
+
+    private void OpenCrossSellGroupDetail(CrossSellByProductGroupRowDto row) => _selectedCrossSellGroup = row;
+    private void CloseCrossSellGroupDetail() => _selectedCrossSellGroup = null;
 
     private RenderFragment RenderKpiPlain(string label, string value, string sub) => __builder =>
     {
@@ -445,7 +651,7 @@
 
     private async Task LoadAsync()
     {
-        _loading = true; StateHasChanged();
+        _loading = true; _selectedGroupCountRow = null; _selectedRevenueType = null; _selectedCrossSellGroup = null; StateHasChanged();
         try
         {
             _data = await ExpansionApi.GetAsync(BuildFilter());
@@ -473,7 +679,7 @@
             new { name = "Cross-Sell Revenue", value = kpi.CrossSellRevenue },
             new { name = "Upsell Revenue", value = kpi.UpsellRevenue }
         };
-        await JS.InvokeVoidAsync("dashboardECharts.renderShareDonut", DonutChartId, donutPoints, "Expansion Revenue");
+        await JS.InvokeVoidAsync("dashboardECharts.renderShareDonut", DonutChartId, donutPoints, "Expansion Revenue", _dotNetRef);
 
         if (_data.CustomerGrowthYoY.Count > 0)
         {
@@ -485,6 +691,58 @@
                 .ToArray();
             await JS.InvokeVoidAsync("dashboardECharts.renderDivergingBar", GrowthChartId, growthRows);
         }
+    }
+
+    private async Task ExportToExcelAsync()
+    {
+        if (_data is null || _data.TopCustomers.Count == 0) return;
+
+        try
+        {
+            var username = AuthState.Permission?.Username;
+            var fileName = $"CrossSellUpsellGains_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await DownloadLogSvc.LogDownloadAsync(username ?? "", fileName);
+
+            _jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Top Sold-to Parties");
+
+            var headers = new[] { "Sold-to Party", "Salesperson", "Existing Revenue", "Cross-Sell Revenue", "Upsell Revenue", "Expansion Revenue", "YoY Growth %" };
+            for (var i = 0; i < headers.Length; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+            var headerRow = ws.Row(1);
+            headerRow.Style.Font.Bold = true;
+            headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+
+            var row = 2;
+            foreach (var r in _data.TopCustomers)
+            {
+                var col = 1;
+                ws.Cell(row, col++).Value = r.CustomerName;
+                ws.Cell(row, col++).Value = r.SalesEmployeeBP;
+                ws.Cell(row, col++).Value = r.ExistingRevenue;
+                ws.Cell(row, col++).Value = r.CrossSellRevenue;
+                ws.Cell(row, col++).Value = r.UpsellRevenue;
+                ws.Cell(row, col++).Value = r.ExpansionRevenue;
+                if (r.YoYGrowthPercent.HasValue) ws.Cell(row, col).Value = r.YoYGrowthPercent.Value;
+                col++;
+                row++;
+            }
+
+            ws.Columns().AdjustToContents();
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+
+            await _jsModule.InvokeVoidAsync(
+                "downloadFileFromBytes",
+                fileName,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                base64);
+        }
+        catch (JSDisconnectedException) { }
     }
 
     public async ValueTask DisposeAsync()

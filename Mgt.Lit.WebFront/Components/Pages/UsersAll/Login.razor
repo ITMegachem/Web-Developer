@@ -4,8 +4,24 @@
 <link rel="stylesheet" href="/lib/bootstrap/dist/css/siteLogin.css" />
 <style>
     .remember-me-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
         margin-bottom: 18px;
         margin-top: -6px;
+    }
+
+    .change-password-link {
+        color: #16a34a;
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 0.85rem;
+        transition: color 0.2s;
+    }
+
+    .change-password-link:hover {
+        color: #15803d;
+        text-decoration: underline;
     }
 
     .remember-me-label {
@@ -60,7 +76,7 @@ else
                 <div class="login-right">
                     <div class="login-eyebrow">MGT Business Intelligence</div>
                     <div class="login-title">
-                        Welcome<br><span class="login-title-em">back.</span>
+                        Welcome <span class="login-title-em">back.</span>
                     </div>
                     <div class="login-sub">Sign in to continue</div>
 
@@ -131,6 +147,7 @@ else
                             <input type="checkbox" @bind="rememberMe" />
                             <span>Remember me</span>
                         </label>
+                        <a href="/settings" class="change-password-link">Change password</a>
                     </div>
 
                      <div class="btn-wrap">
@@ -165,9 +182,6 @@ else
                         </button>
                     </div>
                     
-                    <div class="forgot-password">
-                        @*<a href="#">Forgotten password?</a>*@
-                    </div>
                 </div>
 
             </div>

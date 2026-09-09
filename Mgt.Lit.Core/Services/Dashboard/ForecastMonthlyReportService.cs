@@ -26,12 +26,19 @@ namespace Mgt.Lit.Core.Services.Dashboard
     {
         private readonly AppDbContext _db;
         private readonly SapService _sap;
+        private readonly ISalesEmployeeNameResolver _nameResolver;
 
-        public ForecastMonthlyReportService(AppDbContext db, SapService sap)
+        public ForecastMonthlyReportService(AppDbContext db, SapService sap, ISalesEmployeeNameResolver nameResolver)
         {
             _db = db;
             _sap = sap;
+            _nameResolver = nameResolver;
         }
+
+        // ★ Sales ทำเครื่องหมายเองว่า deal นี้นับเข้า forecast รอบนี้หรือไม่ (picklist -None-/Yes/No) — รายงานนี้ต้อง
+        // กรองเฉพาะ Forecast_Status = "Yes" เสมอ (pattern เดียวกับ SalesForecastAccuracyService.ForecastedDealsQuery)
+        // เดิมรายงานนี้ไม่ได้กรองฟิลด์นี้เลย ทำให้รวม Deal_Items ของ deal ที่ยังไม่ถูกทำเครื่องหมายว่านับเข้า forecast เข้ามาด้วย
+        private const string ForecastYes = "Yes";
 
         private sealed record ForecastLineRow(string MaterialCode, string? Product, decimal Quantity, DateTime EffectiveDate);
 
@@ -42,9 +49,18 @@ namespace Mgt.Lit.Core.Services.Dashboard
             if (toMonth < fromMonth) toMonth = fromMonth;
             var toMonthEnd = toMonth.AddMonths(1).AddDays(-1);
 
-            var dealQuery = _db.MGT_Deal.AsNoTracking().AsQueryable();
-            if (!string.IsNullOrWhiteSpace(filter.SalesGroup))
-                dealQuery = dealQuery.Where(x => x.SalesGroup == filter.SalesGroup);
+            // ★ นิยาม BU ใหม่ทั้งรายงาน — อ้างอิงจากรายชื่อพนักงานขาย Active ของ BU นั้น (Ms_User.Division + Department='Sales')
+            var lockedRawNames = string.IsNullOrWhiteSpace(filter.SalesGroup)
+                ? null
+                : await _nameResolver.GetActiveSalesEmployeeRawDealNamesAsync(filter.SalesGroup, ct);
+
+            var dealQuery = _db.MGT_Deal.AsNoTracking().Where(x => x.ForecastStatus == ForecastYes);
+            if (lockedRawNames is not null)
+                dealQuery = dealQuery.Where(x => x.SalesEmployeeBP != null && lockedRawNames.Contains(x.SalesEmployeeBP));
+            // ★ SalesEmployeeBP เก็บชื่อบางส่วนจาก Zoho — filter.SalesEmployeeBP เป็น FullName ที่ resolve แล้ว
+            // จึงเทียบแบบ substring แทน exact match (ดู pattern เดียวกันใน AverageDaysToCloseService.ApplyScopeFilter)
+            if (!string.IsNullOrWhiteSpace(filter.SalesEmployeeBP))
+                dealQuery = dealQuery.Where(x => x.SalesEmployeeBP != null && filter.SalesEmployeeBP.Contains(x.SalesEmployeeBP));
             if (!string.IsNullOrWhiteSpace(filter.CustomerName))
                 dealQuery = dealQuery.Where(x => x.CustomerName == filter.CustomerName);
             if (!string.IsNullOrWhiteSpace(filter.JobDeal))
@@ -133,7 +149,8 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 MaterialsWithStockDataCount = onHandRows.Count
             };
 
-            var (availableCustomers, availableMaterialGroups, availableMaterials, availableJobDeals) = await GetDropdownsAsync(filter.SalesGroup, ct);
+            var (availableCustomers, availableMaterialGroups, availableMaterials, availableJobDeals, availableSalesEmployees) =
+                await GetDropdownsAsync(filter.SalesGroup, lockedRawNames, ct);
 
             return new ForecastMonthlyDto
             {
@@ -144,7 +161,8 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 AvailableCustomers = availableCustomers,
                 AvailableMaterialGroups = availableMaterialGroups,
                 AvailableMaterials = availableMaterials,
-                AvailableJobDeals = availableJobDeals
+                AvailableJobDeals = availableJobDeals,
+                AvailableSalesEmployees = availableSalesEmployees
             };
         }
 
@@ -230,18 +248,33 @@ namespace Mgt.Lit.Core.Services.Dashboard
             return result;
         }
 
-        private async Task<(List<string> Customers, List<string> MaterialGroups, List<string> Materials, List<string> JobDeals)>
-            GetDropdownsAsync(string? salesGroup, CancellationToken ct)
+        private async Task<(List<string> Customers, List<string> MaterialGroups, List<string> Materials, List<string> JobDeals, List<string> SalesEmployees)>
+            GetDropdownsAsync(string? salesGroup, List<string>? lockedRawNames, CancellationToken ct)
         {
-            var dealQuery = string.IsNullOrWhiteSpace(salesGroup)
-                ? _db.MGT_Deal.AsNoTracking()
-                : _db.MGT_Deal.AsNoTracking().Where(x => x.SalesGroup == salesGroup);
+            var dealQuery = _db.MGT_Deal.AsNoTracking().Where(x => x.ForecastStatus == ForecastYes);
+            if (lockedRawNames is not null)
+                dealQuery = dealQuery.Where(x => x.SalesEmployeeBP != null && lockedRawNames.Contains(x.SalesEmployeeBP));
 
             var customers = await dealQuery.Select(x => x.CustomerName)
                 .Where(v => v != null && v != "").Select(v => v!).Distinct().OrderBy(v => v).ToListAsync(ct);
 
             var jobDeals = await dealQuery.Select(x => x.OpportunityName)
                 .Where(v => v != null && v != "").Select(v => v!).Distinct().OrderBy(v => v).ToListAsync(ct);
+
+            var salesEmployeesRaw = await dealQuery.Select(x => x.SalesEmployeeBP)
+                .Where(v => v != null && v != "").Select(v => v!).Distinct().ToListAsync(ct);
+
+            // ★ SalesEmployeeBP เก็บชื่อบางส่วนจาก Zoho — map เป็น Ms_User.FullName ก่อนแสดงผล (pattern เดียวกับรายงานอื่น)
+            var salesEmployeeNameMap = await _nameResolver.BuildNameMapAsync(salesEmployeesRaw, ct);
+            var salesEmployeesMapped = salesEmployeesRaw
+                .Select(raw => salesEmployeeNameMap.TryGetValue(raw, out var mapped) ? mapped : raw)
+                .Where(v => !string.IsNullOrWhiteSpace(v) && !string.Equals(v, "Department", StringComparison.OrdinalIgnoreCase))
+                .Distinct()
+                .OrderBy(v => v)
+                .ToList();
+            // ★ เมื่อ BU ถูกล็อก (salesGroup มีค่า, กรณีนี้คือ Leader) dropdown "Salesperson" แสดงเฉพาะพนักงานที่ Home
+            // Division (Ms_User.Division) ตรงกับ BU นี้เท่านั้น
+            var salesEmployees = await _nameResolver.FilterToDivisionAsync(salesEmployeesMapped, salesGroup, ct);
 
             var itemQuery = from item in _db.MGT_DealProduct.AsNoTracking()
                             join deal in dealQuery on item.DealId equals deal.DealId
@@ -261,7 +294,7 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 .OrderBy(v => v)
                 .ToList();
 
-            return (customers, materialGroups, materialLabels, jobDeals);
+            return (customers, materialGroups, materialLabels, jobDeals, salesEmployees);
         }
 
         private static DateTime NormalizeMonth(DateTime value) => new(value.Year, value.Month, 1);

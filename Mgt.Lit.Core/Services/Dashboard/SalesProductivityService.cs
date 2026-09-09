@@ -24,8 +24,13 @@ namespace Mgt.Lit.Core.Services.Dashboard
         private const int MaxTrendMonths = 36;
 
         private readonly AppDbContext _db;
+        private readonly ISalesEmployeeNameResolver _nameResolver;
 
-        public SalesProductivityService(AppDbContext db) => _db = db;
+        public SalesProductivityService(AppDbContext db, ISalesEmployeeNameResolver nameResolver)
+        {
+            _db = db;
+            _nameResolver = nameResolver;
+        }
 
         private sealed record DealRow(
             string DealId, string? OpportunityName, string? Stage, string? ForecastCategory, decimal? DealAmount,
@@ -33,8 +38,13 @@ namespace Mgt.Lit.Core.Services.Dashboard
 
         public async Task<SalesProductivityDto> GetAsync(SalesProductivityFilter filter, CancellationToken ct = default)
         {
+            // ★ นิยาม BU ใหม่ทั้งรายงาน — อ้างอิงจากรายชื่อพนักงานขาย Active ของ BU นั้น (Ms_User.Division + Department='Sales')
+            var lockedRawNames = string.IsNullOrWhiteSpace(filter.SalesGroup)
+                ? null
+                : await _nameResolver.GetActiveSalesEmployeeRawDealNamesAsync(filter.SalesGroup, ct);
+
             // สำคัญ: EF Core DbContext ไม่ thread-safe ห้ามยิงหลาย query พร้อมกันด้วย Task.WhenAll
-            var scopeQuery = ApplyScopeFilter(_db.MGT_Deal.AsNoTracking(), filter);
+            var scopeQuery = ApplyScopeFilter(_db.MGT_Deal.AsNoTracking(), filter, lockedRawNames);
 
             // ★ Cohort หลักของทั้งรายงาน: Opportunity ที่ถูก "สร้าง" ในช่วงที่กรอง (ไม่ใช่ปิดในช่วงนี้) — ตาม spec ข้อ 2
             IQueryable<MGT_Deal> CreatedInRange(DateTime? from, DateTime? to)
@@ -112,14 +122,19 @@ namespace Mgt.Lit.Core.Services.Dashboard
             pipelineByStage.Add(new StageFunnelRowDto { Stage = "Closed Won", DealCount = won.Count });
             pipelineByStage.Add(new StageFunnelRowDto { Stage = "Closed Lost", DealCount = lost.Count });
 
-            // ── By Product (join MGT_DealProduct) — Top 8 + Others ───────────────────
-            var byProduct = await GetByProductAsync(mainRows.Select(x => x.DealId).ToList(), ct);
+            // ★ SalesEmployeeBP เก็บชื่อบางส่วนจาก Zoho — map เป็น Ms_User.FullName ก่อน แล้วค่อย group เป็น "By Salesperson"
+            var availableSalesEmployeesRaw = await GetDistinctDealFieldAsync(filter, x => x.SalesEmployeeBP, lockedRawNames, ct);
+            var salesEmployeeNameMap = await _nameResolver.BuildNameMapAsync(
+                mainRows.Select(x => x.SalesEmployeeBP).Concat(availableSalesEmployeesRaw), ct);
+
+            string MapSalesEmployeeName(string? raw) =>
+                !string.IsNullOrWhiteSpace(raw) && salesEmployeeNameMap.TryGetValue(raw, out var mapped) ? mapped : (raw ?? "");
 
             // ── By Salesperson (ตารางหลัก) ───────────────────────────────────────────
             var avgRevenuePerSalesperson = activeSalespersons == 0 ? 0 : revenue / activeSalespersons;
             var bySalesperson = mainRows
                 .Where(x => !string.IsNullOrWhiteSpace(x.SalesEmployeeBP))
-                .GroupBy(x => x.SalesEmployeeBP!)
+                .GroupBy(x => MapSalesEmployeeName(x.SalesEmployeeBP))
                 .Select(g => BuildSalespersonRow(g.Key, g.ToList(), avgOppPerSalesperson, overallWinRate, avgRevenuePerSalesperson))
                 .OrderByDescending(x => x.Opportunities)
                 .ToList();
@@ -165,17 +180,26 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 })
                 .ToList();
 
-            var availableSalesEmployees = await GetDistinctDealFieldAsync(filter, x => x.SalesEmployeeBP, ct);
-            var availableStages = await GetDistinctDealFieldAsync(filter, x => x.Stage, ct);
-            var availableCustomers = await GetDistinctDealFieldAsync(filter, x => x.CustomerName, ct);
-            var availableProducts = await GetAvailableProductsAsync(filter.SalesGroup, ct);
+            var availableStages = await GetDistinctDealFieldAsync(filter, x => x.Stage, lockedRawNames, ct);
+            var availableCustomers = await GetDistinctDealFieldAsync(filter, x => x.CustomerName, lockedRawNames, ct);
+            var availableProducts = await GetAvailableProductsAsync(filter.SalesGroup, lockedRawNames, ct);
+
+            var availableSalesEmployeesMapped = availableSalesEmployeesRaw
+                .Select(MapSalesEmployeeName)
+                .Where(v => !string.IsNullOrWhiteSpace(v) && !string.Equals(v, "Department", StringComparison.OrdinalIgnoreCase))
+                .Distinct()
+                .OrderBy(v => v)
+                .ToList();
+            var availableSalesEmployees = await _nameResolver.FilterToDivisionAsync(availableSalesEmployeesMapped, filter.SalesGroup, ct);
+
+            foreach (var row in recentClosedWon) row.SalesEmployeeBP = MapSalesEmployeeName(row.SalesEmployeeBP);
+            foreach (var row in openPipelineTop) row.SalesEmployeeBP = MapSalesEmployeeName(row.SalesEmployeeBP);
 
             return new SalesProductivityDto
             {
                 Kpi = kpi,
                 Trend = trend,
                 PipelineByStage = pipelineByStage,
-                ByProduct = byProduct,
                 BySalesperson = bySalesperson,
                 LostReasons = lostReasons,
                 RecentClosedWon = recentClosedWon,
@@ -279,35 +303,16 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 cursor = cursor.AddMonths(1);
                 guard++;
             }
-            return trend;
-        }
-
-        private async Task<List<ProductGroupRowDto>> GetByProductAsync(List<string> dealIds, CancellationToken ct)
-        {
-            if (dealIds.Count == 0) return new();
-
-            var rows = await _db.MGT_DealProduct.AsNoTracking()
-                .Where(p => dealIds.Contains(p.DealId) && p.Product != null && p.Product != "")
-                .GroupBy(p => p.Product!)
-                .Select(g => new { Product = g.Key, Count = g.Count() })
-                .ToListAsync(ct);
-
-            var ordered = rows.OrderByDescending(x => x.Count).ToList();
-            var top = ordered.Take(8).Select(x => new ProductGroupRowDto { GroupName = x.Product, OpportunityCount = x.Count }).ToList();
-
-            var othersCount = ordered.Skip(8).Sum(x => x.Count);
-            if (othersCount > 0)
-                top.Add(new ProductGroupRowDto { GroupName = "Others", OpportunityCount = othersCount });
-
-            return top;
+            // แสดงเฉพาะเดือนที่มีข้อมูลจริง (ตัดเดือนที่ไม่มี opportunity เลยออก ไม่ให้กราฟรกด้วยเดือนว่าง)
+            return trend.Where(x => x.NewOpportunities > 0).ToList();
         }
 
         private async Task<List<string>> GetDistinctDealFieldAsync(
-            SalesProductivityFilter filter, System.Linq.Expressions.Expression<Func<MGT_Deal, string?>> keySelector, CancellationToken ct)
+            SalesProductivityFilter filter, System.Linq.Expressions.Expression<Func<MGT_Deal, string?>> keySelector, List<string>? lockedRawNames, CancellationToken ct)
         {
             // dropdown scope ตาม SalesGroup เท่านั้น (ไม่ใส่ filter ของตัวเอง) เพื่อให้เห็นตัวเลือกครบหลังเลือกแล้ว
             var baseFilter = new SalesProductivityFilter { SalesGroup = filter.SalesGroup };
-            var query = ApplyScopeFilter(_db.MGT_Deal.AsNoTracking(), baseFilter);
+            var query = ApplyScopeFilter(_db.MGT_Deal.AsNoTracking(), baseFilter, lockedRawNames);
 
             return await query
                 .Select(keySelector)
@@ -318,11 +323,11 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 .ToListAsync(ct);
         }
 
-        private async Task<List<string>> GetAvailableProductsAsync(string? salesGroup, CancellationToken ct)
+        private async Task<List<string>> GetAvailableProductsAsync(string? salesGroup, List<string>? lockedRawNames, CancellationToken ct)
         {
-            var dealQuery = string.IsNullOrWhiteSpace(salesGroup)
-                ? _db.MGT_Deal.AsNoTracking()
-                : _db.MGT_Deal.AsNoTracking().Where(x => x.SalesGroup == salesGroup);
+            var dealQuery = _db.MGT_Deal.AsNoTracking();
+            if (lockedRawNames is not null)
+                dealQuery = dealQuery.Where(x => x.SalesEmployeeBP != null && lockedRawNames.Contains(x.SalesEmployeeBP));
 
             var query = from p in _db.MGT_DealProduct.AsNoTracking()
                         join d in dealQuery on p.DealId equals d.DealId
@@ -337,13 +342,16 @@ namespace Mgt.Lit.Core.Services.Dashboard
         }
 
         // instance method เพราะ filter ตาม Product ต้องอ้าง _db.MGT_DealProduct (subquery)
-        private IQueryable<MGT_Deal> ApplyScopeFilter(IQueryable<MGT_Deal> query, SalesProductivityFilter filter)
+        // ★ BU กรองจากรายชื่อดิบ (Zoho partial name) ของพนักงานขาย Active ของ BU นั้น (lockedRawNames) แทน SalesGroup
+        private IQueryable<MGT_Deal> ApplyScopeFilter(IQueryable<MGT_Deal> query, SalesProductivityFilter filter, List<string>? lockedRawNames)
         {
-            if (!string.IsNullOrWhiteSpace(filter.SalesGroup))
-                query = query.Where(x => x.SalesGroup == filter.SalesGroup);
+            if (lockedRawNames is not null)
+                query = query.Where(x => x.SalesEmployeeBP != null && lockedRawNames.Contains(x.SalesEmployeeBP));
 
+            // ★ filter.SalesEmployeeBP เป็น FullName ที่เลือกจาก dropdown (map แล้ว) แต่คอลัมน์จริงเก็บชื่อบางส่วนจาก Zoho
+            // จึงเทียบแบบ substring แทน exact match (ดู SalesEmployeeNameResolver)
             if (!string.IsNullOrWhiteSpace(filter.SalesEmployeeBP))
-                query = query.Where(x => x.SalesEmployeeBP == filter.SalesEmployeeBP);
+                query = query.Where(x => x.SalesEmployeeBP != null && filter.SalesEmployeeBP.Contains(x.SalesEmployeeBP));
 
             if (!string.IsNullOrWhiteSpace(filter.Stage))
                 query = query.Where(x => x.Stage == filter.Stage);

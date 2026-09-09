@@ -15,17 +15,28 @@
     {
         <div class="dds-backdrop" @onclick="Close"></div>
         <div class="dds-panel">
-            @if (Placeholder is not null)
+            @if (ShowSearch)
+            {
+                <div class="dds-search-wrap">
+                    <input class="dds-search" type="text" placeholder="Search..." autocomplete="off"
+                           @ref="_searchInputRef" value="@_searchText" @oninput="OnSearchInput" />
+                </div>
+            }
+            @if (Placeholder is not null && MatchesSearch(Placeholder))
             {
                 <div class="dds-opt @(IsPlaceholder ? "sel" : "")" @onclick="@(() => Pick(""))">
                     <span>@Placeholder</span><span class="dds-tick">✓</span>
                 </div>
             }
-            @foreach (var o in Options)
+            @foreach (var o in FilteredOptions)
             {
                 <div class="dds-opt @(o == Value ? "sel" : "")" @onclick="@(() => Pick(o))">
                     <span>@o</span><span class="dds-tick">✓</span>
                 </div>
+            }
+            @if (!FilteredOptions.Any() && !(Placeholder is not null && MatchesSearch(Placeholder)))
+            {
+                <div class="dds-empty">No matches</div>
             }
         </div>
     }
@@ -37,12 +48,39 @@
     [Parameter] public IEnumerable<string> Options { get; set; } = System.Array.Empty<string>();
     [Parameter] public string? Placeholder { get; set; }
 
+    // ★ แสดงช่องค้นหาเมื่อตัวเลือกเยอะพอที่จะเลื่อนหายาก (เช่น Job Deal/Sold-to Party ที่มีเป็นร้อยรายการ)
+    // ตัวเลือกน้อยๆ (เช่น Year, Status) ไม่ต้องมีก็ได้ ไม่ให้ดูรกเกินจำเป็น
+    private const int SearchThreshold = 8;
+    private bool ShowSearch => Options.Count() > SearchThreshold;
+
     private bool _open;
+    private string _searchText = "";
+    private ElementReference _searchInputRef;
     private bool IsPlaceholder => string.IsNullOrEmpty(Value);
     private string Display => IsPlaceholder ? (Placeholder ?? "") : Value!;
 
-    private void Toggle() => _open = !_open;
+    private bool MatchesSearch(string text) =>
+        string.IsNullOrWhiteSpace(_searchText) || text.Contains(_searchText, System.StringComparison.OrdinalIgnoreCase);
+
+    private IEnumerable<string> FilteredOptions => Options.Where(MatchesSearch);
+
+    private async Task Toggle()
+    {
+        _open = !_open;
+        if (_open)
+        {
+            _searchText = "";
+            if (ShowSearch)
+            {
+                await Task.Yield();   // รอ panel render เสร็จก่อนค่อย focus (element ยังไม่มีตอน _open เพิ่ง set)
+                try { await _searchInputRef.FocusAsync(); } catch { /* element อาจยังไม่พร้อม ไม่ critical */ }
+            }
+        }
+    }
+
     private void Close() => _open = false;
+
+    private void OnSearchInput(ChangeEventArgs e) => _searchText = e.Value?.ToString() ?? "";
 
     private async Task Pick(string? v)
     {

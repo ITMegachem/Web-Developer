@@ -18,17 +18,37 @@ namespace Mgt.Lit.Core.Services.Dashboard
         private const int MaxTrendMonths = 36; // กันลูปยาวเกินไปถ้าไม่ได้กรอง DateFrom/DateTo
 
         private readonly AppDbContext _db;
+        private readonly ISalesEmployeeNameResolver _nameResolver;
 
-        public AverageDaysToCloseService(AppDbContext db) => _db = db;
+        public AverageDaysToCloseService(AppDbContext db, ISalesEmployeeNameResolver nameResolver)
+        {
+            _db = db;
+            _nameResolver = nameResolver;
+        }
 
+        // DealRow.EffectiveClosedDate = ActualClosedDate ?? ClosingDate — ใช้คำนวณ "Days to Close" (Amount Close Day)
+        // ส่วน ClosingDate/ActualClosedDate ดิบ เก็บแยกไว้เพื่อคำนวณ "Variance" = Closing Date - Actual Closing Date
+        // (ต้องมี Actual Closing Date จริง ไม่ใช่ค่าที่ fallback มาจาก Closing Date ไม่งั้น variance จะกลายเป็น 0 ที่ผิดความหมาย)
         private sealed record DealRow(
             string DealId, string? OpportunityName, string? CustomerName, string? SalesEmployeeBP,
-            string? IndustryName, decimal? DealAmount, DateTime? CreatedDate, DateTime? EffectiveClosedDate);
+            string? IndustryName, decimal? DealAmount, DateTime? CreatedDate, DateTime? EffectiveClosedDate,
+            DateTime? ClosingDate, DateTime? ActualClosedDate);
+
+        private static int? ResolveVarianceDays(DealRow row) =>
+            row.ClosingDate.HasValue && row.ActualClosedDate.HasValue
+                ? (int)(row.ClosingDate.Value.Date - row.ActualClosedDate.Value.Date).TotalDays
+                : null;
 
         public async Task<AverageDaysToCloseDto> GetAsync(AverageDaysToCloseFilter filter, CancellationToken ct = default)
         {
+            // ★ นิยาม BU ใหม่ทั้งรายงาน — อ้างอิงจากรายชื่อพนักงานขาย Active ของ BU นั้น (Ms_User.Division + Department='Sales')
+            // คืนเป็น "ชื่อดิบ" ที่เจอจริงใน MGT_Deal.SalesEmployeeBP เพราะคอลัมน์นี้เก็บชื่อบางส่วนจาก Zoho ไม่ใช่ชื่อเต็ม
+            var lockedRawNames = string.IsNullOrWhiteSpace(filter.SalesGroup)
+                ? null
+                : await _nameResolver.GetActiveSalesEmployeeRawDealNamesAsync(filter.SalesGroup, ct);
+
             // สำคัญ: EF Core DbContext ไม่ thread-safe ห้ามยิงหลาย query พร้อมกันด้วย Task.WhenAll
-            var scopeQuery = ApplyScopeFilter(_db.MGT_Deal.AsNoTracking(), filter);
+            var scopeQuery = ApplyScopeFilter(_db.MGT_Deal.AsNoTracking(), filter, lockedRawNames);
 
             IQueryable<MGT_Deal> ClosedWonInRange(DateTime? from, DateTime? to)
             {
@@ -48,11 +68,13 @@ namespace Mgt.Lit.Core.Services.Dashboard
                     x.IndustryName,
                     x.DealAmount,
                     x.CreatedDate,
-                    EffectiveClosedDate = x.ActualClosedDate ?? x.ClosingDate
+                    EffectiveClosedDate = x.ActualClosedDate ?? x.ClosingDate,
+                    x.ClosingDate,
+                    x.ActualClosedDate
                 })
                 .ToListAsync(ct))
                 .Select(x => new DealRow(x.DealId, x.OpportunityName, x.CustomerName, x.SalesEmployeeBP,
-                    x.IndustryName, x.DealAmount, x.CreatedDate, x.EffectiveClosedDate))
+                    x.IndustryName, x.DealAmount, x.CreatedDate, x.EffectiveClosedDate, x.ClosingDate, x.ActualClosedDate))
                 .ToList();
 
             var closedWonDeals = mainRows.Count;
@@ -107,7 +129,7 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 .ToList();
 
             // ── Breakdown: Product (join ตาราง MGT_DealProduct — 1 Deal นับได้หลาย Product ตามที่ตั้งใจ) ──
-            var byProduct = await GetByProductAsync(filter, ct);
+            var byProduct = await GetByProductAsync(filter, lockedRawNames, ct);
 
             // ── By Status (เร็ว/ปานกลาง/เริ่มนาน/นาน) ────────────────────────────────
             var byStatus = new[] { "เร็ว", "ปานกลาง", "เริ่มนาน", "นาน" }.Select(status =>
@@ -123,6 +145,10 @@ namespace Mgt.Lit.Core.Services.Dashboard
 
             // ── Trend รายเดือน ภายในช่วงที่กรอง (ถ้าไม่กรองช่วงเวลา ใช้ min-max ของข้อมูลที่มีจริงแทน) ──
             var trend = BuildTrend(withDays, filter.DateFrom, filter.DateTo);
+
+            // ── Variance = Closing Date - Actual Closing Date (ต้องมี Actual Closing Date จริงเท่านั้น) ──
+            var varianceDaysList = mainRows.Select(ResolveVarianceDays).Where(v => v.HasValue).Select(v => v!.Value).ToList();
+            double? avgVarianceDays = varianceDaysList.Count == 0 ? null : Math.Round(varianceDaysList.Average(), 1);
 
             // ── เทียบกับช่วงก่อนหน้า ─────────────────────────────────────────────────
             var (prevAvg, prevClosedCount, prevOver90Percent) = await GetPreviousPeriodStatsAsync(filter, ClosedWonInRange, ct);
@@ -158,14 +184,41 @@ namespace Mgt.Lit.Core.Services.Dashboard
                     CreatedDate = x.CreatedDate,
                     ClosedWonDate = x.EffectiveClosedDate,
                     DaysToClose = days,
-                    Status = days.HasValue ? GetStatus(days.Value) : ""
+                    Status = days.HasValue ? GetStatus(days.Value) : "",
+                    VarianceDays = ResolveVarianceDays(x)
                 };
             }).ToList();
 
-            var availableSalesEmployees = await GetDistinctDealFieldAsync(filter, x => x.SalesEmployeeBP, ct);
-            var availableIndustries = await GetDistinctDealFieldAsync(filter, x => x.IndustryName, ct);
-            var availableCustomers = await GetDistinctDealFieldAsync(filter, x => x.CustomerName, ct);
-            var availableProducts = await GetAvailableProductsAsync(filter.SalesGroup, ct);
+            var availableSalesEmployeesRaw = await GetDistinctDealFieldAsync(filter, x => x.SalesEmployeeBP, lockedRawNames, ct);
+            var availableIndustries = await GetDistinctDealFieldAsync(filter, x => x.IndustryName, lockedRawNames, ct);
+            var availableCustomers = await GetDistinctDealFieldAsync(filter, x => x.CustomerName, lockedRawNames, ct);
+            var availableProducts = await GetAvailableProductsAsync(lockedRawNames, ct);
+
+            // ★ SalesEmployeeBP เก็บชื่อบางส่วนจาก Zoho — map เป็น Ms_User.FullName ก่อนแสดงผลทุกจุด
+            var salesEmployeeNameMap = await _nameResolver.BuildNameMapAsync(
+                bySalesperson.Select(r => r.GroupName)
+                    .Concat(recentOpportunities.Select(r => r.SalesEmployeeBP))
+                    .Concat(new[] { longestSalesperson?.Name })
+                    .Concat(availableSalesEmployeesRaw), ct);
+
+            string MapSalesEmployeeName(string? raw) =>
+                !string.IsNullOrWhiteSpace(raw) && salesEmployeeNameMap.TryGetValue(raw, out var mapped) ? mapped : (raw ?? "");
+
+            var availableSalesEmployeesMapped = availableSalesEmployeesRaw
+                .Select(MapSalesEmployeeName)
+                .Where(v => !string.IsNullOrWhiteSpace(v) && !string.Equals(v, "Department", StringComparison.OrdinalIgnoreCase))
+                .Distinct()
+                .OrderBy(v => v)
+                .ToList();
+
+            // ★ เมื่อ BU ถูกล็อก (filter.SalesGroup มีค่า, กรณีนี้คือ Leader) dropdown "Salesperson" แสดงเฉพาะพนักงานที่
+            // Home Division (Ms_User.Division) ตรงกับ BU นี้เท่านั้น (ตาราง "Avg Days to Close by Salesperson" เอง
+            // ยังคงแสดงชื่อจริงทั้งหมดตามธุรกรรม ไม่กรอง/ไม่รวมกลุ่ม — ยืนยันแล้วว่าต้องการแบบนี้)
+            var availableSalesEmployees = await _nameResolver.FilterToDivisionAsync(availableSalesEmployeesMapped, filter.SalesGroup, ct);
+
+            foreach (var row in bySalesperson) row.GroupName = MapSalesEmployeeName(row.GroupName);
+            foreach (var row in recentOpportunities) row.SalesEmployeeBP = MapSalesEmployeeName(row.SalesEmployeeBP);
+            var longestSalespersonName = longestSalesperson is null ? null : MapSalesEmployeeName(longestSalesperson.Name);
 
             return new AverageDaysToCloseDto
             {
@@ -183,8 +236,9 @@ namespace Mgt.Lit.Core.Services.Dashboard
                     FastestCustomerDays = withDays.Count == 0 ? null : fastest.Days,
                     SlowestCustomerName = slowest.Row?.CustomerName,
                     SlowestCustomerDays = withDays.Count == 0 ? null : slowest.Days,
-                    LongestSalespersonName = longestSalesperson?.Name,
+                    LongestSalespersonName = longestSalespersonName,
                     LongestSalespersonAvgDays = longestSalesperson is null ? null : Math.Round(longestSalesperson.Avg, 1),
+                    AvgVarianceDays = avgVarianceDays,
 
                     AvgDaysChangeVsPrevious = (avgDays.HasValue && prevAvg.HasValue) ? Math.Round(avgDays.Value - prevAvg.Value, 1) : null,
                     AvgDaysImprovementPercent = (avgDays.HasValue && prevAvg.HasValue && prevAvg.Value != 0)
@@ -262,12 +316,13 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 cursor = cursor.AddMonths(1);
                 guard++;
             }
-            return trend;
+            // แสดงเฉพาะเดือนที่มีข้อมูลจริง (ตัดเดือนที่ไม่มี closed won deal เลยออก ไม่ให้กราฟรกด้วยเดือนว่าง)
+            return trend.Where(x => x.ClosedWonDeals > 0).ToList();
         }
 
-        private async Task<List<DaysToCloseGroupRowDto>> GetByProductAsync(AverageDaysToCloseFilter filter, CancellationToken ct)
+        private async Task<List<DaysToCloseGroupRowDto>> GetByProductAsync(AverageDaysToCloseFilter filter, List<string>? lockedRawNames, CancellationToken ct)
         {
-            var scopeQuery = ApplyScopeFilter(_db.MGT_Deal.AsNoTracking(), filter).Where(x => x.ForecastCategory == WonCategory);
+            var scopeQuery = ApplyScopeFilter(_db.MGT_Deal.AsNoTracking(), filter, lockedRawNames).Where(x => x.ForecastCategory == WonCategory);
 
             if (filter.DateFrom.HasValue) scopeQuery = scopeQuery.Where(x => (x.ActualClosedDate ?? x.ClosingDate) >= filter.DateFrom.Value);
             if (filter.DateTo.HasValue) scopeQuery = scopeQuery.Where(x => (x.ActualClosedDate ?? x.ClosingDate) <= filter.DateTo.Value);
@@ -315,11 +370,11 @@ namespace Mgt.Lit.Core.Services.Dashboard
         }
 
         private async Task<List<string>> GetDistinctDealFieldAsync(
-            AverageDaysToCloseFilter filter, Expression<Func<MGT_Deal, string?>> keySelector, CancellationToken ct)
+            AverageDaysToCloseFilter filter, Expression<Func<MGT_Deal, string?>> keySelector, List<string>? lockedRawNames, CancellationToken ct)
         {
             // dropdown scope ตาม SalesGroup เท่านั้น (ไม่ใส่ filter ของตัวเอง) เพื่อให้เห็นตัวเลือกครบหลังเลือกแล้ว
             var baseFilter = new AverageDaysToCloseFilter { SalesGroup = filter.SalesGroup };
-            var query = ApplyScopeFilter(_db.MGT_Deal.AsNoTracking(), baseFilter);
+            var query = ApplyScopeFilter(_db.MGT_Deal.AsNoTracking(), baseFilter, lockedRawNames);
 
             return await query
                 .Select(keySelector)
@@ -330,11 +385,11 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 .ToListAsync(ct);
         }
 
-        private async Task<List<string>> GetAvailableProductsAsync(string? salesGroup, CancellationToken ct)
+        private async Task<List<string>> GetAvailableProductsAsync(List<string>? lockedRawNames, CancellationToken ct)
         {
-            var dealQuery = string.IsNullOrWhiteSpace(salesGroup)
-                ? _db.MGT_Deal.AsNoTracking()
-                : _db.MGT_Deal.AsNoTracking().Where(x => x.SalesGroup == salesGroup);
+            var dealQuery = _db.MGT_Deal.AsNoTracking().AsQueryable();
+            if (lockedRawNames is not null)
+                dealQuery = dealQuery.Where(x => x.SalesEmployeeBP != null && lockedRawNames.Contains(x.SalesEmployeeBP));
 
             var query = from p in _db.MGT_DealProduct.AsNoTracking()
                         join d in dealQuery on p.DealId equals d.DealId
@@ -349,13 +404,16 @@ namespace Mgt.Lit.Core.Services.Dashboard
         }
 
         // instance method เพราะ filter ตาม Product ต้องอ้าง _db.MGT_DealProduct (subquery)
-        private IQueryable<MGT_Deal> ApplyScopeFilter(IQueryable<MGT_Deal> query, AverageDaysToCloseFilter filter)
+        // ★ BU กรองจากรายชื่อดิบ (Zoho partial name) ของพนักงานขาย Active ของ BU นั้น (lockedRawNames) แทน SalesGroup
+        private IQueryable<MGT_Deal> ApplyScopeFilter(IQueryable<MGT_Deal> query, AverageDaysToCloseFilter filter, List<string>? lockedRawNames)
         {
-            if (!string.IsNullOrWhiteSpace(filter.SalesGroup))
-                query = query.Where(x => x.SalesGroup == filter.SalesGroup);
+            if (lockedRawNames is not null)
+                query = query.Where(x => x.SalesEmployeeBP != null && lockedRawNames.Contains(x.SalesEmployeeBP));
 
+            // ★ filter.SalesEmployeeBP เป็น FullName ที่เลือกจาก dropdown (map แล้ว) แต่คอลัมน์จริงเก็บชื่อบางส่วนจาก Zoho
+            // จึงเทียบแบบ substring แทน exact match (ดู SalesEmployeeNameResolver)
             if (!string.IsNullOrWhiteSpace(filter.SalesEmployeeBP))
-                query = query.Where(x => x.SalesEmployeeBP == filter.SalesEmployeeBP);
+                query = query.Where(x => x.SalesEmployeeBP != null && filter.SalesEmployeeBP.Contains(x.SalesEmployeeBP));
 
             if (!string.IsNullOrWhiteSpace(filter.IndustryName))
                 query = query.Where(x => x.IndustryName == filter.IndustryName);

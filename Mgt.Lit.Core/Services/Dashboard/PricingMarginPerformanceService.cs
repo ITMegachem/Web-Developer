@@ -22,12 +22,17 @@ namespace Mgt.Lit.Core.Services.Dashboard
     public class PricingMarginPerformanceService : IPricingMarginPerformanceService
     {
         private readonly AppDbContext _db;
+        private readonly ISalesEmployeeNameResolver _nameResolver;
 
-        public PricingMarginPerformanceService(AppDbContext db) => _db = db;
+        public PricingMarginPerformanceService(AppDbContext db, ISalesEmployeeNameResolver nameResolver)
+        {
+            _db = db;
+            _nameResolver = nameResolver;
+        }
 
         private sealed record RawSaleRow(
             string? SalesEmployeeBP, string? CustomerFullName, string? MaterialGroupName, string? Material, string? MaterialName,
-            string? ProductGroup, string? Unit, string? SalesGroup, int? Month,
+            string? ProductGroup, string? Unit, string? SalesGroup, int? Month, DateTime? BillingDocumentDate,
             decimal NetAmount, decimal CostAmount, decimal GrossProfit, decimal Quantity);
 
         public async Task<PricingMarginPerformanceDto> GetAsync(PricingMarginPerformanceFilter filter, CancellationToken ct = default)
@@ -35,9 +40,14 @@ namespace Mgt.Lit.Core.Services.Dashboard
             // สำคัญ: EF Core DbContext ไม่ thread-safe ห้ามยิงหลาย query พร้อมกันด้วย Task.WhenAll
             var target = filter.TargetMarginPercent;
 
+            // ★ นิยาม BU ใหม่ทั้งรายงาน — อ้างอิงจากรายชื่อพนักงานขาย Active ของ BU นั้น (Ms_User.Division + Department='Sales')
+            var lockedBuNames = string.IsNullOrWhiteSpace(filter.SalesGroup)
+                ? null
+                : await _nameResolver.GetActiveSalesEmployeeFullNamesAsync(filter.SalesGroup, ct);
+
             // ── ดึง raw rows ของทั้งปี (CY) มาครั้งเดียว — ใช้ ApplyCommonFilter (ไม่รวม MonthFrom/MonthTo) เพราะ
             //   MarginTrend ต้องเห็นครบ Jan-Dec เสมอ ส่วนตัวคำนวณอื่นที่ต้องกรองช่วงเดือน จะกรอง Month ต่อในหน่วยความจำ ──
-            var cyRawFullYear = await GetRawRowsAsync(ApplyCommonFilter(_db.MGT_Sale.AsNoTracking(), filter), ct);
+            var cyRawFullYear = await GetRawRowsAsync(ApplyCommonFilter(_db.MGT_Sale.AsNoTracking(), filter, lockedBuNames), ct);
             var cyRaw = FilterByMonthRange(cyRawFullYear, filter.MonthFrom, filter.MonthTo).ToList();
 
             var cyTotals = ComputeTotals(cyRaw);
@@ -50,7 +60,7 @@ namespace Mgt.Lit.Core.Services.Dashboard
             if (filter.Year.HasValue)
             {
                 var lyFilter = CloneForYear(filter, filter.Year.Value - 1);
-                var lyRawFullYear = await GetRawRowsAsync(ApplyCommonFilter(_db.MGT_Sale.AsNoTracking(), lyFilter), ct);
+                var lyRawFullYear = await GetRawRowsAsync(ApplyCommonFilter(_db.MGT_Sale.AsNoTracking(), lyFilter, lockedBuNames), ct);
                 lyRaw = FilterByMonthRange(lyRawFullYear, filter.MonthFrom, filter.MonthTo).ToList();
                 lyTotals = ComputeTotals(lyRaw);
             }
@@ -91,8 +101,8 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 : null;
             var productPerformance = BuildProductPerformance(cyRaw, lyMarginByMaterial);
 
-            var dropdownQuery = ApplyCommonFilter(_db.MGT_Sale.AsNoTracking(), new PricingMarginPerformanceFilter { SalesGroup = filter.SalesGroup, Year = filter.Year });
-            var (availableSalesEmployees, availableCustomerGroups, availableProductCategories) = await GetDropdownsAsync(dropdownQuery, ct);
+            var dropdownQuery = ApplyCommonFilter(_db.MGT_Sale.AsNoTracking(), new PricingMarginPerformanceFilter { SalesGroup = filter.SalesGroup, Year = filter.Year }, lockedBuNames);
+            var (availableSalesEmployees, availableCustomerGroups, availableProductCategories) = await GetDropdownsAsync(dropdownQuery, filter.SalesGroup, ct);
 
             return new PricingMarginPerformanceDto
             {
@@ -146,6 +156,7 @@ namespace Mgt.Lit.Core.Services.Dashboard
                     x.Unit,
                     x.SalesGroup,
                     Month = x.BillingDocumentDate.HasValue ? (int?)x.BillingDocumentDate.Value.Month : null,
+                    x.BillingDocumentDate,
                     NetAmount = x.NetAmount ?? 0,
                     CostAmount = x.CostAmount ?? 0,
                     GrossProfit = x.GrossProfit ?? 0,
@@ -155,7 +166,7 @@ namespace Mgt.Lit.Core.Services.Dashboard
 
             return rows.Select(r => new RawSaleRow(
                 r.SalesEmployeeBP, r.CustomerFullName, r.MaterialGroupName, r.Material, r.MaterialName,
-                r.ProductGroup, r.Unit, r.SalesGroup, r.Month, r.NetAmount, r.CostAmount, r.GrossProfit, (decimal)r.Quantity)).ToList();
+                r.ProductGroup, r.Unit, r.SalesGroup, r.Month, r.BillingDocumentDate, r.NetAmount, r.CostAmount, r.GrossProfit, (decimal)r.Quantity)).ToList();
         }
 
         private static IEnumerable<RawSaleRow> FilterByMonthRange(List<RawSaleRow> rows, int? monthFrom, int? monthTo) =>
@@ -338,7 +349,11 @@ namespace Mgt.Lit.Core.Services.Dashboard
                     NetAmount = g.Sum(x => x.NetAmount),
                     CostAmount = g.Sum(x => x.CostAmount),
                     GrossProfit = g.Sum(x => x.GrossProfit),
-                    Qty = g.Sum(x => x.Quantity)
+                    Qty = g.Sum(x => x.Quantity),
+                    // ★ salesperson จากรายการขายล่าสุด (BillingDocumentDate มากสุด) ของ material นี้ — เช่นเดียวกับ
+                    // pattern ที่ใช้ใน CrossSellUpsellGainsService/CustomerChurnAnalysisService (material หนึ่งอาจขายโดยหลาย
+                    // salesperson จึงเลือกแสดงคนล่าสุดแทนการรวม/แสดงหลายชื่อ)
+                    LatestSalesEmployeeBP = g.OrderByDescending(x => x.BillingDocumentDate).Select(x => x.SalesEmployeeBP).FirstOrDefault()
                 })
                 .OrderByDescending(x => x.NetAmount)
                 .Take(200)   // กันโหลดหนักถ้ามี SKU เยอะมาก — ตารางเรียงตามยอดขายมากไปน้อยอยู่แล้ว
@@ -358,6 +373,7 @@ namespace Mgt.Lit.Core.Services.Dashboard
                     MaterialName = r.MaterialName ?? "",
                     ProductCategory = r.MaterialGroupName ?? "",
                     ProductGroup = r.ProductGroup ?? "",
+                    SalesEmployeeBP = r.LatestSalesEmployeeBP ?? "",
                     NetAmount = r.NetAmount,
                     SalesVolume = qty,
                     Unit = r.Unit ?? "",
@@ -370,8 +386,8 @@ namespace Mgt.Lit.Core.Services.Dashboard
             }).ToList();
         }
 
-        private static async Task<(List<string> SalesEmployees, List<string> CustomerGroups, List<string> ProductCategories)>
-            GetDropdownsAsync(IQueryable<MGT_Sale> dropdownScopeQuery, CancellationToken ct)
+        private async Task<(List<string> SalesEmployees, List<string> CustomerGroups, List<string> ProductCategories)>
+            GetDropdownsAsync(IQueryable<MGT_Sale> dropdownScopeQuery, string? salesGroup, CancellationToken ct)
         {
             var raw = await dropdownScopeQuery
                 .Select(x => new { x.SalesEmployeeBP, x.AffiliateCustomerName, x.MaterialGroupName })
@@ -381,8 +397,11 @@ namespace Mgt.Lit.Core.Services.Dashboard
             static List<string> DistinctSorted(IEnumerable<string?> values) =>
                 values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!).Distinct().OrderBy(v => v).ToList();
 
+            // ★ กรองซ้ำด้วย Division ประจำของพนักงานเมื่อ BU ถูกล็อก (ดู comment ที่ ISalesEmployeeNameResolver.FilterToDivisionAsync)
+            var salesEmployees = await _nameResolver.FilterToDivisionAsync(DistinctSorted(raw.Select(x => x.SalesEmployeeBP)), salesGroup, ct);
+
             return (
-                DistinctSorted(raw.Select(x => x.SalesEmployeeBP)),
+                salesEmployees,
                 DistinctSorted(raw.Select(x => x.AffiliateCustomerName)),
                 DistinctSorted(raw.Select(x => x.MaterialGroupName))
             );
@@ -402,10 +421,10 @@ namespace Mgt.Lit.Core.Services.Dashboard
 
         // ★ ใช้กับการดึง raw rows ของ "ทั้งปี" เท่านั้น (ไม่รวม MonthFrom/MonthTo) — กรองช่วงเดือนทำในหน่วยความจำแทน
         // (SalesEmployeeBP/CustomerGroup/ProductCategory ยังคงกรองที่ SQL เหมือนเดิม เพราะเป็น filter ระดับ scope ไม่ใช่ระดับเวลา)
-        private static IQueryable<MGT_Sale> ApplyCommonFilter(IQueryable<MGT_Sale> query, PricingMarginPerformanceFilter filter)
+        private static IQueryable<MGT_Sale> ApplyCommonFilter(IQueryable<MGT_Sale> query, PricingMarginPerformanceFilter filter, HashSet<string>? lockedBuNames)
         {
-            if (!string.IsNullOrWhiteSpace(filter.SalesGroup))
-                query = query.Where(x => x.SalesGroup == filter.SalesGroup);
+            if (lockedBuNames is not null)
+                query = query.Where(x => x.SalesEmployeeBP != null && lockedBuNames.Contains(x.SalesEmployeeBP));
 
             if (filter.Year.HasValue)
                 query = query.Where(x => x.BillingDocumentDate.HasValue

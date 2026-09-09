@@ -7,6 +7,6 @@ namespace Mgt.Lit.Core.Services.Dashboard
 {
     public interface IYearlyComparisonService
     {
-        Task<YearlyComparisonDto> GetAsync(CancellationToken ct = default);
+        Task<YearlyComparisonDto> GetAsync(string? salesGroup, string? salesEmployeeBP, CancellationToken ct = default);
     }
 }

@@ -24,8 +24,13 @@ namespace Mgt.Lit.Core.Services.Dashboard
         private const int CriticalThresholdDays = 1000;
 
         private readonly AppDbContext _db;
+        private readonly ISalesEmployeeNameResolver _nameResolver;
 
-        public CustomerChurnAnalysisService(AppDbContext db) => _db = db;
+        public CustomerChurnAnalysisService(AppDbContext db, ISalesEmployeeNameResolver nameResolver)
+        {
+            _db = db;
+            _nameResolver = nameResolver;
+        }
 
         private sealed record ChurnRawRow(
             string Customer, DateTime Date, decimal NetAmount, decimal GrossProfit,
@@ -40,12 +45,17 @@ namespace Mgt.Lit.Core.Services.Dashboard
             var asOfDate = analysisYear == DateTime.Now.Year ? DateTime.Now.Date : endOfPeriod;
             var periodEnd = asOfDate < endOfPeriod ? asOfDate : endOfPeriod;
 
-            var scopeQuery = ApplyScopeFilter(_db.MGT_Sale.AsNoTracking(), filter);
-            var dropdownScopeQuery = ApplyScopeFilter(_db.MGT_Sale.AsNoTracking(), new CustomerChurnAnalysisFilter { SalesGroup = filter.SalesGroup });
+            // ★ นิยาม BU ใหม่ทั้งรายงาน — อ้างอิงจากรายชื่อพนักงานขาย Active ของ BU นั้น (Ms_User.Division + Department='Sales')
+            var lockedBuNames = string.IsNullOrWhiteSpace(filter.SalesGroup)
+                ? null
+                : await _nameResolver.GetActiveSalesEmployeeFullNamesAsync(filter.SalesGroup, ct);
+
+            var scopeQuery = ApplyScopeFilter(_db.MGT_Sale.AsNoTracking(), filter, lockedBuNames);
+            var dropdownScopeQuery = ApplyScopeFilter(_db.MGT_Sale.AsNoTracking(), new CustomerChurnAnalysisFilter { SalesGroup = filter.SalesGroup }, lockedBuNames);
 
             // ── query หลัก 2 ครั้งที่ยิงไปที่ MGT_Sale จริงๆ (raw ทั้งประวัติ + dropdown รวม) ──────────
             var raw = await GetRawRowsAsync(scopeQuery, ct);
-            var (availableSalesEmployees, availableCustomerGroups, availableIndustries) = await GetDropdownsAsync(dropdownScopeQuery, ct);
+            var (availableSalesEmployees, availableCustomerGroups, availableIndustries) = await GetDropdownsAsync(dropdownScopeQuery, filter.SalesGroup, ct);
 
             // ── 1) First/Last purchase ต่อลูกค้า (ทั้งประวัติ ภายใต้ scope ที่กรอง) — group ครั้งเดียว ใช้ซ้ำได้ทุกจุด ──
             var byCustomer = raw.GroupBy(x => x.Customer).ToDictionary(g => g.Key, g => g.OrderBy(x => x.Date).ToList());
@@ -257,8 +267,8 @@ namespace Mgt.Lit.Core.Services.Dashboard
             return rows.Select(r => new ChurnRawRow(r.Customer, r.Date, r.NetAmount, r.GrossProfit, r.IndustryName, r.SalesEmployeeBP, r.SoldToParty)).ToList();
         }
 
-        private static async Task<(List<string> SalesEmployees, List<string> CustomerGroups, List<string> Industries)>
-            GetDropdownsAsync(IQueryable<MGT_Sale> dropdownScopeQuery, CancellationToken ct)
+        private async Task<(List<string> SalesEmployees, List<string> CustomerGroups, List<string> Industries)>
+            GetDropdownsAsync(IQueryable<MGT_Sale> dropdownScopeQuery, string? salesGroup, CancellationToken ct)
         {
             var raw = await dropdownScopeQuery
                 .Select(x => new { x.SalesEmployeeBP, x.AffiliateCustomerName, x.IndustryName })
@@ -268,8 +278,11 @@ namespace Mgt.Lit.Core.Services.Dashboard
             static List<string> DistinctSorted(IEnumerable<string?> values) =>
                 values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!).Distinct().OrderBy(v => v).ToList();
 
+            // ★ กรองซ้ำด้วย Division ประจำของพนักงานเมื่อ BU ถูกล็อก (ดู comment ที่ ISalesEmployeeNameResolver.FilterToDivisionAsync)
+            var salesEmployees = await _nameResolver.FilterToDivisionAsync(DistinctSorted(raw.Select(x => x.SalesEmployeeBP)), salesGroup, ct);
+
             return (
-                DistinctSorted(raw.Select(x => x.SalesEmployeeBP)),
+                salesEmployees,
                 DistinctSorted(raw.Select(x => x.AffiliateCustomerName)),
                 DistinctSorted(raw.Select(x => x.IndustryName))
             );
@@ -295,10 +308,10 @@ namespace Mgt.Lit.Core.Services.Dashboard
         private static int GetRiskScore(int days) => Math.Min(100, (int)Math.Round(days / 10.0));
 
         // ไม่ใส่ filter ปี — cohort Existing/New ต้องอาศัยประวัติการซื้อทั้งหมดของลูกค้า ไม่ใช่แค่ปีที่เลือก
-        private static IQueryable<MGT_Sale> ApplyScopeFilter(IQueryable<MGT_Sale> query, CustomerChurnAnalysisFilter filter)
+        private static IQueryable<MGT_Sale> ApplyScopeFilter(IQueryable<MGT_Sale> query, CustomerChurnAnalysisFilter filter, HashSet<string>? lockedBuNames)
         {
-            if (!string.IsNullOrWhiteSpace(filter.SalesGroup))
-                query = query.Where(x => x.SalesGroup == filter.SalesGroup);
+            if (lockedBuNames is not null)
+                query = query.Where(x => x.SalesEmployeeBP != null && lockedBuNames.Contains(x.SalesEmployeeBP));
 
             if (!string.IsNullOrWhiteSpace(filter.SalesEmployeeBP))
                 query = query.Where(x => x.SalesEmployeeBP == filter.SalesEmployeeBP);

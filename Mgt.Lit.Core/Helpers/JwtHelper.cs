@@ -26,7 +26,9 @@ namespace Mgt.Lit.Core.Helpers
         new Claim(ClaimTypes.Name, user.Username ?? ""),
         new Claim(ClaimTypes.Role, user.UserRole ?? ""),
         new Claim("FullName", user.FullName ?? ""),
+        new Claim("Position", user.Position ?? ""),
         new Claim("Division", user.Division ?? ""),
+        new Claim("Department", user.Department ?? ""),
         new Claim("CompanyID", (primaryCompanyId ?? 0).ToString()),
         new Claim("TokenVersion", user.TokenVersion ?? ""),
         new Claim("UserID", user.UserID.ToString())

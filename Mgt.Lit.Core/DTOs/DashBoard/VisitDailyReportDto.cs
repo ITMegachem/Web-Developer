@@ -81,6 +81,16 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
         // ★ ไม่มี field สถานะตรงๆ บน Zoho — derive จาก EndDateTime มีค่าหรือไม่ (มี = "Completed", ไม่มี = "In Progress")
         public string Status { get; set; } = string.Empty;
 
+        // ★ สถานะ Deal ของลูกค้ารายนี้ (join จาก MGT_Deal.CustomerCode = MGT_VisitReport.CustomerCode ซึ่งเป็น Zoho
+        // Account record id เดียวกันทั้งคู่ — ไม่ใช่ deal ของ visit นี้โดยตรง เพราะ Zoho ไม่มี field เชื่อม Visit -> Deal)
+        // "Won" = ลูกค้ามี deal ที่ Closed อย่างน้อย 1 รายการ, "Open" = มี deal ที่ยังเปิดอยู่ (ไม่มี Won),
+        // "Lost" = มีแต่ deal ที่ Omitted เท่านั้น, "No Deal" = ลูกค้ารายนี้ไม่มี Deal ในระบบเลย
+        public string DealStatus { get; set; } = string.Empty;
+
+        // ★ ชื่อ Deal ของลูกค้ารายนี้ (join ด้วย CustomerCode เดียวกับ DealStatus) — ใช้สำหรับ Search เท่านั้น
+        // ไม่ใช่ Deal ของ visit นี้โดยตรง อาจมีหลายชื่อคั่นด้วย ", " ถ้าลูกค้ามีหลาย Deal
+        public string RelatedDealNames { get; set; } = string.Empty;
+
         public int ProductCount { get; set; }
         public int CompetitorCount { get; set; }
         public string ContactPersons { get; set; } = string.Empty;  // รวมชื่อผู้ติดต่อไม่ซ้ำ คั่นด้วย ", "

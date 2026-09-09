@@ -13,12 +13,23 @@ namespace Mgt.Lit.Core.Services.Dashboard
     public class ProductMovementService : IProductMovementService
     {
         private readonly AppDbContext _db;
-        public ProductMovementService(AppDbContext db) => _db = db;
+        private readonly ISalesEmployeeNameResolver _nameResolver;
+
+        public ProductMovementService(AppDbContext db, ISalesEmployeeNameResolver nameResolver)
+        {
+            _db = db;
+            _nameResolver = nameResolver;
+        }
 
         public async Task<ProductMovementDto> GetAsync(ProductMovementFilter filter, CancellationToken ct = default)
         {
+            // ★ นิยาม BU ใหม่ทั้งหน้า — อ้างอิงจากรายชื่อพนักงานขาย Active ของ BU นั้น (Ms_User.Division + Department='Sales')
+            var lockedBuNames = string.IsNullOrWhiteSpace(filter.SalesGroup)
+                ? null
+                : await _nameResolver.GetActiveSalesEmployeeFullNamesAsync(filter.SalesGroup, ct);
+
             var q = _db.MGT_Sale.AsNoTracking();
-            q = ApplyYearBu(q, filter);
+            q = ApplyYearBu(q, filter, lockedBuNames);
             if (!string.IsNullOrWhiteSpace(filter.CustomerFullName))
                 q = q.Where(x => x.CustomerFullName == filter.CustomerFullName);
             if (!string.IsNullOrWhiteSpace(filter.MaterialName))
@@ -54,7 +65,7 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 })
                 .ToList();
 
-            var custBase = ApplyYearBu(_db.MGT_Sale.AsNoTracking(), filter);
+            var custBase = ApplyYearBu(_db.MGT_Sale.AsNoTracking(), filter, lockedBuNames);
             var customers = await custBase
                 .Where(x => x.CustomerFullName != null && x.CustomerFullName != "")
                 .Select(x => x.CustomerFullName!)
@@ -62,7 +73,7 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 .OrderBy(x => x)
                 .ToListAsync(ct);
 
-            var matBase = ApplyYearBu(_db.MGT_Sale.AsNoTracking(), filter);
+            var matBase = ApplyYearBu(_db.MGT_Sale.AsNoTracking(), filter, lockedBuNames);
             if (!string.IsNullOrWhiteSpace(filter.CustomerFullName))
                 matBase = matBase.Where(x => x.CustomerFullName == filter.CustomerFullName);
             var materials = await matBase
@@ -84,13 +95,15 @@ namespace Mgt.Lit.Core.Services.Dashboard
             };
         }
 
-        private static IQueryable<MGT_Sale> ApplyYearBu(IQueryable<MGT_Sale> q, ProductMovementFilter f)
+        private static IQueryable<MGT_Sale> ApplyYearBu(IQueryable<MGT_Sale> q, ProductMovementFilter f, HashSet<string>? lockedBuNames)
         {
             if (f.Year.HasValue)
                 q = q.Where(x => x.BillingDocumentDate.HasValue
                               && x.BillingDocumentDate.Value.Year == f.Year.Value);
-            if (!string.IsNullOrWhiteSpace(f.SalesGroup))
-                q = q.Where(x => x.SalesGroup == f.SalesGroup);
+            if (lockedBuNames is not null)
+                q = q.Where(x => x.SalesEmployeeBP != null && lockedBuNames.Contains(x.SalesEmployeeBP));
+            if (!string.IsNullOrWhiteSpace(f.SalesEmployeeBP))
+                q = q.Where(x => x.SalesEmployeeBP == f.SalesEmployeeBP);
             return q;
         }
     }

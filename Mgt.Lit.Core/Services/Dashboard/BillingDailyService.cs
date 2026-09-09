@@ -13,12 +13,23 @@ namespace Mgt.Lit.Core.Services.Dashboard
     public class BillingDailyService : IBillingDailyService
     {
         private readonly AppDbContext _db;
-        public BillingDailyService(AppDbContext db) => _db = db;
+        private readonly ISalesEmployeeNameResolver _nameResolver;
+
+        public BillingDailyService(AppDbContext db, ISalesEmployeeNameResolver nameResolver)
+        {
+            _db = db;
+            _nameResolver = nameResolver;
+        }
 
         public async Task<BillingDailyDto> GetAsync(BillingDailyFilter filter, CancellationToken ct = default)
         {
+            // ★ นิยาม BU ใหม่ทั้งหน้า — อ้างอิงจากรายชื่อพนักงานขาย Active ของ BU นั้น (Ms_User.Division + Department='Sales')
+            var lockedBuNames = string.IsNullOrWhiteSpace(filter.SalesGroup)
+                ? null
+                : await _nameResolver.GetActiveSalesEmployeeFullNamesAsync(filter.SalesGroup, ct);
+
             // ---------- detail grid: billing document × material ----------
-            var q = ApplyScope(_db.MGT_Sale.AsNoTracking(), filter);
+            var q = ApplyScope(_db.MGT_Sale.AsNoTracking(), filter, lockedBuNames);
             if (!string.IsNullOrWhiteSpace(filter.CustomerFullName))
                 q = q.Where(x => x.CustomerFullName == filter.CustomerFullName);
             if (!string.IsNullOrWhiteSpace(filter.SalesEmployeeBP))
@@ -65,7 +76,7 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 .ToList();
 
             // ---------- ตัวเลือก dropdown (scope ตาม BU + ช่วงวันที่) ----------
-            var scope = ApplyScope(_db.MGT_Sale.AsNoTracking(), filter);
+            var scope = ApplyScope(_db.MGT_Sale.AsNoTracking(), filter, lockedBuNames);
 
             var customers = await scope
                 .Where(x => x.CustomerFullName != null && x.CustomerFullName != "")
@@ -74,12 +85,15 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 .OrderBy(x => x)
                 .ToListAsync(ct);
 
-            var salesEmployees = await scope
+            var salesEmployeesRaw = await scope
                 .Where(x => x.SalesEmployeeBP != null && x.SalesEmployeeBP != "")
                 .Select(x => x.SalesEmployeeBP!)
                 .Distinct()
                 .OrderBy(x => x)
                 .ToListAsync(ct);
+
+            // ★ กรองซ้ำด้วย Division ประจำของพนักงานเมื่อ BU ถูกล็อก (ดู comment ที่ ISalesEmployeeNameResolver.FilterToDivisionAsync)
+            var salesEmployees = await _nameResolver.FilterToDivisionAsync(salesEmployeesRaw, filter.SalesGroup, ct);
 
             return new BillingDailyDto
             {
@@ -90,11 +104,11 @@ namespace Mgt.Lit.Core.Services.Dashboard
             };
         }
 
-        // scope พื้นฐาน: BU (SalesGroup, server บังคับ) + ช่วงวันที่
-        private static IQueryable<MGT_Sale> ApplyScope(IQueryable<MGT_Sale> q, BillingDailyFilter f)
+        // scope พื้นฐาน: BU (รายชื่อพนักงานขาย Active ของ BU นั้น) + ช่วงวันที่
+        private static IQueryable<MGT_Sale> ApplyScope(IQueryable<MGT_Sale> q, BillingDailyFilter f, HashSet<string>? lockedBuNames)
         {
-            if (!string.IsNullOrWhiteSpace(f.SalesGroup))
-                q = q.Where(x => x.SalesGroup == f.SalesGroup);
+            if (lockedBuNames is not null)
+                q = q.Where(x => x.SalesEmployeeBP != null && lockedBuNames.Contains(x.SalesEmployeeBP));
             if (f.DateFrom.HasValue)
                 q = q.Where(x => x.BillingDocumentDate.HasValue && x.BillingDocumentDate.Value >= f.DateFrom.Value);
             if (f.DateTo.HasValue)

@@ -13,16 +13,28 @@ namespace Mgt.Lit.Core.Services.Dashboard
     public class SalePerformanceService : ISalePerformanceService
     {
         private readonly AppDbContext _db;
-        public SalePerformanceService(AppDbContext db) => _db = db;
+        private readonly ISalesEmployeeNameResolver _nameResolver;
+
+        public SalePerformanceService(AppDbContext db, ISalesEmployeeNameResolver nameResolver)
+        {
+            _db = db;
+            _nameResolver = nameResolver;
+        }
 
         private const int YearsBack = 5;   // ตาราง 1 แสดง ปีปัจจุบัน + ย้อนหลัง 5 ปี = 6 ปี
 
         public async Task<SalePerformanceDto> GetAsync(SalePerformanceFilter filter, CancellationToken ct = default)
         {
+            // ★ นิยาม BU ใหม่ทั้งหน้า — อ้างอิงจากรายชื่อพนักงานขาย Active ของ BU นั้น (Ms_User.Division + Department='Sales')
+            // แทนการเชื่อ SalesGroup ของธุรกรรมเอง (ดู comment ที่ ISalesEmployeeNameResolver/SalesOverviewService)
+            var lockedBuNames = string.IsNullOrWhiteSpace(filter.SalesGroup)
+                ? null
+                : await _nameResolver.GetActiveSalesEmployeeFullNamesAsync(filter.SalesGroup, ct);
+
             // DbContext ไม่ thread-safe — await ทีละตัว
-            var byYear = await GetByYearAsync(filter, ct);
-            var byMonth = await GetByMonthAsync(filter, ct);
-            var trend = await GetEmployeeTrendAsync(filter, ct);
+            var byYear = await GetByYearAsync(filter, lockedBuNames, ct);
+            var byMonth = await GetByMonthAsync(filter, lockedBuNames, ct);
+            var trend = await GetEmployeeTrendAsync(filter, lockedBuNames, ct);
 
             static SalePerfTotalDto Mk(decimal net, decimal gp) => new()
             {
@@ -53,12 +65,12 @@ namespace Mgt.Lit.Core.Services.Dashboard
         }
 
         // ---------- ตาราง 1: คน × ปี ----------
-        private async Task<List<SalePerfByYearRowDto>> GetByYearAsync(SalePerformanceFilter filter, CancellationToken ct)
+        private async Task<List<SalePerfByYearRowDto>> GetByYearAsync(SalePerformanceFilter filter, HashSet<string>? lockedBuNames, CancellationToken ct)
         {
             int currentYear = DateTime.Now.Year;
             int startYear = currentYear - YearsBack;
 
-            var q = ApplyFilter(_db.MGT_Sale.AsNoTracking(), filter)
+            var q = ApplyFilter(_db.MGT_Sale.AsNoTracking(), filter, lockedBuNames)
                 .Where(x => x.BillingDocumentDate.HasValue
                          && x.BillingDocumentDate.Value.Year >= startYear
                          && x.BillingDocumentDate.Value.Year <= currentYear);
@@ -88,9 +100,9 @@ namespace Mgt.Lit.Core.Services.Dashboard
         }
 
         // ---------- ตาราง 2: คน × เดือน ----------
-        private async Task<List<SalePerfByMonthRowDto>> GetByMonthAsync(SalePerformanceFilter filter, CancellationToken ct)
+        private async Task<List<SalePerfByMonthRowDto>> GetByMonthAsync(SalePerformanceFilter filter, HashSet<string>? lockedBuNames, CancellationToken ct)
         {
-            var q = ApplyFilter(_db.MGT_Sale.AsNoTracking(), filter)
+            var q = ApplyFilter(_db.MGT_Sale.AsNoTracking(), filter, lockedBuNames)
                 .Where(x => x.BillingDocumentDate.HasValue);
 
             var rows = await q
@@ -122,9 +134,9 @@ namespace Mgt.Lit.Core.Services.Dashboard
         }
 
         // ---------- Chart 3: ต่อคน (X = Sale Employee) ----------
-        private async Task<List<SalePerfEmployeeDto>> GetEmployeeTrendAsync(SalePerformanceFilter filter, CancellationToken ct)
+        private async Task<List<SalePerfEmployeeDto>> GetEmployeeTrendAsync(SalePerformanceFilter filter, HashSet<string>? lockedBuNames, CancellationToken ct)
         {
-            var q = ApplyFilter(_db.MGT_Sale.AsNoTracking(), filter);
+            var q = ApplyFilter(_db.MGT_Sale.AsNoTracking(), filter, lockedBuNames);
 
             var rows = await q
                 .GroupBy(x => x.SalesEmployeeBP)
@@ -158,16 +170,16 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 .ToListAsync(ct);
         }
 
-        private static IQueryable<MGT_Sale> ApplyFilter(IQueryable<MGT_Sale> q, SalePerformanceFilter f)
+        private static IQueryable<MGT_Sale> ApplyFilter(IQueryable<MGT_Sale> q, SalePerformanceFilter f, HashSet<string>? lockedBuNames)
         {
             // ปี (จาก BillingDocumentDate ให้สอดคล้องกับหน้าอื่น)
             if (f.Year.HasValue)
                 q = q.Where(x => x.BillingDocumentDate.HasValue
                               && x.BillingDocumentDate.Value.Year == f.Year.Value);
 
-            // BU (SalesGroup) — controller เป็นคน resolve จาก permission มาแล้ว
-            if (!string.IsNullOrWhiteSpace(f.SalesGroup))
-                q = q.Where(x => x.SalesGroup == f.SalesGroup);
+            // BU — กรองจากรายชื่อพนักงานขาย Active ของ BU นั้น (ไม่ใช่ SalesGroup ธุรกรรม) ดู comment ที่ GetAsync
+            if (lockedBuNames is not null)
+                q = q.Where(x => x.SalesEmployeeBP != null && lockedBuNames.Contains(x.SalesEmployeeBP));
 
             if (!string.IsNullOrWhiteSpace(f.SalesEmployeeBP))
                 q = q.Where(x => x.SalesEmployeeBP == f.SalesEmployeeBP);

@@ -40,8 +40,13 @@ namespace Mgt.Lit.Core.Services.Dashboard
         private const int MaxTrendMonths = 36;
 
         private readonly AppDbContext _db;
+        private readonly ISalesEmployeeNameResolver _nameResolver;
 
-        public CrossSellUpsellGainsService(AppDbContext db) => _db = db;
+        public CrossSellUpsellGainsService(AppDbContext db, ISalesEmployeeNameResolver nameResolver)
+        {
+            _db = db;
+            _nameResolver = nameResolver;
+        }
 
         private sealed record GroupClassificationRow(string Customer, string Group, decimal Revenue, decimal BaselineRevenue, bool IsCrossSell);
 
@@ -67,14 +72,19 @@ namespace Mgt.Lit.Core.Services.Dashboard
             var dateFrom = filter.DateFrom ?? new DateTime(DateTime.Now.Year, 1, 1);
             var dateTo = filter.DateTo ?? DateTime.Now.Date;
 
-            var scopeQuery = ApplyScopeFilter(_db.MGT_Sale.AsNoTracking(), filter);
-            var dropdownScopeQuery = ApplyScopeFilter(_db.MGT_Sale.AsNoTracking(), new CrossSellUpsellGainsFilter { SalesGroup = filter.SalesGroup });
+            // ★ นิยาม BU ใหม่ทั้งรายงาน — อ้างอิงจากรายชื่อพนักงานขาย Active ของ BU นั้น (Ms_User.Division + Department='Sales')
+            var lockedBuNames = string.IsNullOrWhiteSpace(filter.SalesGroup)
+                ? null
+                : await _nameResolver.GetActiveSalesEmployeeFullNamesAsync(filter.SalesGroup, ct);
+
+            var scopeQuery = ApplyScopeFilter(_db.MGT_Sale.AsNoTracking(), filter, lockedBuNames);
+            var dropdownScopeQuery = ApplyScopeFilter(_db.MGT_Sale.AsNoTracking(), new CrossSellUpsellGainsFilter { SalesGroup = filter.SalesGroup }, lockedBuNames);
 
             // ── 3 query หลักที่ยิงไปที่ MGT_Sale จริงๆ (ดู comment บน class) ─────────────────────
             var allTimeGroups = await GetAllTimeGroupFirstPurchaseAsync(scopeQuery, ct);
             var windowedRevenue = await GetWindowedRevenueAsync(scopeQuery, dateFrom.AddYears(-2), dateTo, ct);
             var (availableSalesEmployees, availableProductGroups, availableIndustries, availableCustomerGroups) =
-                await GetDropdownsAsync(dropdownScopeQuery, ct);
+                await GetDropdownsAsync(dropdownScopeQuery, filter.SalesGroup, ct);
 
             // ── สร้างชุดข้อมูล all-time ที่ cutoff ต่างกัน (ใช้ allTimeGroups ชุดเดียวกันทุกจุด ไม่ยิง query ซ้ำ) ──
             var existingCustomersY0 = BuildExistingCustomers(allTimeGroups, dateFrom);
@@ -102,6 +112,13 @@ namespace Mgt.Lit.Core.Services.Dashboard
             var customerGrowth = BuildCustomerGrowth(perCustomer, prevPerCustomer);
 
             var prevByCustomer = prevPerCustomer.ToDictionary(x => x.Customer);
+            var topCustomerNames = perCustomer
+                .OrderByDescending(x => x.ExistingRevenue)
+                .Take(10)
+                .Select(x => x.Customer)
+                .ToList();
+            var latestSalesEmployeeByCustomer = await GetLatestSalesEmployeeByCustomerAsync(scopeQuery, topCustomerNames, ct);
+
             var topCustomers = perCustomer
                 .OrderByDescending(x => x.ExistingRevenue)
                 .Take(10)
@@ -113,6 +130,7 @@ namespace Mgt.Lit.Core.Services.Dashboard
                     return new TopCustomerExpansionRowDto
                     {
                         CustomerName = x.Customer,
+                        SalesEmployeeBP = latestSalesEmployeeByCustomer.TryGetValue(x.Customer, out var sp) ? sp : "",
                         ExistingRevenue = x.ExistingRevenue,
                         CrossSellRevenue = x.CrossSellRevenue,
                         UpsellRevenue = x.UpsellRevenue,
@@ -136,7 +154,11 @@ namespace Mgt.Lit.Core.Services.Dashboard
                 ProductGroup = x.Group,
                 CrossSellRevenue = x.Revenue,
                 CrossSellCustomers = x.Customers,
-                SharePercent = crossSellTotal == 0 ? 0 : Math.Round(x.Revenue * 100m / crossSellTotal, 1)
+                SharePercent = crossSellTotal == 0 ? 0 : Math.Round(x.Revenue * 100m / crossSellTotal, 1),
+                Customers = rows.Where(r => r.IsCrossSell && r.Group == x.Group)
+                    .OrderByDescending(r => r.Revenue)
+                    .Select(r => new ProductGroupRevenueCustomerDto { CustomerName = r.Customer, Revenue = r.Revenue })
+                    .ToList()
             }).ToList();
 
             var upsellByProductGroup = rows.Where(r => !r.IsCrossSell)
@@ -211,8 +233,8 @@ namespace Mgt.Lit.Core.Services.Dashboard
         }
 
         // ── 3 ใน 3 query หลัก: dropdown ทั้ง 4 คอลัมน์ในครั้งเดียว (distinct ระดับ tuple แล้วแยกในหน่วยความจำ) ──
-        private static async Task<(List<string> SalesEmployees, List<string> ProductGroups, List<string> Industries, List<string> CustomerGroups)>
-            GetDropdownsAsync(IQueryable<MGT_Sale> dropdownScopeQuery, CancellationToken ct)
+        private async Task<(List<string> SalesEmployees, List<string> ProductGroups, List<string> Industries, List<string> CustomerGroups)>
+            GetDropdownsAsync(IQueryable<MGT_Sale> dropdownScopeQuery, string? salesGroup, CancellationToken ct)
         {
             var raw = await dropdownScopeQuery
                 .Select(x => new { x.SalesEmployeeBP, x.MaterialGroupName, x.IndustryName, x.AffiliateCustomerName })
@@ -222,12 +244,37 @@ namespace Mgt.Lit.Core.Services.Dashboard
             static List<string> DistinctSorted(IEnumerable<string?> values) =>
                 values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!).Distinct().OrderBy(v => v).ToList();
 
+            // ★ กรองซ้ำด้วย Division ประจำของพนักงาน (Ms_User.Division) เมื่อ BU ถูกล็อก — MGT_Sale.SalesEmployeeBP
+            // อิงจาก SalesGroup ของ "ธุรกรรม" ไม่ใช่ของ "คน" จึงมีบางแถวหลุดข้าม BU ของพนักงานคนนั้นได้ (ดู comment ที่
+            // ISalesEmployeeNameResolver.FilterToDivisionAsync)
+            var salesEmployees = await _nameResolver.FilterToDivisionAsync(DistinctSorted(raw.Select(x => x.SalesEmployeeBP)), salesGroup, ct);
+
             return (
-                DistinctSorted(raw.Select(x => x.SalesEmployeeBP)),
+                salesEmployees,
                 DistinctSorted(raw.Select(x => x.MaterialGroupName)),
                 DistinctSorted(raw.Select(x => x.IndustryName)),
                 DistinctSorted(raw.Select(x => x.AffiliateCustomerName))
             );
+        }
+
+        // ★ ดึงชื่อ salesperson จากรายการขายล่าสุด (BillingDocumentDate มากสุด) ของแต่ละ customer — ใช้เฉพาะ Top 10
+        // ที่จะแสดงผลจริงเท่านั้น (ไม่ query ทั้งตาราง) ตาม pattern เดียวกับ SalesForecastAccuracyService.GetForecastVsActualAsync
+        // (ดึงมาก่อนแล้ว GroupBy/OrderByDescending ในหน่วยความจำ ไม่ทำเป็น SQL window function)
+        private static async Task<Dictionary<string, string>> GetLatestSalesEmployeeByCustomerAsync(
+            IQueryable<MGT_Sale> scopeQuery, List<string> customerNames, CancellationToken ct)
+        {
+            if (customerNames.Count == 0) return new();
+
+            var rows = await scopeQuery
+                .Where(x => x.CustomerFullName != null && customerNames.Contains(x.CustomerFullName) && x.BillingDocumentDate.HasValue)
+                .Select(x => new { x.CustomerFullName, x.BillingDocumentDate, x.SalesEmployeeBP })
+                .ToListAsync(ct);
+
+            return rows
+                .GroupBy(x => x.CustomerFullName!)
+                .Select(g => g.OrderByDescending(x => x.BillingDocumentDate).First())
+                .Where(x => !string.IsNullOrWhiteSpace(x.SalesEmployeeBP))
+                .ToDictionary(x => x.CustomerFullName!, x => x.SalesEmployeeBP!);
         }
 
         private static HashSet<string> BuildExistingCustomers(List<AllTimeGroupRow> allTimeGroups, DateTime periodFrom) =>
@@ -398,13 +445,23 @@ namespace Mgt.Lit.Core.Services.Dashboard
 
             return buckets.Select(b =>
             {
-                var count = perCustomer.Count(x => b.Match(x.GroupCount));
+                var matched = perCustomer.Where(x => b.Match(x.GroupCount)).ToList();
                 return new ProductGroupCountRowDto
                 {
                     GroupCountLabel = b.Label,
-                    CustomerCount = count,
-                    SharePercent = total == 0 ? 0 : Math.Round(count * 100m / total, 1),
-                    Priority = b.Priority
+                    CustomerCount = matched.Count,
+                    SharePercent = total == 0 ? 0 : Math.Round(matched.Count * 100m / total, 1),
+                    Priority = b.Priority,
+                    Customers = matched
+                        .OrderByDescending(x => x.ExistingRevenue)
+                        .Select(x => new ProductGroupCountCustomerDto
+                        {
+                            CustomerName = x.Customer,
+                            GroupCount = x.GroupCount,
+                            Revenue = x.ExistingRevenue,
+                            ProductGroups = x.Groups
+                        })
+                        .ToList()
                 };
             }).ToList();
         }
@@ -491,10 +548,10 @@ namespace Mgt.Lit.Core.Services.Dashboard
             return trend;
         }
 
-        private static IQueryable<MGT_Sale> ApplyScopeFilter(IQueryable<MGT_Sale> query, CrossSellUpsellGainsFilter filter)
+        private static IQueryable<MGT_Sale> ApplyScopeFilter(IQueryable<MGT_Sale> query, CrossSellUpsellGainsFilter filter, HashSet<string>? lockedBuNames)
         {
-            if (!string.IsNullOrWhiteSpace(filter.SalesGroup))
-                query = query.Where(x => x.SalesGroup == filter.SalesGroup);
+            if (lockedBuNames is not null)
+                query = query.Where(x => x.SalesEmployeeBP != null && lockedBuNames.Contains(x.SalesEmployeeBP));
 
             if (!string.IsNullOrWhiteSpace(filter.SalesEmployeeBP))
                 query = query.Where(x => x.SalesEmployeeBP == filter.SalesEmployeeBP);

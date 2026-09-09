@@ -12,6 +12,7 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
         public DateTime? FromMonth { get; set; }   // ใช้แค่ปี+เดือน (วันที่ถูก normalize เป็นวันที่ 1 เสมอ)
         public DateTime? ToMonth { get; set; }
         public string? SalesGroup { get; set; }
+        public string? SalesEmployeeBP { get; set; }
         public string? CustomerName { get; set; }
         public string? MaterialGroup { get; set; }
         public string? MaterialCode { get; set; }
@@ -55,5 +56,6 @@ namespace Mgt.Lit.Core.DTOs.DashBoard
         public List<string> AvailableMaterialGroups { get; set; } = new();
         public List<string> AvailableMaterials { get; set; } = new();   // แสดงเป็น "Code - Description"
         public List<string> AvailableJobDeals { get; set; } = new();
+        public List<string> AvailableSalesEmployees { get; set; } = new();
     }
 }
