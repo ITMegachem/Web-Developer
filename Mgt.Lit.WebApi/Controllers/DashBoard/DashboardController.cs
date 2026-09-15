@@ -121,7 +121,8 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
         // ---------- Sales Intelligence Matrix permissions (Department + UserRole จาก JWT) ----------
         // อ้างอิงจาก query คัดกรอง user ที่มีสิทธิ์เข้ารายงานกลุ่มนี้: Department IN (Sales, CSR, IT) + IsActive=1 +
         // SalesOrganization=1000 หรือ username พิเศษ 3 คนด้านล่าง (ได้สิทธิเต็มเสมอไม่ว่า Department จริงจะเป็นอะไร)
-        // ลำดับการตัดสิน (จากเข้มงวดสุดไปหลวมสุด — เช็ค username พิเศษและ CSR ก่อน UserRole เสมอ):
+        // ลำดับการตัดสิน (จากเข้มงวดสุดไปหลวมสุด — เช็ค block list ก่อนสุด แล้วค่อย username พิเศษและ CSR ก่อน UserRole เสมอ):
+        //   0) Username อยู่ใน BlockedFromMatrixUsernames หรือขึ้นต้นด้วย "GLC" -> ไม่มีสิทธิ์เข้ารายงานกลุ่มนี้เลย (บล็อกทับทุกข้อด้านล่าง)
         //   1) Username พิเศษ                  -> เห็นทุกรายงาน + Export ได้ทุกรายงาน
         //   2) Department = CSR                -> เห็นเฉพาะ Sales Forecast Accuracy + Forecast Monthly เท่านั้น
         //      (เช็คก่อนข้อ 3 เสมอ — เป็นข้อจำกัดตามหน้าที่งาน ไม่ใช่ตามตำแหน่ง แม้ CSR จะมี UserRole=Manager ก็ยังถูกจำกัด)
@@ -134,11 +135,30 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
         private static readonly HashSet<string> FullAccessUsernames = new(System.StringComparer.OrdinalIgnoreCase)
         { "MGT000298", "MGT000297", "MGT000018" };
 
+        // ★ Block list เฉพาะบุคคล/กลุ่ม — ห้ามเห็น Sales Intelligence Matrix ทั้งหมด ไม่ว่า Department/UserRole จะเป็นอะไร
+        // ต้องเช็คก่อน IsFullAccessUser เสมอ (แม้จะเป็น username พิเศษ/Manager/Admin/IT ก็ยังถูกบล็อก)
+        private static readonly HashSet<string> BlockedFromMatrixUsernames = new(System.StringComparer.OrdinalIgnoreCase)
+        { "MGT000185", "MGT000142" };
+
+        // ★ MGT000142 ถูกบล็อกเพิ่มจาก Dashboard (7 endpoint ด้านล่าง: salesoverview, yearlycomparison, billingdaily,
+        // customeroverview, productmovement, productoverview, saleperformance) ด้วย ไม่ใช่แค่ Sales Intelligence Matrix
+        // เก็บแยกจาก BlockedFromMatrixUsernames เพราะ MGT000185/GLC* ยังไม่ได้ถูกขอให้บล็อก Dashboard
+        private static readonly HashSet<string> BlockedFromDashboardUsernames = new(System.StringComparer.OrdinalIgnoreCase)
+        { "MGT000142" };
+
+        private bool IsBlockedFromDashboard() =>
+            BlockedFromDashboardUsernames.Contains(CurrentUsername());
+
         private static readonly HashSet<string> CsrAllowedReports = new(System.StringComparer.OrdinalIgnoreCase)
         { "SalesForecastAccuracy", "ForecastMonthly" };
 
         private bool IsSpecialFullAccessUser() =>
             FullAccessUsernames.Contains(CurrentUsername());
+
+        // Username ขึ้นต้นด้วย "GLC" (เช่น user บริษัทในเครือ/บัญชีทดสอบ) -> ห้ามเห็น Sales Intelligence Matrix เลย
+        private bool IsBlockedFromMatrix() =>
+            BlockedFromMatrixUsernames.Contains(CurrentUsername())
+            || CurrentUsername().StartsWith("GLC", System.StringComparison.OrdinalIgnoreCase);
 
         private bool IsCsrRestricted() =>
             !IsSpecialFullAccessUser() && CurrentDepartment() == "CSR";
@@ -158,6 +178,7 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
         // (เช่นว่าง หรือแผนกอื่น) จะโดนบล็อกทุกรายงานทั้งที่ควรเห็นทั้งหมด
         private bool CanAccessReport(string reportKey)
         {
+            if (IsBlockedFromMatrix()) return false;
             if (IsFullAccessUser()) return true;
             if (!IsEligibleForMatrix()) return false;
             if (IsCsrRestricted()) return CsrAllowedReports.Contains(reportKey);
@@ -214,6 +235,7 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
         [HttpGet("salesoverview")]
         public async Task<ActionResult<SalesOverviewDto>> GetSalesOverview([FromQuery] SalesOverviewFilter filter, CancellationToken ct)
         {
+            if (IsBlockedFromDashboard()) return Forbid();
             filter.Bu = ResolveEffectiveBu(filter.Bu);   // BU security (จาก JWT) — endpoint นี้ขาดบรรทัดนี้ไปแต่แรก ทำให้ Division-locked user เห็นทุก BU
             filter.SalesEmployeeBP = ResolveEffectiveSalesEmployeeFilter(filter.SalesEmployeeBP);   // Department/Role security (จาก JWT) — UserRole ทั่วไปเห็นเฉพาะข้อมูลตัวเอง
             var result = await _salesOverviewService.GetOverviewAsync(filter, ct);
@@ -224,6 +246,7 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
         [HttpGet("yearlycomparison")]
         public async Task<ActionResult<YearlyComparisonDto>> GetYearlyComparison(CancellationToken ct)
         {
+            if (IsBlockedFromDashboard()) return Forbid();
             var salesGroup = ResolveEffectiveBu(null);   // BU security (จาก JWT) — หน้านี้ไม่มี filter ให้ client เลือกเอง ต้องล็อกจาก server เท่านั้น
             var salesEmployeeBP = ResolveEffectiveSalesEmployeeFilter(null);   // Department/Role security (จาก JWT) — UserRole ทั่วไปเห็นเฉพาะข้อมูลตัวเอง
             var result = await _yearlyComparisonService.GetAsync(salesGroup, salesEmployeeBP, ct);
@@ -234,6 +257,7 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
         [HttpGet("billingdaily")]
         public async Task<ActionResult<BillingDailyDto>> GetBillingDaily([FromQuery] BillingDailyFilter filter, CancellationToken ct)
         {
+            if (IsBlockedFromDashboard()) return Forbid();
             filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
             filter.SalesEmployeeBP = ResolveEffectiveSalesEmployeeFilter(filter.SalesEmployeeBP);   // Department/Role security (จาก JWT) — UserRole ทั่วไปเห็นเฉพาะข้อมูลตัวเอง
             var result = await _billingDailyService.GetAsync(filter, ct);
@@ -245,6 +269,7 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
         [HttpGet("customeroverview")]
         public async Task<ActionResult<CustomerOverviewDto>> GetCustomerOverview([FromQuery] CustomerOverviewFilter filter, CancellationToken ct)
         {
+            if (IsBlockedFromDashboard()) return Forbid();
             filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
             filter.SalesEmployeeBP = ResolveEffectiveSalesEmployeeFilter(filter.SalesEmployeeBP);   // Department/Role security (จาก JWT) — UserRole ทั่วไปเห็นเฉพาะข้อมูลตัวเอง
             var result = await _customerOverviewService.GetAsync(filter, ct);
@@ -260,6 +285,7 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
         [HttpGet("productmovement")]
         public async Task<ActionResult<ProductMovementDto>> GetProductMovement([FromQuery] ProductMovementFilter filter, CancellationToken ct)
         {
+            if (IsBlockedFromDashboard()) return Forbid();
             filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
             filter.SalesEmployeeBP = ResolveEffectiveSalesEmployeeFilter(filter.SalesEmployeeBP);   // Department/Role security (จาก JWT) — UserRole ทั่วไปเห็นเฉพาะข้อมูลตัวเอง
             var result = await _productMovementService.GetAsync(filter, ct);
@@ -270,6 +296,7 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
         [HttpGet("productoverview")]
         public async Task<ActionResult<ProductOverviewDto>> GetProductOverview([FromQuery] ProductOverviewFilter filter, CancellationToken ct)
         {
+            if (IsBlockedFromDashboard()) return Forbid();
             filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
             filter.SalesEmployeeBP = ResolveEffectiveSalesEmployeeFilter(filter.SalesEmployeeBP);   // Department/Role security (จาก JWT) — UserRole ทั่วไปเห็นเฉพาะข้อมูลตัวเอง
             var result = await _productOverviewService.GetAsync(filter, ct);
@@ -280,6 +307,7 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
         [HttpGet("saleperformance")]
         public async Task<ActionResult<SalePerformanceDto>> GetSalePerformance([FromQuery] SalePerformanceFilter filter, CancellationToken ct)
         {
+            if (IsBlockedFromDashboard()) return Forbid();
             filter.SalesGroup = ResolveEffectiveBu(filter.SalesGroup);   // BU security (จาก JWT)
             filter.SalesEmployeeBP = ResolveEffectiveSalesEmployeeFilter(filter.SalesEmployeeBP);   // Department/Role security (จาก JWT) — UserRole ทั่วไปเห็นเฉพาะข้อมูลตัวเอง
             var result = await _salePerformanceService.GetAsync(filter, ct);

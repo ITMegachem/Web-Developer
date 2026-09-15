@@ -329,9 +329,14 @@
     private bool IsPurchaseDept =>
         string.Equals(Department, "purchase", StringComparison.OrdinalIgnoreCase);
 
+    // ★ Block list เฉพาะบุคคล — ห้ามเห็น Dashboard (DB1-4) ทั้งหมด ไม่ว่า Company/Division/Role จะเป็นอะไร
+    // mirror ของ ReportAccessHelper.IsBlockedFromDashboard ฝั่งเดียวกัน (ใช้ helper ตรงๆ ไม่ต้อง mirror ซ้ำ)
+    private bool IsBlockedFromDashboard => ReportAccessHelper.IsBlockedFromDashboard(AuthState.User);
+
     // ★ Admin/Manager เห็นได้เสมอ (ไม่ผูก Division เดิม) เพิ่มเงื่อนไข: Department=Sales + UserRole=User ที่ Division=BU1
     // ให้เห็น "BU1 Dashboard" ของตัวเองได้เช่นกัน (ข้อมูลถูกล็อกเหลือแค่ของตัวเองที่ backend อยู่แล้ว)
     private bool CanViewDB1 =>
+        !IsBlockedFromDashboard &&
         PrimaryCompanyID == 1 &&
         ((IsAdmin || IsManager) && !IsPurchaseDept
             || (IsRegularUserRole && IsSalesDept && string.Equals(Division, "BU1", StringComparison.OrdinalIgnoreCase)));
@@ -339,6 +344,7 @@
     // ก็ให้เห็น Dashboard ของ Division ตัวเองได้เช่นกัน (ข้อมูลจะถูกล็อกเหลือแค่ของตัวเองที่ backend อยู่แล้วผ่าน
     // ResolveEffectiveSalesEmployeeFilter — ดู DashboardController.cs)
     private bool CanViewOwnDivisionDashboard(string division) =>
+        !IsBlockedFromDashboard &&
         PrimaryCompanyID == 1 &&
         (IsLeader || (IsRegularUserRole && IsSalesDept)) &&
         string.Equals(Division, division, StringComparison.OrdinalIgnoreCase);
