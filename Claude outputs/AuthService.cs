@@ -1,4 +1,4 @@
-﻿using Mgt.Lit.Core.DTOs;
+using Mgt.Lit.Core.DTOs;
 using Mgt.Lit.WebFront.Auth;
 using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
 using System.Net;
@@ -10,48 +10,55 @@ public class AuthService
 {
     private readonly HttpClient _http;
     private readonly AuthState _authState;
-    private readonly ProtectedSessionStorage _legacySessionStorage;   // เฉพาะล้าง login แบบเก่าที่ค้างใน session storage
-    private readonly ProtectedLocalStorage _storage;                  // ★ login เก็บที่นี่ที่เดียว (ทุกแท็บใช้ร่วมกัน)
+    private readonly ProtectedSessionStorage _storage;
+    private readonly ProtectedLocalStorage _localStorage;
     private readonly SessionBroadcast _broadcast;
 
-    public AuthService(HttpClient http, AuthState authState, ProtectedSessionStorage sessionStorage,
+    public AuthService(HttpClient http, AuthState authState, ProtectedSessionStorage storage,
                        ProtectedLocalStorage localStorage, SessionBroadcast broadcast)
     {
         _http = http;
         _authState = authState;
-        _legacySessionStorage = sessionStorage;
-        _storage = localStorage;
+        _storage = storage;
+        _localStorage = localStorage;
         _broadcast = broadcast;
     }
 
-    private static async Task ClearStorageAsync(ProtectedBrowserStorage storage)
+    private static readonly string[] AuthStorageKeys =
     {
-        foreach (var key in AuthState.StorageKeys)
+        "authToken", "refreshToken", "UserID", "fullName", "username", "userRole",
+        "division", "primaryCompanyID", "primaryCompanyCode", "currentCompanyID", "companies", "permission"
+    };
+
+    // ★ ล้าง key เดิมของ storage อีกฝั่ง กัน remembered session เก่าค้างอยู่ตอนสลับไป/กลับจาก "Remember me"
+    private async Task ClearStorageAsync(ProtectedBrowserStorage storage)
+    {
+        foreach (var key in AuthStorageKeys)
         {
             try { await storage.DeleteAsync(key); } catch { /* best-effort */ }
         }
     }
 
-    // ล้าง login ทั้งใน local storage และของเก่าที่อาจค้างใน session storage (ก่อนเปลี่ยนมาเก็บที่เดียว)
-    private async Task ClearAllStoredLoginAsync()
-    {
-        await ClearStorageAsync(_storage);
-        await ClearStorageAsync(_legacySessionStorage);
-    }
-
+    // อ่านค่าจาก session storage ก่อน แล้วค่อย fallback ไป local storage (remembered login)
     private async Task<string?> ReadStoredStringAsync(string key)
     {
         try
         {
-            var r = await _storage.GetAsync<string>(key);
-            if (r.Success && !string.IsNullOrWhiteSpace(r.Value)) return r.Value;
+            var s = await _storage.GetAsync<string>(key);
+            if (s.Success && !string.IsNullOrWhiteSpace(s.Value)) return s.Value;
+        }
+        catch { }
+        try
+        {
+            var l = await _localStorage.GetAsync<string>(key);
+            if (l.Success && !string.IsNullOrWhiteSpace(l.Value)) return l.Value;
         }
         catch { }
         return null;
     }
 
-    // ✅ ดึง refreshToken จาก Set-Cookie header แล้วเก็บใน storage (ใช้ทั้ง password login และ SSO)
-    private async Task SaveRefreshTokenAsync(HttpResponseMessage response)
+    // ✅ ดึง refreshToken จาก Set-Cookie header แล้วเก็บใน storage ที่ระบุ (ใช้ทั้ง password login และ SSO)
+    private async Task SaveRefreshTokenAsync(HttpResponseMessage response, ProtectedBrowserStorage storage)
     {
         if (!response.Headers.TryGetValues("Set-Cookie", out var cookies))
             return;
@@ -59,41 +66,13 @@ public class AuthService
         if (rtCookie == null)
             return;
         var rt = rtCookie.Split('=')[1].Split(';')[0];
-        await _storage.SetAsync("refreshToken", rt);
+        await storage.SetAsync("refreshToken", rt);
         Console.WriteLine("[AuthService] refreshToken saved to storage");
     }
 
-    // เก็บข้อมูล login ทั้งชุด + session cookie แล้ว rebuild AuthState
-    private async Task StoreLoginAsync(LoginResponseDto result, HttpResponseMessage response, bool rememberMe)
-    {
-        _authState.Token = result.Token;
-        _authState.IsRemembered = rememberMe;
-
-        await ClearAllStoredLoginAsync();   // กัน login เก่า (ของ user อื่น/แบบเก่า) ค้างปน
-
-        await SaveRefreshTokenAsync(response);
-        await _storage.SetAsync("authToken", result.Token!);
-        await _storage.SetAsync("rememberMe", rememberMe);
-        await _storage.SetAsync("UserID", result.UserID);
-        await _storage.SetAsync("fullName", result.FullName ?? string.Empty);
-        await _storage.SetAsync("username", result.Username ?? string.Empty);
-        await _storage.SetAsync("userRole", result.UserRole ?? string.Empty);
-        await _storage.SetAsync("division", result.Division ?? string.Empty);
-        await _storage.SetAsync("primaryCompanyID", result.PrimaryCompanyID);
-        await _storage.SetAsync("primaryCompanyCode", result.PrimaryCompanyCode ?? string.Empty);
-        await _storage.SetAsync("companies", result.Companies);
-        await _storage.SetAsync("permission", result.Permission);
-
-        // ★ session cookie: บอกว่า browser รอบนี้ login แล้ว — แท็บใหม่เห็นร่วมกัน, หายเองตอนปิด browser
-        await _authState.MarkBrowserSessionAsync();
-
-        await _authState.InitializeAsync(force: true);
-        _broadcast.Publish(result.UserID.ToString()); // other tabs/devices of this user: check now
-    }
-
     // ✅ LoginAsync อันเดียว — รวมการเก็บ refreshToken ไว้แล้ว
-    // rememberMe = true  -> login อยู่ข้ามการปิด browser
-    // rememberMe = false -> login ใช้ได้ทุกแท็บจนกว่าจะปิด browser
+    // rememberMe = true -> เก็บ session ใน ProtectedLocalStorage (คงอยู่ข้ามการปิด browser)
+    // rememberMe = false (ค่าเริ่มต้น) -> เก็บใน ProtectedSessionStorage เหมือนเดิม (หายเมื่อปิด browser)
     public async Task<LoginResponseDto?> LoginAsync(LoginRequestDto req, bool rememberMe = false)
     {
         var response = await _http.PostAsJsonAsync("api/member/login", req);
@@ -108,7 +87,28 @@ public class AuthService
         if (result is null || string.IsNullOrWhiteSpace(result.Token))
             return null;
 
-        await StoreLoginAsync(result, response, rememberMe);
+        _authState.Token = result.Token;
+        _authState.IsRemembered = rememberMe;
+
+        ProtectedBrowserStorage activeStorage = rememberMe ? _localStorage : _storage;
+        ProtectedBrowserStorage inactiveStorage = rememberMe ? _storage : _localStorage;
+        await ClearStorageAsync(inactiveStorage);
+
+        await SaveRefreshTokenAsync(response, activeStorage);
+
+        await activeStorage.SetAsync("authToken", result.Token);
+        await activeStorage.SetAsync("UserID", result.UserID);
+        await activeStorage.SetAsync("fullName", result.FullName ?? string.Empty);
+        await activeStorage.SetAsync("username", result.Username ?? string.Empty);
+        await activeStorage.SetAsync("userRole", result.UserRole ?? string.Empty);
+        await activeStorage.SetAsync("division", result.Division ?? string.Empty);
+        await activeStorage.SetAsync("primaryCompanyID", result.PrimaryCompanyID);
+        await activeStorage.SetAsync("primaryCompanyCode", result.PrimaryCompanyCode ?? string.Empty);
+        await activeStorage.SetAsync("companies", result.Companies);
+        await activeStorage.SetAsync("permission", result.Permission);
+
+        await _authState.InitializeAsync(force: true);
+        _broadcast.Publish(result.UserID.ToString()); // other tabs/devices of this user: check now
         return result;
     }
 
@@ -133,8 +133,11 @@ public class AuthService
             return null;
 
         _authState.Token = result.Token;
-        await _storage.SetAsync("authToken", result.Token);
-        await _storage.SetAsync("currentCompanyID", result.CurrentCompanyId);
+        // ★ เขียนกลับไปที่ storage เดียวกับตอน login (remembered -> local, ไม่งั้น -> session) กัน remembered
+        //   session ถูก "ลดระดับ" เป็น session-only ทุกครั้งที่ token refresh
+        ProtectedBrowserStorage activeStorage = _authState.IsRemembered ? _localStorage : _storage;
+        await activeStorage.SetAsync("authToken", result.Token);
+        await activeStorage.SetAsync("currentCompanyID", result.CurrentCompanyId);
 
         await _authState.InitializeAsync(force: true);
 
@@ -160,12 +163,13 @@ public class AuthService
             return null;
 
         _authState.Token = result.Token;
-        await _storage.SetAsync("authToken", result.Token);
-        await _storage.SetAsync("currentCompanyID", result.CurrentCompanyId);
+        ProtectedBrowserStorage activeStorage = _authState.IsRemembered ? _localStorage : _storage;
+        await activeStorage.SetAsync("authToken", result.Token);
+        await activeStorage.SetAsync("currentCompanyID", result.CurrentCompanyId);
 
         if (result.Permission != null)
         {
-            await _storage.SetAsync("permission", new Mgt.Lit.Core.Entities.View_UserPermission
+            await activeStorage.SetAsync("permission", new Mgt.Lit.Core.Entities.View_UserPermission
             {
                 UserRole = result.Permission.UserRole,
                 Department = result.Permission.Department,
@@ -188,15 +192,17 @@ public class AuthService
 
     public async Task LogoutAsync()
     {
-        // Read what the server needs BEFORE clearing anything.
+        // Read what the server needs BEFORE clearing anything (refreshToken อาจอยู่ session หรือ local).
         var rt = await ReadStoredStringAsync("refreshToken");
         var accessToken = _authState.Token;
         var userId = _authState.User?.FindFirst("UserID")?.Value;
 
-        // 1) Clear this browser FIRST (local storage is shared by every tab) — a leftover refreshToken
-        //    would silently sign the person straight back in on the next page.
+        // 1) Clear this browser FIRST. ล้างทั้งสอง storage เสมอ ไม่ว่า session นี้จะ "Remember me" ไว้หรือไม่
+        //    — กันกรณี logout แล้วยังมี remembered session เก่าเหลือใน local storage ทำให้ auto-login กลับมาอีกรอบ
+        //    (ClearStorageAsync ลบทีละ key แบบ best-effort: ถ้า key หนึ่งพลาด ตัวอื่นก็ยังถูกลบ)
         _authState.Reset();
-        await ClearAllStoredLoginAsync();
+        await ClearStorageAsync(_storage);
+        await ClearStorageAsync(_localStorage);
         Console.WriteLine("[Logout] local session cleared");
 
         // 2) Revoke the refresh token on the API — best effort with a short timeout, so a slow API/DB never
@@ -254,8 +260,26 @@ public class AuthService
         if (result is null || string.IsNullOrWhiteSpace(result.Token))
             return null;
 
-        // SSO ไม่มีช่อง Remember me → ใช้ได้ทุกแท็บจนกว่าจะปิด browser
-        await StoreLoginAsync(result, response, rememberMe: false);
+        // SSO ใช้ session storage (ไม่มี Remember me) — ล้าง remembered session เก่าใน local storage
+        // ไม่ให้ค้างมาปนกับ session ใหม่
+        _authState.Token = result.Token;
+        _authState.IsRemembered = false;
+        await ClearStorageAsync(_localStorage);
+
+        await SaveRefreshTokenAsync(response, _storage); // SSO users need it too, or they can never refresh
+        await _storage.SetAsync("authToken", result.Token);
+        await _storage.SetAsync("UserID", result.UserID);
+        await _storage.SetAsync("fullName", result.FullName ?? string.Empty);
+        await _storage.SetAsync("username", result.Username ?? string.Empty);
+        await _storage.SetAsync("userRole", result.UserRole ?? string.Empty);
+        await _storage.SetAsync("division", result.Division ?? string.Empty);
+        await _storage.SetAsync("primaryCompanyID", result.PrimaryCompanyID);
+        await _storage.SetAsync("primaryCompanyCode", result.PrimaryCompanyCode ?? string.Empty);
+        await _storage.SetAsync("companies", result.Companies);
+        await _storage.SetAsync("permission", result.Permission);
+
+        await _authState.InitializeAsync(force: true);
+        _broadcast.Publish(result.UserID.ToString()); // other tabs/devices of this user: check now
         return result;
     }
 }
