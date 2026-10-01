@@ -782,101 +782,375 @@ namespace Mgt.Lit.WebApi.Controllers.SalesOrder
                 return BadRequest(new { message = ex.Message });
             }
         }
+        // Api MB51 Material Document List
+        [Authorize]
+        [HttpPost("MaterialDocumentList")]
+        public async Task<IActionResult> GetMaterialDocumentList(
+            [FromBody] MaterialDocumentRequestDto request)
+        {
+            var permission = await GetCurrentPermissionAsync();
+            if (permission == null) return Unauthorized();
+            if (!permission.Page2Access) return Forbid();
+
+            var material = request.Material?.Trim();
+            var hasDoc = !string.IsNullOrWhiteSpace(request.MaterialDocument);
+
+            // ✅ กันยิงเปล่า — SAP จะ timeout ถ้าไม่มี filter
+            if (!hasDoc && string.IsNullOrWhiteSpace(material) &&
+                !request.PostingDateFrom.HasValue)
+                return BadRequest(new { message = "กรุณาระบุ Material หรือช่วง Posting Date อย่างน้อย 1 อย่าง" });
+
+            // ── Plant ตาม scope (ใช้ helper เดิม) ────────────────────────────────
+            var plantsToQuery = GetPlantsForStockMovement(permission, request.Plant?.Trim()).ToList();
+            if (!plantsToQuery.Any()) return Forbid();
+
+            try
+            {
+                static DateTime? ParseSapDate(string? raw)
+                {
+                    if (string.IsNullOrWhiteSpace(raw)) return null;
+                    var m = System.Text.RegularExpressions.Regex.Match(raw, @"-?\d+");
+                    return m.Success && long.TryParse(m.Value, out var ms)
+                        ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime
+                        : null;
+                }
+
+                static decimal? ParseDec(JsonElement el, string key)
+                {
+                    if (!el.TryGetProperty(key, out var p)) return null;
+                    var raw = p.ValueKind == JsonValueKind.String ? p.GetString() : p.GetRawText();
+                    return decimal.TryParse(raw,
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out var v) ? v : null;
+                }
+
+                static string? Str(JsonElement el, string key) =>
+                    el.TryGetProperty(key, out var p) && p.ValueKind == JsonValueKind.String
+                        ? p.GetString() : null;
+
+                // ── 1. ยิง SAP ทีละ Plant แล้ว merge ─────────────────────────────
+                var rows = new List<SapService.SapMaterialDocumentRow>();
+
+                foreach (var p in plantsToQuery)
+                {
+                    var r = await _sapService.GetMaterialDocumentRowsAsync(
+                        material: material,
+                        plant: p,
+                        storageLocation: request.StorageLocation?.Trim(),
+                        batch: request.Batch?.Trim(),
+                        postingDateFrom: request.PostingDateFrom,
+                        postingDateTo: request.PostingDateTo,
+                        movementType: request.MovementType?.Trim(),
+                        materialDocument: request.MaterialDocument?.Trim(),
+                        materialDocumentYear: request.MaterialDocumentYear?.Trim(),
+                        top: 2000);
+
+                    rows.AddRange(r);
+                }
+
+                rows = rows
+                    .Where(x => !string.Equals(x.Plant, "1900", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (!rows.Any())
+                    return Ok(new
+                    {
+                        totalCount = 0,
+                        page = request.Page,
+                        pageSize = request.PageSize,
+                        items = new List<MaterialDocumentItemDto>()
+                    });
+
+                // ── 2. Material Description (ใช้ pattern fallback เดิม) ──────────
+                var materialCodes = rows.Select(x => x.Material)
+     .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim())
+     .Distinct().ToList();
+                var materialDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                if (materialCodes.Any())
+                {
+                    var fromDesc = await _context.Ms_ProductDescription
+                        .AsNoTracking()
+                        .Where(x => x.Product != null &&
+                                    materialCodes.Contains(x.Product) &&
+                                    x.Language == "EN")
+                        .Select(x => new { x.Product, x.ProductDescription })
+                        .ToListAsync();
+
+                    foreach (var f in fromDesc)
+                        if (!string.IsNullOrEmpty(f.Product))
+                            materialDict[f.Product] = f.ProductDescription ?? "";
+
+                    var missing = materialCodes.Where(m => !materialDict.ContainsKey(m)).ToList();
+                    if (missing.Any())
+                    {
+                        var fromSales = await _context.View_MGT_GLC_ALL_Sales
+                            .AsNoTracking()
+                            .Where(x => x.Material != null && missing.Contains(x.Material))
+                            .Select(x => new { x.Material, x.MaterialName })
+                            .Distinct()
+                            .ToListAsync();
+
+                        foreach (var f in fromSales)
+                            if (!string.IsNullOrEmpty(f.Material) && !materialDict.ContainsKey(f.Material))
+                                materialDict[f.Material] = f.MaterialName ?? "";
+                    }
+                }
+
+                // ── 3. Map → DTO ─────────────────────────────────────────────────
+                var items = rows.Select(x =>
+                {
+                    var sign = string.Equals(x.DebitCreditCode, "H", StringComparison.OrdinalIgnoreCase) ? -1m : 1m;
+                    materialDict.TryGetValue(x.Material ?? "", out var matDesc);
+
+                    return new MaterialDocumentItemDto
+                    {
+                        MaterialDocument = x.MaterialDocument,
+                        MaterialDocumentYear = x.MaterialDocumentYear,
+                        MaterialDocumentItem = x.MaterialDocumentItem,
+                        PostingDate = x.PostingDate,
+                        DocumentDate = x.DocumentDate,
+                        CreatedByUser = x.CreatedByUser,
+
+                        Material = x.Material,
+                        MaterialDescription = matDesc,
+                        Plant = x.Plant,
+                        StorageLocation = x.StorageLocation,
+                        Batch = x.Batch,
+
+                        MovementType = x.GoodsMovementType,
+                        MovementTypeDescription = _sapService.GetMovementTypeDescription(x.GoodsMovementType),
+                        DebitCreditCode = x.DebitCreditCode,
+
+                        // SAP ส่ง quantity เป็นบวกเสมอ → ใส่เครื่องหมายตาม D/C (S=รับ, H=จ่าย)
+                        Quantity = x.QuantityInEntryUnit * sign,
+                        EntryUnit = x.EntryUnit,
+                        QuantityInBaseUnit = x.QuantityInBaseUnit * sign,
+                        BaseUnit = x.MaterialBaseUnit,
+
+                        Amount = permission.CanViewCost ? x.ExternalAmount : null,
+                        Currency = permission.CanViewCost ? x.CompanyCodeCurrency : null,
+
+                        RefDocType = x.GoodsMovementRefDocType,
+                        PurchaseOrder = x.PurchaseOrder,
+                        DeliveryDocument = x.Delivery,
+                        SalesOrder = x.SalesOrder,
+                        Customer = permission.CanViewCustomer ? x.Customer : null,
+                        Supplier = permission.CanViewVendor ? x.Supplier : null,
+                        Reservation = x.Reservation,
+
+                        ItemText = x.ItemText,
+                        ShelfLifeExpirationDate = x.ShelfLifeExpirationDate,
+                        IsCancelled = x.IsCancelled,
+                        ReversedMaterialDocument = x.ReversedMaterialDocument
+                    };
+                })
+ .OrderByDescending(x => x.PostingDate)
+ .ThenBy(x => x.MaterialDocument)
+ .ThenBy(x => x.MaterialDocumentItem)
+ .ToList();
+
+                var totalCount = items.Count;
+                var paged = items
+                    .Skip((request.Page - 1) * request.PageSize)
+                    .Take(request.PageSize)
+                    .ToList();
+
+                return Ok(new
+                {
+                    totalCount,
+                    page = request.Page,
+                    pageSize = request.PageSize,
+                    items = paged
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+        // movement type ที่นับเป็น consumption: ขาย + เบิกใช้ (ไม่รวมโอนย้าย/ตรวจนับ)
+        private static readonly HashSet<string> ConsumptionMovementTypes =
+     new(StringComparer.OrdinalIgnoreCase)
+     { "601", "602", "261", "262", "201", "202" };
+
         [Authorize]
         [HttpPost("MaterialConsumption")]
         public async Task<IActionResult> GetMaterialConsumption([FromBody] MaterialConsumptionRequest request)
         {
             var permission = await GetCurrentPermissionAsync();
-            if (permission == null)
-                return Unauthorized();
+            if (permission == null) return Unauthorized();
+            if (!permission.Page3Access) return Forbid();
 
-            if (!permission.Page3Access)
-                return Forbid();
+            var material = request.Material?.Trim();
+            if (string.IsNullOrWhiteSpace(material))
+                return BadRequest(new { message = "Material is required" });
 
-            if (string.IsNullOrWhiteSpace(request.Material))
-                return BadRequest("Material is required");
+            var plants = GetPlantsForStockMovement(permission, null).ToList();
+            if (!plants.Any()) return Forbid();
 
-            var query = _context.View_MGT_GLC_ALL_Sales
-                .AsNoTracking()
-                .Where(x => x.Material == request.Material);
+            var yearFrom = request.YearFrom ?? 2020;
+            var yearTo = request.YearTo ?? DateTime.Now.Year;
+            if (yearFrom > yearTo) (yearFrom, yearTo) = (yearTo, yearFrom);
 
-            query = ApplySalesPermission(query, permission);
+            // ✅ จุดตัดระหว่าง 2 แหล่งข้อมูล
+            // ✅ จุดตัดระหว่าง 2 แหล่งข้อมูล
+            var goLive = _sapService.MaterialDocumentGoLiveDate;
 
-            var data = await query
-                .GroupBy(x => new
-                {
-                    x.Material,
-                    x.MaterialName,
-                    x.x_Year
-                })
-                .Select(g => new
-                {
-                    Material = g.Key.Material,
-                    MaterialName = g.Key.MaterialName,
-                    Year = g.Key.x_Year,
-
-                    January = g.Sum(x => x.x_Month == 1 ? x.Quantity : 0),
-                    February = g.Sum(x => x.x_Month == 2 ? x.Quantity : 0),
-                    March = g.Sum(x => x.x_Month == 3 ? x.Quantity : 0),
-                    April = g.Sum(x => x.x_Month == 4 ? x.Quantity : 0),
-                    May = g.Sum(x => x.x_Month == 5 ? x.Quantity : 0),
-                    June = g.Sum(x => x.x_Month == 6 ? x.Quantity : 0),
-                    July = g.Sum(x => x.x_Month == 7 ? x.Quantity : 0),
-                    August = g.Sum(x => x.x_Month == 8 ? x.Quantity : 0),
-                    September = g.Sum(x => x.x_Month == 9 ? x.Quantity : 0),
-                    October = g.Sum(x => x.x_Month == 10 ? x.Quantity : 0),
-                    November = g.Sum(x => x.x_Month == 11 ? x.Quantity : 0),
-                    December = g.Sum(x => x.x_Month == 12 ? x.Quantity : 0),
-                    Total = g.Sum(x => x.Quantity)
-                })
-                .OrderBy(x => x.Year)
-                .ToListAsync();
-
-            // ✅ ดึง NetWeight ของ Material นี้
-            var netWeight = await _context.View_MaterialStock_WeightKG
-                .AsNoTracking()
-                .Where(x => x.Material == request.Material)
-                .Select(x => x.NetWeight)
-                .FirstOrDefaultAsync();
-
-            // ✅ Map เพิ่ม KG
-            var result = data.Select(x => new
+            try
             {
-                x.Material,
-                x.MaterialName,
-                x.Year,
+                // ── A. MB51 (ตั้งแต่ go-live) ─────────────────────────────────────
+                var rows = new List<SapService.SapMaterialDocumentRow>();
+                foreach (var p in plants)
+                    rows.AddRange(await _sapService.GetMaterialDocumentRowsAsync(
+                        material: material, plant: p, top: 5000));
 
-                x.January,
-                JanuaryKG = netWeight.HasValue ? x.January * netWeight : null,
-                x.February,
-                FebruaryKG = netWeight.HasValue ? x.February * netWeight : null,
-                x.March,
-                MarchKG = netWeight.HasValue ? x.March * netWeight : null,
-                x.April,
-                AprilKG = netWeight.HasValue ? x.April * netWeight : null,
-                x.May,
-                MayKG = netWeight.HasValue ? x.May * netWeight : null,
-                x.June,
-                JuneKG = netWeight.HasValue ? x.June * netWeight : null,
-                x.July,
-                JulyKG = netWeight.HasValue ? x.July * netWeight : null,
-                x.August,
-                AugustKG = netWeight.HasValue ? x.August * netWeight : null,
-                x.September,
-                SeptemberKG = netWeight.HasValue ? x.September * netWeight : null,
-                x.October,
-                OctoberKG = netWeight.HasValue ? x.October * netWeight : null,
-                x.November,
-                NovemberKG = netWeight.HasValue ? x.November * netWeight : null,
-                x.December,
-                DecemberKG = netWeight.HasValue ? x.December * netWeight : null,
-                x.Total,
-                TotalKG = netWeight.HasValue ? x.Total * netWeight : null,
+                rows = rows
+                    .Where(x => !string.Equals(x.Plant, "1900", StringComparison.OrdinalIgnoreCase))
+                    .Where(x => x.PostingDate.HasValue)
+                    .Where(x => x.PostingDate!.Value >= goLive)
+                    .Where(x => x.PostingDate!.Value.Year >= yearFrom &&
+                                x.PostingDate!.Value.Year <= yearTo)
+                    .Where(x => !string.IsNullOrWhiteSpace(x.GoodsMovementType) &&
+                                ConsumptionMovementTypes.Contains(x.GoodsMovementType!))
+                    .ToList();
 
-                NetWeight = netWeight  // ✅ ส่ง NetWeight กลับไปด้วยให้ frontend รู้
-            });
+                static decimal Consumed(SapService.SapMaterialDocumentRow r)
+                {
+                    var q = Math.Abs(r.QuantityInBaseUnit ?? 0);
+                    return string.Equals(r.DebitCreditCode, "H", StringComparison.OrdinalIgnoreCase)
+                        ? q : -q;
+                }
 
-            return Ok(result);
+                var sapByMonth = rows
+                    .GroupBy(x => (x.PostingDate!.Value.Year, x.PostingDate!.Value.Month))
+                    .ToDictionary(g => g.Key, g => g.Sum(Consumed));
+
+                // ── B. DWH billing (ก่อน go-live) ────────────────────────────────
+                var legacyRaw = await _context.View_MGT_GLC_ALL_Sales
+                    .AsNoTracking()
+                    .Where(x => x.Material == material &&
+                                x.x_Year >= yearFrom && x.x_Year <= yearTo)
+                    .GroupBy(x => new { x.x_Year, x.x_Month })
+                    .Select(g => new
+                    {
+                        Year = g.Key.x_Year,
+                        Month = g.Key.x_Month,
+                        Qty = g.Sum(x => x.Quantity) ?? 0
+                    })
+                    .ToListAsync();
+
+                var legacyByMonth = legacyRaw
+                    .Where(x => x.Year.HasValue && x.Month.HasValue)
+                    .Where(x => new DateTime(x.Year!.Value, x.Month!.Value, 1) < goLive)
+                    .ToDictionary(x => (x.Year!.Value, x.Month!.Value), x => x.Qty);
+
+                // ── C. Material name + NetWeight ─────────────────────────────────
+                var materialName = await _context.Ms_ProductDescription
+                    .AsNoTracking()
+                    .Where(x => x.Product == material && x.Language == "EN")
+                    .Select(x => x.ProductDescription)
+                    .FirstOrDefaultAsync();
+
+                if (string.IsNullOrWhiteSpace(materialName))
+                    materialName = await _context.View_MGT_GLC_ALL_Sales
+                        .AsNoTracking()
+                        .Where(x => x.Material == material)
+                        .Select(x => x.MaterialName)
+                        .FirstOrDefaultAsync();
+
+                decimal? netWeight = await _context.View_MaterialStock_WeightKG
+                    .AsNoTracking()
+                    .Where(x => x.Material == material)
+                    .Select(x => x.NetWeight)
+                    .FirstOrDefaultAsync();
+
+                if (netWeight == null || netWeight <= 0)
+                {
+                    var raw = await _context.Ms_Product
+                        .AsNoTracking()
+                        .Where(x => x.Product == material)
+                        .Select(x => x.NetWeight)
+                        .FirstOrDefaultAsync();
+
+                    netWeight = decimal.TryParse(raw,
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out var nw) && nw > 0 ? nw : null;
+                }
+
+                var baseUnit = rows.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.MaterialBaseUnit))
+                                   ?.MaterialBaseUnit;
+                var baseIsKg = string.Equals(baseUnit, "KG", StringComparison.OrdinalIgnoreCase);
+
+                decimal? ToKg(decimal v) =>
+                    baseIsKg ? v
+                  : netWeight.HasValue ? v * netWeight.Value
+                  : (decimal?)null;
+
+                // ── D. รวม 2 แหล่ง แล้วไล่ทุกปีในช่วง ─────────────────────────────
+                decimal Qty(int year, int month)
+                {
+                    var key = (year, month);
+                    if (new DateTime(year, month, 1) >= goLive)
+                        return sapByMonth.TryGetValue(key, out var s) ? s : 0m;
+                    return legacyByMonth.TryGetValue(key, out var l) ? l : 0m;
+                }
+
+                var result = Enumerable.Range(yearFrom, yearTo - yearFrom + 1)
+                    .Select(year =>
+                    {
+                        var m = Enumerable.Range(1, 12).Select(i => Qty(year, i)).ToArray();
+                        var total = m.Sum();
+
+                        return new
+                        {
+                            Material = material,
+                            MaterialName = materialName ?? "",
+                            Year = year,
+
+                            January = m[0],
+                            JanuaryKG = ToKg(m[0]),
+                            February = m[1],
+                            FebruaryKG = ToKg(m[1]),
+                            March = m[2],
+                            MarchKG = ToKg(m[2]),
+                            April = m[3],
+                            AprilKG = ToKg(m[3]),
+                            May = m[4],
+                            MayKG = ToKg(m[4]),
+                            June = m[5],
+                            JuneKG = ToKg(m[5]),
+                            July = m[6],
+                            JulyKG = ToKg(m[6]),
+                            August = m[7],
+                            AugustKG = ToKg(m[7]),
+                            September = m[8],
+                            SeptemberKG = ToKg(m[8]),
+                            October = m[9],
+                            OctoberKG = ToKg(m[9]),
+                            November = m[10],
+                            NovemberKG = ToKg(m[10]),
+                            December = m[11],
+                            DecemberKG = ToKg(m[11]),
+
+                            Total = total,
+                            TotalKG = ToKg(total),
+
+                            NetWeight = netWeight,
+                            BaseUnit = baseUnit,
+                            SourceCutover = goLive.ToString("yyyy-MM-dd")   // ✅ ให้ Excel เอาไปโชว์ได้
+                        };
+                    })
+                    .ToList();
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
         }
         [HttpGet("MaterialLookup")]
         public async Task<IActionResult> GetMaterialLookup([FromQuery] string keyword)
