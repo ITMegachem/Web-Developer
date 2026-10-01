@@ -9,7 +9,7 @@ namespace Mgt.Lit.WebFront.Auth;
 public class AuthTokenHandler : DelegatingHandler
 {
     private readonly AuthState _auth;
-    private readonly ProtectedSessionStorage _storage;
+    private readonly ProtectedLocalStorage _storage;
     private readonly IHttpClientFactory _factory;
 
     // ✅ ลบ _httpContextAccessor ออกแล้ว ไม่ต้องใช้อีก
@@ -18,7 +18,7 @@ public class AuthTokenHandler : DelegatingHandler
 
     public AuthTokenHandler(
         AuthState auth,
-        ProtectedSessionStorage storage,
+        ProtectedLocalStorage storage,
         IHttpClientFactory factory)
     // ✅ ลบ IHttpContextAccessor httpContextAccessor ออก
     {
@@ -69,7 +69,7 @@ public class AuthTokenHandler : DelegatingHandler
         }
     }
 
-    // ✅ เหลืออันเดียว — อ่านจาก ProtectedSessionStorage
+    // ✅ เหลืออันเดียว — อ่านจาก ProtectedLocalStorage
     private async Task<bool> DoRefreshAsync(CancellationToken cancellationToken)
     {
         try

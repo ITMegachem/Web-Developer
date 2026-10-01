@@ -1,0 +1,503 @@
+﻿@page "/admin/users"
+@using Mgt.Lit.Core.DTOs.Admin
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@using Mgt.Lit.WebFront.Services.Member
+@layout AppLayout
+@rendermode InteractiveServer
+@inject ApiHttpClient Api
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject NavigationManager Nav
+
+<div class="so-page-wrapper um-page">
+    @* --- Header --- *@
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-2">
+        <h2 class="page-title m-0">User Management</h2>
+        <div class="d-flex align-items-center gap-2">
+            <div class="date-badge">@DateTime.Now.ToString("dd MMM yyyy")</div>
+            <button class="btn btn-search-pill px-4" @onclick="OpenCreate">
+                <i class="bi bi-person-plus-fill me-1"></i> Add User
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_pageMessage))
+    {
+        <div class="um-toast um-toast-@_pageMessageType mb-3">
+            <i class="bi @(_pageMessageType == "success" ? "bi-check-circle-fill" : "bi-exclamation-triangle-fill") me-2"></i>
+            <span class="flex-grow-1">@_pageMessage</span>
+            <button class="um-toast-close" @onclick="() => _pageMessage = null"><i class="bi bi-x-lg"></i></button>
+        </div>
+    }
+
+    @* --- Filters --- *@
+    <div class="filter-card-modern shadow-sm mb-4">
+        <div class="row g-3 align-items-end">
+            <div class="col-12 col-md-6 col-lg-5">
+                <label class="modern-label">Search</label>
+                <input class="form-control modern-input" placeholder="Username, name or email"
+                       @bind="_search" @bind:event="oninput" @bind:after="ResetPage" />
+            </div>
+            <div class="col-6 col-md-3 col-lg-2">
+                <label class="modern-label">Role</label>
+                <select class="form-select modern-input" @bind="_roleFilter" @bind:after="ResetPage">
+                    <option value="">All roles</option>
+                    @foreach (var r in _lookups?.Roles ?? new())
+                    {
+                        <option value="@r">@r</option>
+                    }
+                </select>
+            </div>
+            <div class="col-6 col-md-3 col-lg-2">
+                <label class="modern-label">Status</label>
+                <select class="form-select modern-input" @bind="_statusFilter" @bind:after="ResetPage">
+                    <option value="">All</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                </select>
+            </div>
+            <div class="col-12 col-lg-3 d-flex gap-3 justify-content-lg-end um-stats">
+                <div><span class="um-stat-num">@(_users?.Count ?? 0)</span><span class="um-stat-lbl">Users</span></div>
+                <div><span class="um-stat-num">@(_users?.Count(u => u.IsActive) ?? 0)</span><span class="um-stat-lbl">Active</span></div>
+            </div>
+        </div>
+    </div>
+
+    @* --- Table --- *@
+    <div class="table-card-container shadow-sm">
+        <div class="table-responsive">
+            <table class="table modern-table fixed-table mb-0">
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Division</th>
+                        <th>Company</th>
+                        <th>Status</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_users == null)
+                    {
+                        <tr><td colspan="7" class="text-center py-5"><span class="spinner-border spinner-border-sm text-success me-2"></span>Loading…</td></tr>
+                    }
+                    else if (!Filtered.Any())
+                    {
+                        <tr><td colspan="7" class="text-center py-5 text-muted">No users found</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var u in Paged)
+                        {
+                            <tr class="@(u.IsActive ? "" : "um-row-inactive")">
+                                <td>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div class="um-avatar">@Initials(u)</div>
+                                        <div>
+                                            <div class="numeric-green">@u.Username</div>
+                                            <div class="text-muted small">@(string.IsNullOrWhiteSpace(u.FullName) ? "-" : u.FullName)</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="text-nowrap">@(string.IsNullOrWhiteSpace(u.Email) ? "-" : u.Email)</td>
+                                <td><span class="badge-pill-material um-role-@(u.UserRole?.ToLowerInvariant())">@u.UserRole</span></td>
+                                <td>@(string.IsNullOrWhiteSpace(u.Division) ? "-" : u.Division)</td>
+                                <td class="text-nowrap">
+                                    @foreach (var c in u.CompanyCodes)
+                                    {
+                                        <span class="um-chip @(c == u.PrimaryCompanyCode ? "um-chip-primary" : "")" title="@(c == u.PrimaryCompanyCode ? "Primary company" : "")">@c</span>
+                                    }
+                                </td>
+                                <td class="text-nowrap">
+                                    <span class="um-status @(u.IsActive ? "on" : "off")">@(u.IsActive ? "Active" : "Inactive")</span>
+                                </td>
+                                <td class="text-end text-nowrap">
+                                    <button class="um-icon-btn" title="Reset password" @onclick="() => OpenReset(u)">
+                                        <i class="bi bi-key-fill"></i>
+                                    </button>
+                                    <button class="um-icon-btn @(u.IsActive ? "danger" : "success")" title="@(u.IsActive ? "Deactivate" : "Activate")"
+                                            @onclick="() => ToggleActive(u)">
+                                        <i class="bi @(u.IsActive ? "bi-person-dash-fill" : "bi-person-check-fill")"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="table-footer-pagination">
+            <div class="text-muted small">Results: @Filtered.Count()</div>
+            <div class="d-flex align-items-center gap-3">
+                <button class="pill-nav-btn" disabled="@(_page <= 1)" @onclick="() => _page--">
+                    <i class="bi bi-chevron-left"></i>
+                </button>
+                <div class="page-indicator"><span class="fw-bold text-success">@_page</span> / @TotalPages</div>
+                <button class="pill-nav-btn" disabled="@(_page >= TotalPages)" @onclick="() => _page++">
+                    <i class="bi bi-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ── Add user modal ── *@
+@if (_showCreate)
+{
+    <div class="um-overlay">
+        <div class="um-modal">
+            <div class="um-modal-head">
+                <div class="um-modal-icon"><i class="bi bi-person-plus-fill"></i></div>
+                <div>
+                    <h5 class="m-0 fw-bold">Add User</h5>
+                    <div class="text-muted small">Create a new account</div>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_formError))
+            {
+                <div class="um-toast um-toast-danger mb-3"><i class="bi bi-exclamation-triangle-fill me-2"></i>@_formError</div>
+            }
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="modern-label">Username *</label>
+                    <input class="form-control um-input" @bind="_form.Username" autocomplete="off" />
+                </div>
+                <div class="col-md-6">
+                    <label class="modern-label">Password * <span class="um-hint">min 8</span></label>
+                    <input class="form-control um-input" type="password" @bind="_form.Password" autocomplete="new-password" />
+                </div>
+                <div class="col-md-6">
+                    <label class="modern-label">Full Name</label>
+                    <input class="form-control um-input" @bind="_form.FullName" />
+                </div>
+                <div class="col-md-6">
+                    <label class="modern-label">Email <span class="um-hint">for Microsoft sign-in</span></label>
+                    <input class="form-control um-input" type="email" @bind="_form.Email" />
+                </div>
+                <div class="col-md-6">
+                    <label class="modern-label">Role *</label>
+                    <select class="form-select um-input" @bind="_form.UserRole">
+                        @foreach (var r in _lookups?.Roles ?? new())
+                        {
+                            <option value="@r">@r</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="modern-label">Division</label>
+                    <input class="form-control um-input" list="um-divisions" @bind="_form.Division" />
+                    <datalist id="um-divisions">
+                        @foreach (var d in _lookups?.Divisions ?? new())
+                        {
+                            <option value="@d"></option>
+                        }
+                    </datalist>
+                </div>
+
+                <div class="col-12">
+                    <label class="modern-label">Companies * <span class="um-hint">choose the primary one</span></label>
+                    <div class="um-companies">
+                        @foreach (var c in _lookups?.Companies ?? new())
+                        {
+                            var picked = _form.CompanyIDs.Contains(c.CompanyID);
+                            <div class="um-company @(picked ? "picked" : "")">
+                                <label class="d-flex align-items-center gap-2 m-0 flex-grow-1">
+                                    <input type="checkbox" class="form-check-input m-0" checked="@picked"
+                                           @onchange="e => ToggleCompany(c.CompanyID, (bool)e.Value!)" />
+                                    <span><b>@c.CompanyCode</b> <span class="text-muted">— @c.CompanyName</span></span>
+                                </label>
+                                @if (picked)
+                                {
+                                    <label class="um-primary-pick m-0">
+                                        <input type="radio" name="um-primary" class="form-check-input m-0"
+                                               checked="@(_form.PrimaryCompanyID == c.CompanyID)"
+                                               @onchange="() => _form.PrimaryCompanyID = c.CompanyID" />
+                                        Primary
+                                    </label>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <div class="col-12">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch" id="um-active" @bind="_form.IsActive" />
+                        <label class="form-check-label fw-semibold" for="um-active">Active</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-end gap-2 mt-4">
+                <button class="btn um-btn-ghost" @onclick="() => _showCreate = false" disabled="@_saving">Cancel</button>
+                <button class="btn btn-search-pill px-4" @onclick="SaveCreate" disabled="@_saving">
+                    @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    Create User
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ── Reset password modal ── *@
+@if (_resetUser != null)
+{
+    <div class="um-overlay">
+        <div class="um-modal" style="max-width:440px">
+            <div class="um-modal-head">
+                <div class="um-modal-icon"><i class="bi bi-key-fill"></i></div>
+                <div>
+                    <h5 class="m-0 fw-bold">Reset Password</h5>
+                    <div class="text-muted small">@_resetUser.Username will be signed out everywhere</div>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_formError))
+            {
+                <div class="um-toast um-toast-danger mb-3"><i class="bi bi-exclamation-triangle-fill me-2"></i>@_formError</div>
+            }
+            <label class="modern-label">New Password <span class="um-hint">min 8</span></label>
+            <input class="form-control um-input" type="password" @bind="_resetPassword" autocomplete="new-password" />
+
+            <div class="d-flex justify-content-end gap-2 mt-4">
+                <button class="btn um-btn-ghost" @onclick="() => _resetUser = null" disabled="@_saving">Cancel</button>
+                <button class="btn btn-search-pill px-4" @onclick="SaveReset" disabled="@_saving">
+                    @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    Reset
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .um-page .modern-table thead th { white-space: nowrap; }
+    .um-page .modern-table tbody td { padding: 14px 16px; }
+    .um-row-inactive td { opacity: .55; }
+
+    .um-avatar { width: 38px; height: 38px; border-radius: 50%; background: #e8f5e9; color: #2e7d32;
+                 display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: .8rem; flex-shrink: 0; }
+
+    .um-chip { display: inline-block; padding: 3px 10px; border-radius: 10px; background: #f1f5f9; color: #4a5568;
+               font-weight: 700; font-size: .72rem; margin-right: 4px; }
+    .um-chip-primary { background: #4caf50; color: #fff; }
+
+    .um-role-admin { background: #e8f5e9 !important; color: #1b5e20 !important; }
+    .um-role-manager { background: #e3f2fd !important; color: #1565c0 !important; }
+    .um-role-leader { background: #fff8e1 !important; color: #8d6e00 !important; }
+
+    .um-status { display: inline-block; padding: 4px 12px; border-radius: 50px; font-weight: 700; font-size: .72rem; }
+    .um-status.on { background: #e8f5e9; color: #2e7d32; }
+    .um-status.off { background: #f1f5f9; color: #718096; }
+    .um-status.warn { background: #fff8e1; color: #8d6e00; }
+
+    .um-icon-btn { border: none; background: #fff; width: 36px; height: 36px; border-radius: 50%; color: #2e7d32;
+                   box-shadow: 0 2px 8px rgba(0,0,0,.06); transition: all .2s; margin-left: 4px; }
+    .um-icon-btn:hover { background: #e8f5e9; transform: translateY(-2px); }
+    .um-icon-btn.danger { color: #c62828; }
+    .um-icon-btn.danger:hover { background: #ffebee; }
+    .um-icon-btn.success:hover { background: #e8f5e9; }
+
+    .um-stats > div { display: flex; flex-direction: column; align-items: center; background: #fff; border-radius: 18px; padding: 6px 18px; }
+    .um-stat-num { font-weight: 800; font-size: 1.2rem; color: #1b5e20; line-height: 1.2; }
+    .um-stat-lbl { font-size: .7rem; font-weight: 700; color: #718096; text-transform: uppercase; letter-spacing: .05em; }
+
+    .um-toast { display: flex; align-items: center; padding: 12px 18px; border-radius: 18px; font-weight: 600; }
+    .um-toast-success { background: #e8f5e9; color: #1b5e20; }
+    .um-toast-danger { background: #ffebee; color: #b71c1c; }
+    .um-toast-close { border: none; background: transparent; color: inherit; opacity: .6; }
+    .um-toast-close:hover { opacity: 1; }
+
+    .um-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.45); backdrop-filter: blur(2px); z-index: 2000;
+                  display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .um-modal { font-family: 'Inter','Sarabun',sans-serif; font-size: 90%; background: #fff; border-radius: 28px; padding: 2rem;
+                width: 100%; max-width: 700px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 50px rgba(0,0,0,.2); }
+    .um-modal-head { display: flex; align-items: center; gap: 14px; margin-bottom: 1.5rem; }
+    .um-modal-icon { width: 46px; height: 46px; border-radius: 50%; background: #e8f5e9; color: #2e7d32;
+                     display: flex; align-items: center; justify-content: center; font-size: 1.3rem; }
+    .um-input { border-radius: 15px !important; border: 1px solid #e2e8f0 !important; padding: 10px 15px !important; }
+    .um-input:focus { border-color: #4caf50 !important; box-shadow: 0 0 0 .2rem rgba(76,175,80,.15) !important; }
+    .um-hint { text-transform: none; letter-spacing: 0; font-weight: 500; color: #a0aec0; margin-left: 4px; }
+    .um-btn-ghost { border-radius: 50px !important; font-weight: 700; color: #4a5568; background: #f1f5f9; padding: 0 22px; height: 46px; }
+    .um-btn-ghost:hover { background: #e2e8f0; }
+
+    .um-companies { display: flex; flex-direction: column; gap: 8px; max-height: 230px; overflow-y: auto; }
+    .um-company { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 15px; padding: 10px 14px; transition: all .15s; }
+    .um-company.picked { border-color: #4caf50; background: #f1f8f1; }
+    .um-primary-pick { display: flex; align-items: center; gap: 6px; font-size: .8rem; font-weight: 700; color: #2e7d32; }
+    .um-page .form-check-input:checked, .um-modal .form-check-input:checked { background-color: #4caf50; border-color: #4caf50; }
+</style>
+
+@code {
+    private List<AdminUserListItemDto>? _users;
+    private AdminUserLookupsDto? _lookups;
+    private string _search = "";
+    private string _roleFilter = "";
+    private string _statusFilter = "";
+    private int _page = 1;
+    private const int PageSize = 10;
+
+    private bool _showCreate;
+    private AdminCreateUserDto _form = new();
+    private AdminUserListItemDto? _resetUser;
+    private string _resetPassword = "";
+    private string? _formError;
+    private bool _saving;
+
+    private string? _pageMessage;
+    private string _pageMessageType = "success";
+
+    private IEnumerable<AdminUserListItemDto> Filtered =>
+        (_users ?? new()).Where(u =>
+            (string.IsNullOrWhiteSpace(_search)
+                || (u.Username ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase)
+                || (u.FullName ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase)
+                || (u.Email ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase))
+            && (_roleFilter == "" || string.Equals(u.UserRole, _roleFilter, StringComparison.OrdinalIgnoreCase))
+            && (_statusFilter == "" || (_statusFilter == "active") == u.IsActive));
+
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling(Filtered.Count() / (double)PageSize));
+    private IEnumerable<AdminUserListItemDto> Paged =>
+        Filtered.Skip((Math.Min(_page, TotalPages) - 1) * PageSize).Take(PageSize);
+    private void ResetPage() => _page = 1;
+
+    private static string Initials(AdminUserListItemDto u)
+    {
+        var src = string.IsNullOrWhiteSpace(u.FullName) ? (u.Username ?? "?") : u.FullName!;
+        var parts = src.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var s = parts.Length >= 2 ? $"{parts[0][0]}{parts[1][0]}" : src[..Math.Min(2, src.Length)];
+        return s.ToUpperInvariant();
+    }
+
+    private bool IsAdmin => string.Equals(
+        AuthState.User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value, "admin", StringComparison.OrdinalIgnoreCase);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await AuthState.InitializeAsync();
+        if (!IsAdmin) { Nav.NavigateTo("/unauthorized", replace: true); return; }
+
+        await LoadLookups();
+        await LoadUsers();
+        StateHasChanged();
+    }
+
+    private async Task LoadUsers()
+    {
+        try
+        {
+            var http = await Api.CreateAsync();
+            _users = await http.GetFromJsonAsync<List<AdminUserListItemDto>>("api/admin/users") ?? new();
+        }
+        catch (Exception ex) { _users = new(); ShowPage("Could not load users: " + ex.Message, "danger"); }
+    }
+
+    private async Task LoadLookups()
+    {
+        try
+        {
+            var http = await Api.CreateAsync();
+            _lookups = await http.GetFromJsonAsync<AdminUserLookupsDto>("api/admin/users/lookups");
+        }
+        catch (Exception ex) { ShowPage("Could not load companies/roles: " + ex.Message, "danger"); }
+    }
+
+    private void OpenCreate()
+    {
+        _form = new AdminCreateUserDto { UserRole = "user", IsActive = true };
+        var first = _lookups?.Companies.FirstOrDefault();
+        if (first != null) { _form.CompanyIDs.Add(first.CompanyID); _form.PrimaryCompanyID = first.CompanyID; }
+        _formError = null;
+        _showCreate = true;
+    }
+
+    private void ToggleCompany(int id, bool on)
+    {
+        if (on && !_form.CompanyIDs.Contains(id)) _form.CompanyIDs.Add(id);
+        if (!on) _form.CompanyIDs.Remove(id);
+        if (_form.PrimaryCompanyID == null || !_form.CompanyIDs.Contains(_form.PrimaryCompanyID.Value))
+            _form.PrimaryCompanyID = _form.CompanyIDs.FirstOrDefault() is int f && f != 0 ? f : null;
+    }
+
+    private async Task SaveCreate()
+    {
+        _formError = null;
+        if (string.IsNullOrWhiteSpace(_form.Username)) { _formError = "Username is required."; return; }
+        if ((_form.Password ?? "").Length < 8) { _formError = "Password must be at least 8 characters."; return; }
+        if (_form.CompanyIDs.Count == 0) { _formError = "Select at least one company."; return; }
+
+        _saving = true;
+        try
+        {
+            var http = await Api.CreateAsync();
+            using var res = await http.PostAsJsonAsync("api/admin/users", _form);
+            if (!res.IsSuccessStatusCode) { _formError = await ErrorText(res); return; }
+
+            _showCreate = false;
+            ShowPage($"User \"{_form.Username.Trim()}\" created.");
+            await LoadUsers();
+        }
+        catch (Exception ex) { _formError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private void OpenReset(AdminUserListItemDto u)
+    {
+        _resetUser = u;
+        _resetPassword = "";
+        _formError = null;
+    }
+
+    private async Task SaveReset()
+    {
+        if (_resetUser == null) return;
+        _formError = null;
+        if ((_resetPassword ?? "").Length < 8) { _formError = "Password must be at least 8 characters."; return; }
+
+        _saving = true;
+        try
+        {
+            var http = await Api.CreateAsync();
+            using var res = await http.PostAsJsonAsync($"api/admin/users/{_resetUser.UserID}/reset-password",
+                new AdminResetPasswordDto { NewPassword = _resetPassword });
+            if (!res.IsSuccessStatusCode) { _formError = await ErrorText(res); return; }
+
+            ShowPage($"Password of \"{_resetUser.Username}\" has been reset.");
+            _resetUser = null;
+            await LoadUsers();
+        }
+        catch (Exception ex) { _formError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task ToggleActive(AdminUserListItemDto u)
+    {
+        try
+        {
+            var http = await Api.CreateAsync();
+            using var res = await http.PostAsync($"api/admin/users/{u.UserID}/active?value={(!u.IsActive).ToString().ToLower()}", null);
+            if (!res.IsSuccessStatusCode) { ShowPage(await ErrorText(res), "danger"); return; }
+            ShowPage($"\"{u.Username}\" is now {(u.IsActive ? "inactive" : "active")}.");
+            await LoadUsers();
+        }
+        catch (Exception ex) { ShowPage(ex.Message, "danger"); }
+    }
+
+    private void ShowPage(string msg, string type = "success")
+    {
+        _pageMessage = msg;
+        _pageMessageType = type;
+    }
+
+    private static async Task<string> ErrorText(HttpResponseMessage res)
+    {
+        var body = (await res.Content.ReadAsStringAsync()).Trim().Trim('"');
+        if ((int)res.StatusCode == 401 || (int)res.StatusCode == 403) return "You don't have permission (admin only).";
+        return string.IsNullOrWhiteSpace(body) ? $"Error {(int)res.StatusCode}" : body;
+    }
+}

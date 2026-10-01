@@ -34,12 +34,14 @@ namespace Mgt.Lit.WebFront.Services.DashBoard
             var url = "api/dashboard/salesoverview" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
 
             // ★ แนบ JWT ต่อ request — กัน 401
-            using var req = new HttpRequestMessage(HttpMethod.Get, url);
-            var token = _auth.Token;   // ★★ ปรับให้ตรงกับ property/method ที่เก็บ JWT จริงใน AuthState
-            if (!string.IsNullOrWhiteSpace(token))
+            // Valid token (refreshed if expired) + one retry after refresh on 401 — see AuthState.SendAsync
+            using var resp = await _auth.SendAsync(_http, token =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get, url);
                 req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-            using var resp = await _http.SendAsync(req, ct);
+                return req;
+            }, ct);
+            if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized) return null; // session ended → popup via AuthState.SessionEnded
             resp.EnsureSuccessStatusCode();
             return await resp.Content.ReadFromJsonAsync<SalesOverviewDto>(cancellationToken: ct);
         }

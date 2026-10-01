@@ -160,8 +160,21 @@ else
         await AuthState.InitializeAsync();
         _isInitialized = true;
         StateHasChanged();
-        if (!string.IsNullOrEmpty(AuthState.Token))
+
+        if (string.IsNullOrEmpty(AuthState.Token)) return;
+
+        // Only go to /Main with a token that still works (refresh if expired). A dead token left in
+        // localStorage would otherwise bounce Login → /Main → Login forever (endless reload).
+        string? valid = null;
+        try { valid = await AuthState.GetValidTokenAsync(); } catch { }
+
+        if (!string.IsNullOrEmpty(valid))
             Nav.NavigateTo("/Main", forceLoad: true);
+        else
+        {
+            try { await Auth.LogoutAsync(); } catch { AuthState.Clear(); }   // drop the dead token, stay here
+            StateHasChanged();
+        }
     }
 
     private async Task HandleKeyUp(KeyboardEventArgs e)

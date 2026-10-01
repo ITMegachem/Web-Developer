@@ -34,6 +34,10 @@
                     <li><a class="dropdown-item" href="#">@T("NewProject")</a></li>
 
                     <li><a class="dropdown-item" href="/settings">@T("Settings")</a></li>
+                    @if (IsAdmin)
+                    {
+                        <li><a class="dropdown-item" href="/admin/users">@T("Users")</a></li>
+                    }
                     
 
                     <li><a class="dropdown-item" href="/profile">@T("Profile")</a></li>
@@ -382,7 +386,8 @@
     private async Task Logout()
     {
         await Auth.LogoutAsync();
-        Nav.NavigateTo("/", replace: true);
+        // forceLoad: start a fresh circuit so timers / in-flight page loads of the old session stop.
+        Nav.NavigateTo("/", forceLoad: true, replace: true);
     }
 
     public void Dispose()
@@ -412,6 +417,7 @@
             ["StockMovement"] = "Stock Movement",
             ["NewProject"] = "New Project",
             ["Settings"] = "Settings",
+            ["Users"] = "User Management",
             ["Profile"] = "Profile",
             ["SignOut"] = "Sign Out",
         },
@@ -429,6 +435,7 @@
             ["StockMovement"] = "การเคลื่อนไหวสต็อก",
             ["NewProject"] = "โปรเจกต์ใหม่",
             ["Settings"] = "ตั้งค่า",
+            ["Users"] = "จัดการผู้ใช้",
             ["Profile"] = "โปรไฟล์",
             ["SignOut"] = "ออกจากระบบ",
         }

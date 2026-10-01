@@ -27,19 +27,18 @@ namespace Mgt.Lit.WebFront.Services.DashBoard
 
         public async Task<YearlyComparisonDto?> GetAsync(CancellationToken ct = default)
         {
-            using var request = CreateAuthorizedGet("api/dashboard/yearlycomparison");
-            using var response = await _http.SendAsync(request, ct);
+            using var response = await _auth.SendAsync(_http, t => CreateAuthorizedGet("api/dashboard/yearlycomparison", t), ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) return null; // session ended → popup via AuthState.SessionEnded
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadFromJsonAsync<YearlyComparisonDto>(cancellationToken: ct);
         }
 
-        private HttpRequestMessage CreateAuthorizedGet(string url)
+        private HttpRequestMessage CreateAuthorizedGet(string url, string token)
         {
-            EnsureAuthenticated();
 
             var request = new HttpRequestMessage(HttpMethod.Get, url);
 
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _auth.Token);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
             if (!string.IsNullOrWhiteSpace(_pageContext.Menu))
                 request.Headers.TryAddWithoutValidation("X-Menu", _pageContext.Menu);
