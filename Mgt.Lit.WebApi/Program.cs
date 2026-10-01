@@ -115,7 +115,13 @@ builder.Services
             }
         };
     });
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    // [Authorize(Roles = "admin")] is CASE-SENSITIVE — a user whose UserRole is "Admin" gets 403.
+    // This policy matches the front end (PermissionHelper / SideMenu), which ignores case.
+    options.AddPolicy("AdminOnly", p => p.RequireAssertion(ctx =>
+        string.Equals(ctx.User.FindFirst(ClaimTypes.Role)?.Value, "admin", StringComparison.OrdinalIgnoreCase)));
+});
 builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
 builder.Services.AddScoped<ActivityLogFilter>();
 builder.Services.AddScoped<ISalesEmployeeNameResolver, SalesEmployeeNameResolver>();

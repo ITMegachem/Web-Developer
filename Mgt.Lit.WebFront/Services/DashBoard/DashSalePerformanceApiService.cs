@@ -33,18 +33,17 @@ namespace Mgt.Lit.WebFront.Services.DashBoard
 
             var url = "api/dashboard/saleperformance" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
 
-            using var request = CreateAuthorizedGet(url);
-            using var response = await _http.SendAsync(request, ct);
+            using var response = await _auth.SendAsync(_http, t => CreateAuthorizedGet(url, t), ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) return null; // session ended → popup via AuthState.SessionEnded
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadFromJsonAsync<SalePerformanceDto>(cancellationToken: ct);
         }
 
-        private HttpRequestMessage CreateAuthorizedGet(string url)
+        private HttpRequestMessage CreateAuthorizedGet(string url, string token)
         {
-            EnsureAuthenticated();
 
             var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _auth.Token);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
             if (!string.IsNullOrWhiteSpace(_pageContext.Menu))
                 request.Headers.TryAddWithoutValidation("X-Menu", _pageContext.Menu);

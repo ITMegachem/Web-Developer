@@ -12,7 +12,8 @@ namespace Mgt.Lit.Core.Entities
         [Key]
         public int UserID { get; set; }
         public string? Username { get; set; }
-        public string? Password { get; set; }
+        public string? Password { get; set; }          // old plaintext — to be retired
+        public string? PasswordHash { get; set; }      // PBKDF2 (ASP.NET Identity V3), shared with OCR
         public string? FullName { get; set; }
         public string? UserRole { get; set; }
         public string? Position { get; set; }

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection;
 
 using Blazorise;
 using Blazorise.Bootstrap5;
@@ -18,6 +19,7 @@ var apiBaseUrl = builder.Environment.IsDevelopment()
 
 // ✅ AuthState ต้องมาก่อน เพราะ AuthTokenHandler inject AuthState
 builder.Services.AddScoped<AuthState>();
+builder.Services.AddSingleton<SessionBroadcast>();   // instant "check session" between tabs/devices
 builder.Services.AddScoped<UiState>();
 
 // ✅ AuthTokenHandler — ลบ IHttpContextAccessor ออกแล้ว
@@ -174,6 +176,23 @@ builder.Services.AddHttpClient("ApiClient", client =>
     client.Timeout = TimeSpan.FromSeconds(60);
 })
 .AddHttpMessageHandler<AuthTokenHandler>();
+// ⚠️ Every HttpClient here runs on the SERVER and IHttpClientFactory pools its handlers across ALL
+// users. With cookies on (the default), one user's refreshToken cookie would be stored in the shared
+// jar and sent with another user's /refresh → that user gets the first user's token. Cookies OFF:
+// the refresh token travels explicitly in the body (refresh-explicit / logout).
+builder.Services.ConfigureHttpClientDefaults(b =>
+    b.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { UseCookies = false }));
+
+// ProtectedLocalStorage is encrypted with Data Protection keys. Persist them (mount a volume in
+// Docker) or every redeploy makes stored logins unreadable → everyone is signed out.
+var dpKeysPath = builder.Configuration["DataProtection:KeysPath"];
+if (!string.IsNullOrWhiteSpace(dpKeysPath))
+{
+    builder.Services.AddDataProtection()
+        .SetApplicationName("Mgt.Lit.WebFront")
+        .PersistKeysToFileSystem(new DirectoryInfo(dpKeysPath));
+}
+
 var app = builder.Build();
 
 if (!app.Environment.IsDevelopment())

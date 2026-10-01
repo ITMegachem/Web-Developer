@@ -238,9 +238,13 @@ namespace Mgt.Lit.WebApi.Controllers
             if (user == null)
                 return NotFound("User not found");
 
-            if (user.Password != dto.CurrentPassword)
+            if (!Mgt.Lit.Core.Services.PasswordService.Verify(user, dto.CurrentPassword, out _))
                 return BadRequest("Current password is incorrect");
 
+            user.PasswordHash = Mgt.Lit.Core.Services.PasswordService.Hash(user, dto.NewPassword);
+            // TRANSITION: other systems still read the plaintext column, so keep it in sync with the new
+            // password (this also stops the OLD password from passing the plaintext fallback).
+            // Remove this line when the plaintext column is retired.
             user.Password = dto.NewPassword;
             await _context.SaveChangesAsync(); // ✅ ไม่ update TokenVersion
 
@@ -403,18 +407,34 @@ namespace Mgt.Lit.WebApi.Controllers
 
             return Ok(new { token = newAccessToken, currentCompanyId });
         }
-        [Authorize]
+        // No [Authorize]: the refresh token itself proves who is signing out, so logout still works when
+        // the access token has already expired or been invalidated (that used to 401 → nothing revoked).
         [HttpPost("logout")]
-        public async Task<IActionResult> Logout()
+        public async Task<IActionResult> Logout(
+            [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] RefreshExplicitRequest? dto)
         {
-            if (Request.Cookies.TryGetValue("refreshToken", out var refreshToken))
+            // Cookie (browser caller) or body (Blazor Server WebFront — its HttpClient has no cookie).
+            var refreshToken = Request.Cookies.TryGetValue("refreshToken", out var fromCookie) ? fromCookie : null;
+            if (string.IsNullOrWhiteSpace(refreshToken)) refreshToken = dto?.RefreshToken;
+            if (!string.IsNullOrWhiteSpace(refreshToken))
             {
                 var stored = await _context.RefreshTokens
+                    .Include(r => r.User)
                     .FirstOrDefaultAsync(r => r.Token == refreshToken);
 
                 if (stored != null)
                 {
                     stored.IsRevoked = true;
+
+                    // Also end every access token still in use (other open tabs keep theirs in memory for
+                    // up to 30 min): bump TokenVersion like a new login does. Their 30 s session-check
+                    // then gets 401 → refresh fails (revoked) → "Session Ended" popup.
+                    if (stored.User != null)
+                    {
+                        stored.User.TokenVersion = Guid.NewGuid().ToString();
+                        HttpContext.RequestServices.GetRequiredService<IMemoryCache>()
+                            .Remove($"tv_{stored.User.Username}");
+                    }
                     await _context.SaveChangesAsync();
                 }
             }

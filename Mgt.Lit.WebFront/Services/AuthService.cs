@@ -85,12 +85,25 @@ public class AuthService
         await activeStorage.SetAsync("permission", result.Permission);
 
         await _authState.InitializeAsync(force: true);
+        _broadcast.Publish(result.UserID.ToString()); // other tabs/devices of this user: check now
         return result;
     }
 
     public async Task<RefreshResponseDto?> RefreshAsync()
     {
-        var response = await _http.PostAsync("api/member/refresh", null);
+        // Blazor Server: this HttpClient runs on the SERVER, so the browser's refreshToken cookie never
+        // reaches the API. Send the refresh token we stored at login in the body instead.
+        string? rt = null;
+        try
+        {
+            var stored = await _storage.GetAsync<string>("refreshToken");
+            rt = stored.Success ? stored.Value : null;
+        }
+        catch { }
+        if (string.IsNullOrWhiteSpace(rt))
+            return null;
+
+        var response = await _http.PostAsJsonAsync("api/member/refresh-explicit", new { RefreshToken = rt });
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
             return null;
@@ -160,12 +173,39 @@ public class AuthService
         return result;
     }
 
+    // ✅ ดึง refreshToken จาก Set-Cookie header แล้วเก็บใน storage (ใช้ทั้ง password login และ SSO)
+    private async Task SaveRefreshTokenAsync(HttpResponseMessage response)
+    {
+        if (!response.Headers.TryGetValues("Set-Cookie", out var cookies))
+            return;
+        var rtCookie = cookies.FirstOrDefault(c => c.StartsWith("refreshToken="));
+        if (rtCookie == null)
+            return;
+        var rt = rtCookie.Split('=')[1].Split(';')[0];
+        await _storage.SetAsync("refreshToken", rt);
+        Console.WriteLine("[AuthService] refreshToken saved to storage");
+    }
+
     public async Task LogoutAsync()
     {
-        try { await _http.PostAsync("api/member/logout", null); }
-        catch { }
+        // Read what the server needs BEFORE clearing anything.
+        string? rt = null;
+        try { var r = await _storage.GetAsync<string>("refreshToken"); rt = r.Success ? r.Value : null; } catch { }
+        var accessToken = _authState.Token;
+        var userId = _authState.User?.FindFirst("UserID")?.Value;
 
+        // 1) Clear this browser FIRST (localStorage is shared by every tab). Each key on its own, so one
+        //    failure can't leave the tokens behind — a leftover refreshToken would silently sign the
+        //    person straight back in on the next page.
         _authState.Reset();
+        foreach (var key in new[] { "authToken", "refreshToken", "UserID", "fullName", "username", "userRole",
+                                    "division", "primaryCompanyID", "primaryCompanyCode", "currentCompanyID",
+                                    "companies", "permission" })
+        {
+            try { await _storage.DeleteAsync(key); }
+            catch (Exception ex) { Console.WriteLine($"[Logout] could not delete {key}: {ex.Message}"); }
+        }
+        Console.WriteLine("[Logout] local session cleared");
 
         // ★ ล้างทั้งสอง storage เสมอ ไม่ว่า session นี้จะ "Remember me" ไว้หรือไม่ — กันกรณี logout แล้วยังมี
         //   remembered session เก่าเหลือใน local storage ทำให้ auto-login กลับมาอีกรอบ
@@ -205,6 +245,7 @@ public class AuthService
             return null;
 
         _authState.Token = result.Token;
+        await SaveRefreshTokenAsync(response); // SSO users need it too, or they can never refresh
         await _storage.SetAsync("authToken", result.Token);
         await _storage.SetAsync("UserID", result.UserID);
         await _storage.SetAsync("fullName", result.FullName ?? string.Empty);
@@ -217,6 +258,7 @@ public class AuthService
         await _storage.SetAsync("permission", result.Permission);
 
         await _authState.InitializeAsync(force: true);
+        _broadcast.Publish(result.UserID.ToString()); // other tabs/devices of this user: check now
         return result;
     }
 
