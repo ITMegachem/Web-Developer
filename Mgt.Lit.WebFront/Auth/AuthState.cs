@@ -27,7 +27,7 @@ public class AuthState
         _storage = storage;
         _factory = factory;
     }
-
+    // fix merge
     // ---------------------------------------------------------------------------------------------
     // Valid-token helpers. The access token now lives in localStorage (shared by every tab), so a tab
     // can open with a token that expired while the browser was closed. Callers ask for a VALID token:
