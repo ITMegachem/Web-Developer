@@ -41,7 +41,7 @@ public class AuthState
         var localResult = await _localStorage.GetAsync<T>(key);
         return (localResult.Success, localResult.Value);
     }
-
+    // fix merge
     // ---------------------------------------------------------------------------------------------
     // Valid-token helpers. The access token now lives in localStorage (shared by every tab), so a tab
     // can open with a token that expired while the browser was closed. Callers ask for a VALID token:
