@@ -483,23 +483,40 @@
             using var wb = new XLWorkbook();
             var ws = wb.Worksheets.Add("NOF Report");
 
-            var exportMonths = all
+            // ── Month columns ─────────────────────────────────────────────────────
+            // ใช้ช่วงวันที่ที่ผู้ใช้เลือกเป็นหลัก เพื่อให้ได้คอลัมน์ครบทุกเดือน
+            // แม้บางเดือนจะไม่มียอดขายเลย แล้วค่อย union กับเดือนที่มีข้อมูลจริง
+            var monthsFromData = all
                 .SelectMany(r => r.MonthlyQty.Keys)
+                .Distinct()
+                .ToList();
+
+            var monthsFromRange = new List<string>();
+            if (DateFrom.HasValue && DateTo.HasValue)
+            {
+                var cursor = new DateTime(DateFrom.Value.Year, DateFrom.Value.Month, 1);
+                var last = new DateTime(DateTo.Value.Year, DateTo.Value.Month, 1);
+                while (cursor <= last)
+                {
+                    monthsFromRange.Add(cursor.ToString("yyyy/MM"));
+                    cursor = cursor.AddMonths(1);
+                }
+            }
+
+            var exportMonths = monthsFromRange
+                .Union(monthsFromData)
                 .Distinct()
                 .OrderBy(k => k)
                 .ToList();
 
             // ── Header row ────────────────────────────────────────────────────────
-            // Col: A=Product Name, B=Customer Name, C..=months, last=Total(KG)
-            // ── Header row ────────────────────────────────────────────────────────
-            // Col: A=Material Code, B=Product Name, C=Customer Name, D..=months, last=Total(KG)
-            int totalCol = 3 + exportMonths.Count;
+            // Col: A=Material Description, B=Sold-to party name, C..=months
+            int totalCol = 2 + exportMonths.Count;
 
-            ws.Cell(1, 1).Value = "Material Code";
-            ws.Cell(1, 2).Value = "Product Name";
-            ws.Cell(1, 3).Value = "Customer Name";
+            ws.Cell(1, 1).Value = "Material Description";
+            ws.Cell(1, 2).Value = "Sold-to party name";
             for (int i = 0; i < exportMonths.Count; i++)
-                ws.Cell(1, 4 + i).Value = exportMonths[i];
+                ws.Cell(1, 3 + i).Value = exportMonths[i];
 
             var headerRow = ws.Row(1);
             headerRow.Style.Font.Bold = true;
@@ -507,9 +524,9 @@
             headerRow.Style.Font.FontColor = XLColor.White;
             headerRow.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 
-            // ── Group by MaterialName ─────────────────────────────────────────────
+            // ── Group by Material Description ─────────────────────────────────────
             var groups = all
-                .GroupBy(r => r.MaterialName)
+                .GroupBy(r => r.MaterialName ?? "")
                 .OrderBy(g => g.Key)
                 .ToList();
 
@@ -517,35 +534,32 @@
             foreach (var g in groups)
             {
                 int groupStartRow = row;
-                var rows = g.ToList();
+                var rows = g.OrderBy(r => r.SoldToName).ToList();
 
                 foreach (var r in rows)
                 {
-                    ws.Cell(row, 1).Value = r.Material;        // ✅ Material Code
-                    ws.Cell(row, 2).Value = r.MaterialName;    // Product Name (เดิม col 1)
-                    ws.Cell(row, 3).Value = r.SoldToName;      // Customer  (เดิม col 2)
+                    ws.Cell(row, 1).Value = r.MaterialName;   // Material Description
+                    ws.Cell(row, 2).Value = r.SoldToName;     // Sold-to party name
 
                     for (int i = 0; i < exportMonths.Count; i++)
                     {
                         var qty = r.MonthlyQty.TryGetValue(exportMonths[i], out var q) ? q : 0;
-                        if (qty != 0) ws.Cell(row, 4 + i).Value = (double)qty;   // เดิม 3+i → 4+i
+                        if (qty != 0) ws.Cell(row, 3 + i).Value = (double)qty;
                     }
 
                     row++;
                 }
-               
 
-                // ── Merge Product Name cells (col A) for this group + subtotal ────
-                if (groupStartRow < row - 1){
+                // ── Merge Material Description cells (col A) ของกลุ่มนี้ ──────────
+                if (groupStartRow < row - 1)
                     ws.Range(groupStartRow, 1, row - 1, 1).Merge();
-                }
+
                 ws.Cell(groupStartRow, 1).Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
                 ws.Cell(groupStartRow, 1).Style.Alignment.WrapText = true;
             }
 
             // ── Grand Total row ───────────────────────────────────────────────────
-            ws.Cell(row, 1).Value = "Grand Total";
-            ws.Cell(row, 2).Value = "";
+            ws.Cell(row, 1).Value = "TOTAL";
             ws.Range(row, 1, row, 2).Merge();
 
             for (int i = 0; i < exportMonths.Count; i++)
@@ -554,23 +568,22 @@
                     .Where(r => r.MonthlyQty.ContainsKey(exportMonths[i]))
                     .Sum(r => r.MonthlyQty[exportMonths[i]]);
                 if (colSum != 0)
-                    ws.Cell(row, 3 + i).Value = (double)colSum;
+                    ws.Cell(row, 3 + i).Value = (double)colSum;   // ✅ ตรงคอลัมน์เดือนแล้ว
             }
-
-            
 
             var gtRow = ws.Row(row);
             gtRow.Style.Font.Bold = true;
-            gtRow.Style.Fill.BackgroundColor = XLColor.FromArgb(68, 114, 196);
-            gtRow.Style.Font.FontColor = XLColor.White;
+            gtRow.Style.Fill.BackgroundColor = XLColor.FromArgb(255, 235, 59); // yellow
+            gtRow.Style.Font.FontColor = XLColor.Black;
 
-            // ── Number format ─────────────────────────────────────────────────────
+            // ── Number format (เฉพาะคอลัมน์เดือน) ─────────────────────────────────
             var dataRange = ws.Range(2, 3, row, totalCol);
             dataRange.Style.NumberFormat.Format = "#,##0;-#,##0;-";
+            dataRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
 
             // ── Column widths ─────────────────────────────────────────────────────
-            ws.Column(1).Width = 35; // Product Name
-            ws.Column(2).Width = 40; // Customer Name
+            ws.Column(1).Width = 42; // Material Description
+            ws.Column(2).Width = 45; // Sold-to party name
             for (int i = 3; i <= totalCol; i++)
                 ws.Column(i).Width = 12;
 
@@ -578,8 +591,9 @@
             ws.Range(1, 1, row, totalCol).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
             ws.Range(1, 1, row, totalCol).Style.Border.InsideBorder = XLBorderStyleValues.Hair;
 
-            // ── Freeze header ─────────────────────────────────────────────────────
+            // ── Freeze header + 2 คอลัมน์แรก ──────────────────────────────────────
             ws.SheetView.FreezeRows(1);
+            ws.SheetView.FreezeColumns(2);
 
             using var ms = new MemoryStream();
             wb.SaveAs(ms);
@@ -627,10 +641,35 @@
             var result = await NofReportService.GetNofReportAsync(filter);
             if (result.Items == null || !result.Items.Any()) break;
             all.AddRange(result.Items);
-            if (all.Count >= result.TotalItems) break;
             filter.Page++;
+            if (filter.Page > 500) break;   // กัน loop ไม่รู้จบ
         }
-        return all;
+
+        // ✅ รวมแถวซ้ำข้ามหน้า
+        // service group ข้อมูลทีละหน้า ถ้า material+customer เดียวกันถูกตัดคนละหน้า
+        // จะได้ 2 แถวที่มีเดือนไม่ครบ ต้อง merge MonthlyQty เข้าด้วยกันก่อนเขียน Excel
+        return all
+            .GroupBy(r => new { r.Material, r.MaterialName, r.SoldToParty, r.SoldToName })
+            .Select(g =>
+            {
+                var merged = new Dictionary<string, decimal>();
+                foreach (var r in g)
+                    foreach (var kv in r.MonthlyQty)
+                    {
+                        merged.TryGetValue(kv.Key, out var cur);
+                        merged[kv.Key] = cur + kv.Value;
+                    }
+
+                return new NofReportRowDto
+                {
+                    Material = g.Key.Material,
+                    MaterialName = g.Key.MaterialName,
+                    SoldToParty = g.Key.SoldToParty,
+                    SoldToName = g.Key.SoldToName,
+                    MonthlyQty = merged
+                };
+            })
+            .ToList();
     }
 
     // ── i18n ──────────────────────────────────────────────────────────────────
