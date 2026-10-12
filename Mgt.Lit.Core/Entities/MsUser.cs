@@ -23,6 +23,7 @@ namespace Mgt.Lit.Core.Entities
         public string? Email { get; set; }
         public string? Department { get; set; }
         public string? SalesOrganization { get; set; }
+        public string? Tier { get; set; }              // Tier1..Tier4 — used by View_UserPermission / Ms_RolePermission
     }
     [Table("Ms_Company")]
     public class MsCompany
@@ -42,6 +43,27 @@ namespace Mgt.Lit.Core.Entities
         // (optional navigation)
         public MsUser? User { get; set; }
         public MsCompany? Company { get; set; }
+    }
+
+    // Per-user permission override (read by View_UserPermission). PK = UserID → max 1 row per user.
+    // No row = use the role defaults. Types follow the real table: most flags are bit NULL,
+    // but CanViewCustomer and Page4Access are int NOT NULL (1/0).
+    [Table("Ms_UserPermissionOverride")]
+    public class MsUserPermissionOverride
+    {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.None)]
+        public int UserID { get; set; }
+        public bool? Page1Access { get; set; }
+        public bool? Page2Access { get; set; }
+        public bool? Page3Access { get; set; }
+        [Column(TypeName = "varchar(50)")]
+        public string? DataScope { get; set; }
+        public bool? CanViewVendor { get; set; }
+        public bool? CanViewCost { get; set; }
+        public int? CompanyID { get; set; }
+        public int CanViewCustomer { get; set; }
+        public int Page4Access { get; set; }
     }
 
     [Table("RefreshTokens")]

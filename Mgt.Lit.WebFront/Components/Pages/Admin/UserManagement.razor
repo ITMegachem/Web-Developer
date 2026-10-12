@@ -101,7 +101,10 @@
                                     </div>
                                 </td>
                                 <td class="text-nowrap">@(string.IsNullOrWhiteSpace(u.Email) ? "-" : u.Email)</td>
-                                <td><span class="badge-pill-material um-role-@(u.UserRole?.ToLowerInvariant())">@u.UserRole</span></td>
+                                <td>
+                                    <span class="badge-pill-material um-role-@(u.UserRole?.ToLowerInvariant())">@u.UserRole</span>
+                                    <div class="text-muted small mt-1">@(string.IsNullOrWhiteSpace(u.Tier) ? "No tier" : u.Tier)</div>
+                                </td>
                                 <td>@(string.IsNullOrWhiteSpace(u.Division) ? "-" : u.Division)</td>
                                 <td class="text-nowrap">
                                     @foreach (var c in u.CompanyCodes)
@@ -113,6 +116,9 @@
                                     <span class="um-status @(u.IsActive ? "on" : "off")">@(u.IsActive ? "Active" : "Inactive")</span>
                                 </td>
                                 <td class="text-end text-nowrap">
+                                    <button class="um-icon-btn" title="Edit user" @onclick="() => OpenEdit(u)">
+                                        <i class="bi bi-pencil-fill"></i>
+                                    </button>
                                     <button class="um-icon-btn" title="Reset password" @onclick="() => OpenReset(u)">
                                         <i class="bi bi-key-fill"></i>
                                     </button>
@@ -143,16 +149,16 @@
     </div>
 </div>
 
-@* ── Add user modal ── *@
+@* ── Add / Edit user modal (same form; _editUserId != null = edit mode) ── *@
 @if (_showCreate)
 {
     <div class="um-overlay">
         <div class="um-modal">
             <div class="um-modal-head">
-                <div class="um-modal-icon"><i class="bi bi-person-plus-fill"></i></div>
+                <div class="um-modal-icon"><i class="bi @(IsEdit ? "bi-pencil-fill" : "bi-person-plus-fill")"></i></div>
                 <div>
-                    <h5 class="m-0 fw-bold">Add User</h5>
-                    <div class="text-muted small">Create a new account</div>
+                    <h5 class="m-0 fw-bold">@(IsEdit ? "Edit User" : "Add User")</h5>
+                    <div class="text-muted small">@(IsEdit ? "Changing role, division, companies or deactivating signs the user out" : "Create a new account")</div>
                 </div>
             </div>
 
@@ -164,12 +170,15 @@
             <div class="row g-3">
                 <div class="col-md-6">
                     <label class="modern-label">Username *</label>
-                    <input class="form-control um-input" @bind="_form.Username" autocomplete="off" />
+                    <input class="form-control um-input" @bind="_form.Username" autocomplete="off" disabled="@IsEdit" />
                 </div>
-                <div class="col-md-6">
-                    <label class="modern-label">Password * <span class="um-hint">min 8</span></label>
-                    <input class="form-control um-input" type="password" @bind="_form.Password" autocomplete="new-password" />
-                </div>
+                @if (!IsEdit)
+                {
+                    <div class="col-md-6">
+                        <label class="modern-label">Password * <span class="um-hint">min 8</span></label>
+                        <input class="form-control um-input" type="password" @bind="_form.Password" autocomplete="new-password" />
+                    </div>
+                }
                 <div class="col-md-6">
                     <label class="modern-label">Full Name</label>
                     <input class="form-control um-input" @bind="_form.FullName" />
@@ -188,10 +197,41 @@
                     </select>
                 </div>
                 <div class="col-md-6">
+                    <label class="modern-label">Tier <span class="um-hint">needed for role permissions</span></label>
+                    <select class="form-select um-input" @bind="_form.Tier">
+                        <option value="">(not set)</option>
+                        @foreach (var t in _lookups?.Tiers ?? new())
+                        {
+                            <option value="@t">@t</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6">
                     <label class="modern-label">Division</label>
                     <input class="form-control um-input" list="um-divisions" @bind="_form.Division" />
                     <datalist id="um-divisions">
                         @foreach (var d in _lookups?.Divisions ?? new())
+                        {
+                            <option value="@d"></option>
+                        }
+                    </datalist>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="modern-label">Department <span class="um-hint">e.g. Sales, CS</span></label>
+                    <input class="form-control um-input" list="um-departments" @bind="_form.Department" />
+                    <datalist id="um-departments">
+                        @foreach (var d in _lookups?.Departments ?? new())
+                        {
+                            <option value="@d"></option>
+                        }
+                    </datalist>
+                </div>
+                <div class="col-md-6">
+                    <label class="modern-label">Position</label>
+                    <input class="form-control um-input" list="um-positions" @bind="_form.Position" />
+                    <datalist id="um-positions">
+                        @foreach (var d in _lookups?.Positions ?? new())
                         {
                             <option value="@d"></option>
                         }
@@ -224,6 +264,59 @@
                     </div>
                 </div>
 
+                @if (IsEdit)
+                {
+                    <div class="col-12">
+                        <label class="modern-label">Permission Override <span class="um-hint">off = use role defaults</span></label>
+                        @if (_overridesLoading)
+                        {
+                            <div class="text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>Loading…</div>
+                        }
+                        else
+                        {
+                            <div class="um-company @(_override != null ? "picked" : "") flex-column align-items-stretch">
+                                <div class="d-flex align-items-center justify-content-between">
+                                    <span class="fw-semibold">Use custom permissions for this user</span>
+                                    <div class="form-check form-switch m-0">
+                                        <input class="form-check-input" type="checkbox" role="switch" checked="@(_override != null)"
+                                               @onchange="e => ToggleOverride((bool)e.Value!)" />
+                                        <label class="form-check-label small fw-semibold">Override</label>
+                                    </div>
+                                </div>
+                                @if (_override != null)
+                                {
+                                    <div class="row g-2 mt-1">
+                                        <div class="col-md-6">
+                                            <label class="modern-label">Data Scope <span class="um-hint">company = primary company</span></label>
+                                            <select class="form-select um-input" @bind="_override.DataScope">
+                                                @foreach (var s in ScopeOptions)
+                                                {
+                                                    <option value="@s">@s</option>
+                                                }
+                                            </select>
+                                        </div>
+                                        <div class="col-12">
+                                            <label class="modern-label">Pages</label>
+                                            <div class="um-perm-grid">
+                                                <label><input type="checkbox" class="form-check-input" @bind="_override.Page1Access" /> Sales Orders</label>
+                                                <label><input type="checkbox" class="form-check-input" @bind="_override.Page2Access" /> Stock Material</label>
+                                                <label><input type="checkbox" class="form-check-input" @bind="_override.Page3Access" /> Stock Movement</label>
+                                                <label><input type="checkbox" class="form-check-input" @bind="_override.Page4Access" /> NOF Report</label>
+                                            </div>
+                                            <label class="modern-label mt-2">Can view</label>
+                                            <div class="um-perm-grid">
+                                                <label><input type="checkbox" class="form-check-input" @bind="_override.CanViewCustomer" /> Customer</label>
+                                                <label><input type="checkbox" class="form-check-input" @bind="_override.CanViewVendor" /> Vendor</label>
+                                                <label><input type="checkbox" class="form-check-input" @bind="_override.CanViewCost" /> Cost</label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+
                 <div class="col-12">
                     <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" role="switch" id="um-active" @bind="_form.IsActive" />
@@ -233,10 +326,10 @@
             </div>
 
             <div class="d-flex justify-content-end gap-2 mt-4">
-                <button class="btn um-btn-ghost" @onclick="() => _showCreate = false" disabled="@_saving">Cancel</button>
-                <button class="btn btn-search-pill px-4" @onclick="SaveCreate" disabled="@_saving">
+                <button class="btn um-btn-ghost" @onclick="() => { _showCreate = false; _editUserId = null; }" disabled="@_saving">Cancel</button>
+                <button class="btn btn-search-pill px-4" @onclick="SaveForm" disabled="@_saving">
                     @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                    Create User
+                    @(IsEdit ? "Save Changes" : "Create User")
                 </button>
             </div>
         </div>
@@ -328,6 +421,8 @@
     .um-companies { display: flex; flex-direction: column; gap: 8px; max-height: 230px; overflow-y: auto; }
     .um-company { display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; border-radius: 15px; padding: 10px 14px; transition: all .15s; }
     .um-company.picked { border-color: #4caf50; background: #f1f8f1; }
+    .um-perm-grid { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+    .um-perm-grid label { display: flex; align-items: center; gap: 6px; font-size: .8rem; font-weight: 600; margin: 0; }
     .um-primary-pick { display: flex; align-items: center; gap: 6px; font-size: .8rem; font-weight: 700; color: #2e7d32; }
     .um-page .form-check-input:checked, .um-modal .form-check-input:checked { background-color: #4caf50; border-color: #4caf50; }
 </style>
@@ -342,6 +437,12 @@
     private const int PageSize = 10;
 
     private bool _showCreate;
+    private int? _editUserId;
+    private bool IsEdit => _editUserId != null;
+    private AdminPermissionOverrideDto? _override;
+    private bool _overridesLoading;
+    private bool _overridesLoadFailed;
+    private static readonly string[] ScopeOptions = { "OWN", "DIVISION", "COMPANY", "ALL_COMPANIES" };
     private AdminCreateUserDto _form = new();
     private AdminUserListItemDto? _resetUser;
     private string _resetPassword = "";
@@ -409,11 +510,97 @@
 
     private void OpenCreate()
     {
-        _form = new AdminCreateUserDto { UserRole = "user", IsActive = true };
+        _editUserId = null;
+        _form = new AdminCreateUserDto { UserRole = "user", Tier = "Tier1", IsActive = true };
         var first = _lookups?.Companies.FirstOrDefault();
         if (first != null) { _form.CompanyIDs.Add(first.CompanyID); _form.PrimaryCompanyID = first.CompanyID; }
         _formError = null;
         _showCreate = true;
+    }
+
+    private async Task OpenEdit(AdminUserListItemDto u)
+    {
+        _override = null;
+        _overridesLoading = true;
+        _overridesLoadFailed = false;
+        _editUserId = u.UserID;
+        _form = new AdminCreateUserDto
+        {
+            Username = u.Username ?? "",
+            FullName = u.FullName,
+            Email = u.Email,
+            UserRole = u.UserRole ?? "user",
+            Division = u.Division,
+            Tier = u.Tier,
+            Department = u.Department,
+            Position = u.Position,
+            IsActive = u.IsActive,
+            CompanyIDs = u.CompanyIDs.ToList(),
+            PrimaryCompanyID = u.PrimaryCompanyID ?? u.CompanyIDs.FirstOrDefault()
+        };
+        // role not in the lookup list yet (e.g. odd casing) → keep it selectable
+        var match = _lookups?.Roles.FirstOrDefault(r => string.Equals(r, _form.UserRole, StringComparison.OrdinalIgnoreCase));
+        if (match != null) _form.UserRole = match;                 // "User" → "user" so the dropdown shows it
+        else if (_lookups != null) _lookups.Roles.Add(_form.UserRole);
+        if (_lookups != null && !string.IsNullOrWhiteSpace(_form.Tier) && !_lookups.Tiers.Contains(_form.Tier))
+            _lookups.Tiers.Add(_form.Tier);
+        _formError = null;
+        _showCreate = true;
+        StateHasChanged();
+
+        try
+        {
+            var http = await Api.CreateAsync();
+            var rows = await http.GetFromJsonAsync<List<AdminPermissionOverrideDto>>($"api/admin/users/{u.UserID}/permissions") ?? new();
+            _override = rows.FirstOrDefault();
+        }
+        catch (Exception ex) { _overridesLoadFailed = true; _formError = "Could not load permission overrides: " + ex.Message; }
+        finally { _overridesLoading = false; }
+    }
+
+    private void ToggleOverride(bool on)
+    {
+        _override = on ? new AdminPermissionOverrideDto { DataScope = "OWN" } : null;
+    }
+
+    private Task SaveForm() => IsEdit ? SaveEdit() : SaveCreate();
+
+    private async Task SaveEdit()
+    {
+        _formError = null;
+        if (string.IsNullOrWhiteSpace(_form.UserRole)) { _formError = "Role is required."; return; }
+        if (_form.CompanyIDs.Count == 0) { _formError = "Select at least one company."; return; }
+
+        _saving = true;
+        try
+        {
+            var http = await Api.CreateAsync();
+            var dto = new AdminUpdateUserDto
+            {
+                FullName = _form.FullName,
+                Email = _form.Email,
+                UserRole = _form.UserRole,
+                Division = _form.Division,
+                Tier = _form.Tier,
+                Department = _form.Department,
+                Position = _form.Position,
+                IsActive = _form.IsActive,
+                CompanyIDs = _form.CompanyIDs,
+                PrimaryCompanyID = _form.PrimaryCompanyID,
+                // overrides failed to load → send null so the API leaves Ms_UserPermissionOverride untouched
+                UpdateOverride = !_overridesLoading && !_overridesLoadFailed,
+                Override = _override
+            };
+            using var res = await http.PutAsJsonAsync($"api/admin/users/{_editUserId}", dto);
+            if (!res.IsSuccessStatusCode) { _formError = await ErrorText(res); return; }
+
+            _showCreate = false;
+            _editUserId = null;
+            ShowPage($"User \"{_form.Username}\" updated.");
+            await LoadUsers();
+        }
+        catch (Exception ex) { _formError = ex.Message; }
+        finally { _saving = false; }
     }
 
     private void ToggleCompany(int id, bool on)
