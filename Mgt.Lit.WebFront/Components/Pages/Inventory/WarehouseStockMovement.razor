@@ -1,6 +1,5 @@
 ﻿@namespace Mgt.Lit.WebFront.Pages
 @page "/warehouse-stock-movement"
-@* --- 1. แก้ Error: เพิ่ม Path ของ Layout (ปรับตามโฟลเดอร์จริงของคุณ) --- *@
 @using ClosedXML.Excel
 @using Mgt.Lit.WebFront.Components.Layout.MainLay
 @using Mgt.Lit.WebFront.Models.SalesOrder
@@ -8,6 +7,7 @@
 @using Mgt.Lit.WebFront.Services.Member
 @using Mgt.Lit.WebFront.Services.SalesOrder
 @using OfficeOpenXml
+@implements IAsyncDisposable
 @inject StockService StockService
 @layout AppLayout
 @rendermode InteractiveServer
@@ -16,7 +16,7 @@
 @inject IJSRuntime JS
 @inject DownloadLogService DownloadLogSvc
 @inject Mgt.Lit.WebFront.Auth.AuthState AuthState
- 
+
 <div class="so-page-wrapper">
 
     @* --- Header --- *@
@@ -100,149 +100,305 @@
 
     @* --- Table --- *@
     <div class="table-card-container shadow-sm">
-        <div class="d-flex justify-content-between align-items-center px-3 pt-2 pb-1">
-            <span class="text-muted small">
-                @((stockData?.Detail?.Count ?? 0)) record(s) found
-            </span>
-            @if (CanExportConsumption)
-            {
-                <button class="btn btn-sm btn-outline-success rounded-pill px-3"
-                        disabled="@string.IsNullOrWhiteSpace(selectedMaterial)"
-                        @onclick="ExportConsumption">
-                    <i class="bi bi-graph-down me-1"></i> Export Consumption
-                </button>
-            }
-        </div>
-        <table class="table modern-table mb-0">
-            <thead>
-                @{
-                    var colCount = 8 + (ShowVendorCol ? 1 : 0) + (ShowCustomerCol ? 1 : 0);
-                }
-                <tr class="table-header-modern">
-                    <th class="text-center">Date</th>
-                    <th class="text-center">MRP<br />Element Type</th>
-                    <th class="text-center">MRP<br />Element Data</th>
-                    <th class="text-center">Receipt /<br />Reqmt</th>
-                    <th class="text-center">Available<br />Qty</th>
-                    <th class="text-center">Additional<br />Info Out</th>
 
-                    @if (ShowCustomerCol)
-                    {
-                        <th class="text-center">Customer Code /<br />Customer Name</th>
-                    }
-                    <th class="text-center">Additional<br />Info IN</th>
-                    @if (ShowVendorCol)
-                    {
-                        <th class="text-center">Vendor Code /<br />Vendor Name</th>
-                    }
-                    <th class="text-center">Material<br />Group</th>
-                </tr>
-            </thead>
-            <tbody>
-                @if (!hasSearched)
+        @* ── Tab strip + toolbar ─────────────────────────────────────── *@
+        <div class="tab-toolbar px-3 pt-2 pb-2">
+            <div class="tab-strip">
+                <button class="tab-pill @(activeTab == Tab.Requirements ? "active" : "")"
+                        @onclick="() => SwitchTab(Tab.Requirements)">
+                    <i class="bi bi-list-task me-1"></i> Requirements (MD04)
+                </button>
+                <button class="tab-pill @(activeTab == Tab.Movements ? "active" : "")"
+                        @onclick="() => SwitchTab(Tab.Movements)">
+                    <i class="bi bi-arrow-left-right me-1"></i> Movements (MB51)
+                </button>
+            </div>
+
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                @if (activeTab == Tab.Movements)
                 {
-                    <tr>
-                        <td colspan="@colCount" class="text-center text-muted py-4">
-                            กรุณากรอกข้อมูลและค้นหา
-                        </td>
-                    </tr>
+                    <div class="d-flex align-items-center gap-1">
+                        <span class="text-muted small">Posting</span>
+                        <input type="date" class="form-control form-control-sm mov-date"
+                               @bind="movFrom" @bind:after="ReloadMovements" />
+                        <span class="text-muted small">–</span>
+                        <input type="date" class="form-control form-control-sm mov-date"
+                               @bind="movTo" @bind:after="ReloadMovements" />
+                    </div>
                 }
-                else if (stockData?.Detail != null && stockData.Detail.Any())
+
+                <span class="text-muted small text-nowrap">
+                    @if (activeTab == Tab.Requirements)
+                    {
+                        @($"{stockData?.Detail?.Count ?? 0} record(s) found")
+                    }
+                    else
+                    {
+                        @($"{movements.Count} record(s) found")
+                    }
+                </span>
+
+                @if (CanExportConsumption)
                 {
-                    @foreach (var item in stockData.Detail)
+                    <button class="btn btn-sm btn-outline-success rounded-pill px-3 text-nowrap"
+                            disabled="@(string.IsNullOrWhiteSpace(selectedMaterial) || isExportingConsumption)"
+                            @onclick="ExportConsumption">
+                        @if (isExportingConsumption)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                            <span>Exporting...</span>
+                        }
+                        else
+                        {
+                            <span><i class="bi bi-graph-down me-1"></i> Export Consumption</span>
+                        }
+                    </button>
+                }
+            </div>
+        </div>
+
+        @* ═══════════ TAB 1: Requirements (MD04) ═══════════ *@
+        @if (activeTab == Tab.Requirements)
+        {
+            <table class="table modern-table mb-0">
+                <thead>
+                    @{
+                        var colCount = 8 + (ShowVendorCol ? 1 : 0) + (ShowCustomerCol ? 1 : 0);
+                    }
+                    <tr class="table-header-modern">
+                        <th class="text-center">Date</th>
+                        <th class="text-center">MRP<br />Element Type</th>
+                        <th class="text-center">MRP<br />Element Data</th>
+                        <th class="text-center">Receipt /<br />Reqmt</th>
+                        <th class="text-center">Available<br />Qty</th>
+                        <th class="text-center">Additional<br />Info Out</th>
+
+                        @if (ShowCustomerCol)
+                        {
+                            <th class="text-center">Customer Code /<br />Customer Name</th>
+                        }
+                        <th class="text-center">Additional<br />Info IN</th>
+                        @if (ShowVendorCol)
+                        {
+                            <th class="text-center">Vendor Code /<br />Vendor Name</th>
+                        }
+                        <th class="text-center">Material<br />Group</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (!hasSearched)
                     {
                         <tr>
-                            <td class="text-center align-middle text-nowrap">
-                                @item.DocumentDate.ToString("dd-MM-yyyy")
-                            </td>
-                            <td class="text-center align-middle">@item.ElementType</td>
-                            <td class="text-center align-middle">
-                                <span class="highlight-text">@item.DocumentNo</span>
-                            </td>
-                            <td class="text-center align-middle">@item.ReceiptReqmtQty.ToString("#,##0.###")</td>
-                            <td class="text-center align-middle"
-                                style="@(item.AvailableQty < 0 ? "color:#dc3545; font-weight:700;" : "")">
-                                @item.AvailableQty.ToString("#,##0.###")
-                            </td>
-                            <td class="text-center align-middle">
-                                @if (!string.IsNullOrWhiteSpace(item.IndustryName))
-                                {
-                                    <div><b>@item.IndustryName</b></div>
-                                }
-                                @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoOut))
-                                {
-                                    <div>@item.AdditionalInfoOut</div>
-                                }
-                            </td>
-                           
-                            
-                           
-                            @if (ShowCustomerCol)
-                            {
-                                <td class="align-middle">
-                                    <div class="fw-bold">@item.CustomerCode</div>
-                                    <div class="text-muted small">@item.CustomerName</div>
-                                </td>
-                            }
-                            <td class="text-center align-middle">
-                                @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoIn))
-                                {
-                                    var lines = item.AdditionalInfoIn.Split('\n');
-                                    var eta = lines.FirstOrDefault(l => l.Trim().StartsWith("ETA"));
-                                    var etd = lines.FirstOrDefault(l => l.Trim().StartsWith("ETD"));
-                                    var others = lines.Where(l =>
-                                        !l.Trim().StartsWith("ETA") &&
-                                        !l.Trim().StartsWith("ETD") &&
-                                        !string.IsNullOrWhiteSpace(l));
-                                    @if (!string.IsNullOrWhiteSpace(eta))
-                                    {
-                                        <div>@eta.Trim()</div>
-                                    }
-                                    @if (!string.IsNullOrWhiteSpace(etd))
-                                    {
-                                        <div>@etd.Trim()</div>
-                                    }
-                                    @foreach (var line in others)
-                                    {
-                                        <div>@line.Trim()</div>
-                                    }
-                                }
-                            </td>
-                            @if (ShowVendorCol)
-                            {
-                                <td class="align-middle">
-                                    <div class="fw-bold">@item.VendorCode</div>
-                                    <div class="text-muted small">@item.VendorName</div>
-                                </td>
-                            }
-                            <td class="align-middle text-center">
-                                <div class="text-muted small">@item.MaterialGroupDescription</div>
+                            <td colspan="@colCount" class="text-center text-muted py-4">
+                                กรุณากรอกข้อมูลและค้นหา
                             </td>
                         </tr>
                     }
-                }
-                else if (!isLoading)
-                {
-                    <tr>
-                        <td colspan="@colCount" class="text-center text-muted py-4">
-                            ไม่พบข้อมูล
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>  @* ✅ ปิด table-card-container *@
+                    else if (stockData?.Detail != null && stockData.Detail.Any())
+                    {
+                        @foreach (var item in stockData.Detail)
+                        {
+                            <tr>
+                                <td class="text-center align-middle text-nowrap">
+                                    @item.DocumentDate.ToString("dd-MM-yyyy")
+                                </td>
+                                <td class="text-center align-middle">@item.ElementType</td>
+                                <td class="text-center align-middle">
+                                    <span class="highlight-text">@item.DocumentNo</span>
+                                </td>
+                                <td class="text-center align-middle">@item.ReceiptReqmtQty.ToString("#,##0.###")</td>
+                                <td class="text-center align-middle"
+                                    style="@(item.AvailableQty < 0 ? "color:#dc3545; font-weight:700;" : "")">
+                                    @item.AvailableQty.ToString("#,##0.###")
+                                </td>
+                                <td class="text-center align-middle">
+                                    @if (!string.IsNullOrWhiteSpace(item.IndustryName))
+                                    {
+                                        <div><b>@item.IndustryName</b></div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoOut))
+                                    {
+                                        <div>@item.AdditionalInfoOut</div>
+                                    }
+                                </td>
 
-  
-    
+                                @if (ShowCustomerCol)
+                                {
+                                    <td class="align-middle">
+                                        <div class="fw-bold">@item.CustomerCode</div>
+                                        <div class="text-muted small">@item.CustomerName</div>
+                                    </td>
+                                }
+                                <td class="text-center align-middle">
+                                    @if (!string.IsNullOrWhiteSpace(item.AdditionalInfoIn))
+                                    {
+                                        var lines = item.AdditionalInfoIn.Split('\n');
+                                        var eta = lines.FirstOrDefault(l => l.Trim().StartsWith("ETA"));
+                                        var etd = lines.FirstOrDefault(l => l.Trim().StartsWith("ETD"));
+                                        var others = lines.Where(l =>
+                                            !l.Trim().StartsWith("ETA") &&
+                                            !l.Trim().StartsWith("ETD") &&
+                                            !string.IsNullOrWhiteSpace(l));
+                                        @if (!string.IsNullOrWhiteSpace(eta))
+                                        {
+                                            <div>@eta.Trim()</div>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(etd))
+                                        {
+                                            <div>@etd.Trim()</div>
+                                        }
+                                        @foreach (var line in others)
+                                        {
+                                            <div>@line.Trim()</div>
+                                        }
+                                    }
+                                </td>
+                                @if (ShowVendorCol)
+                                {
+                                    <td class="align-middle">
+                                        <div class="fw-bold">@item.VendorCode</div>
+                                        <div class="text-muted small">@item.VendorName</div>
+                                    </td>
+                                }
+                                <td class="align-middle text-center">
+                                    <div class="text-muted small">@item.MaterialGroupDescription</div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                    else if (!isLoading)
+                    {
+                        <tr>
+                            <td colspan="@colCount" class="text-center text-muted py-4">
+                                ไม่พบข้อมูล
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        @* ═══════════ TAB 2: Movements (MB51) ═══════════ *@
+        else
+        {
+            var movCols = 8 + (ShowCustomerCol ? 1 : 0) + (ShowVendorCol ? 1 : 0);
+
+            <table class="table modern-table mb-0">
+                <thead>
+                    <tr class="table-header-modern">
+                        <th class="text-center">Posting<br />Date</th>
+                        <th class="text-center">Material<br />Document</th>
+                        <th class="text-center">MvT</th>
+                        <th class="text-start">Movement<br />Description</th>
+                        <th class="text-center">Storage<br />Loc.</th>
+                        <th class="text-center">Batch</th>
+                        <th class="text-end">Quantity</th>
+                        @if (ShowCustomerCol)
+                        {
+                            <th class="text-center">Customer</th>
+                        }
+                        @if (ShowVendorCol)
+                        {
+                            <th class="text-center">Supplier</th>
+                        }
+                        <th class="text-center">Reference</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (string.IsNullOrWhiteSpace(selectedMaterial))
+                    {
+                        <tr>
+                            <td colspan="@movCols" class="text-center text-muted py-4">
+                                กรุณาเลือก Material แล้วกด Run ก่อน
+                            </td>
+                        </tr>
+                    }
+                    else if (isLoadingMovements)
+                    {
+                        <tr>
+                            <td colspan="@movCols" class="text-center text-muted py-4">
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                                กำลังดึงข้อมูลจาก SAP...
+                            </td>
+                        </tr>
+                    }
+                    else if (movements.Any())
+                    {
+                        @foreach (var m in movements)
+                        {
+                            <tr class="@(m.IsCancelled ? "row-cancelled" : "")">
+                                <td class="text-center align-middle text-nowrap">
+                                    @(m.PostingDate?.ToString("dd-MM-yyyy") ?? "-")
+                                </td>
+                                <td class="text-center align-middle text-nowrap">
+                                    <span class="highlight-text">@m.MaterialDocument</span>
+                                    <span class="text-muted small">/@m.MaterialDocumentItem</span>
+                                </td>
+                                <td class="text-center align-middle">
+                                    <span class="mvt-badge">@m.MovementType</span>
+                                </td>
+                                <td class="align-middle">
+                                    @m.MovementTypeDescription
+                                    @if (m.IsCancelled)
+                                    {
+                                        <span class="badge bg-secondary ms-1">ยกเลิก</span>
+                                    }
+                                </td>
+                                <td class="text-center align-middle">@m.StorageLocation</td>
+                                <td class="text-center align-middle">@m.Batch</td>
+                                <td class="text-end align-middle text-nowrap"
+                                    style="@(m.Quantity < 0 ? "color:#dc3545; font-weight:700;" : "color:#2e7d32; font-weight:700;")">
+                                    @(m.Quantity?.ToString("#,##0.###") ?? "-") <span class="text-muted fw-normal">@m.EntryUnit</span>
+                                </td>
+                                @if (ShowCustomerCol)
+                                {
+                                    <td class="text-center align-middle">@m.Customer</td>
+                                }
+                                @if (ShowVendorCol)
+                                {
+                                    <td class="text-center align-middle">@m.Supplier</td>
+                                }
+                                <td class="text-center align-middle">
+                                    @if (!string.IsNullOrWhiteSpace(m.DeliveryDocument))
+                                    {
+                                        <div class="text-muted small">DO: @m.DeliveryDocument</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(m.PurchaseOrder))
+                                    {
+                                        <div class="text-muted small">PO: @m.PurchaseOrder</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(m.ItemText))
+                                    {
+                                        <div class="text-muted small">@m.ItemText</div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                    else
+                    {
+                        <tr>
+                            <td colspan="@movCols" class="text-center text-muted py-4">
+                                ไม่พบการเคลื่อนไหวในช่วงวันที่ที่เลือก
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>  @* ✅ ปิด table-card-container *@
 
 </div>  @* ✅ ปิด so-page-wrapper *@
 @code {
+    private enum Tab { Requirements, Movements }
+    private Tab activeTab = Tab.Requirements;
+
     private IJSObjectReference? _jsModule;
     private StockRequirementResponse stockData;
     private string selectedPlant;
     private string selectedMaterial;
     private bool isLoading = false;
+    private bool isExportingConsumption = false;
     private string errorMessage;
     private bool hasSearched = false;
     private string materialSearch = "";
@@ -255,10 +411,19 @@
     private string selectedMaterialName = "";
     private bool showVendor = true;
     private bool showCustomer = true;
-   
+
+    // ── MB51 tab ───────────────────────────────────────────────────────────
+    private List<MaterialDocumentItemModel> movements = new();
+    private bool isLoadingMovements = false;
+    private bool movementsLoaded = false;
+    // ✅ default ย้อนหลัง 3 เดือน ถึงสิ้นเดือนหน้า — ครอบคลุมเอกสารที่ post ล่วงหน้า
+    private DateTime movFrom = DateTime.Today.AddMonths(-3);
+    private DateTime movTo = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1)
+                                 .AddMonths(2).AddDays(-1);
 
     private bool ShowVendorCol => CanViewVendor && showVendor;
     private bool ShowCustomerCol => CanViewCustomer && showCustomer;
+
     // ✅ Consumption — Purchase ทุกระดับได้, Sales block เฉพาะ user
     private bool CanExportConsumption
     {
@@ -278,8 +443,7 @@
 
             if (dept == "sales" && role == "user")
                 return false;
-            Console.WriteLine($"UserID: {AuthState.Permission?.UserID}");
-            Console.WriteLine($"Type: {AuthState.Permission?.UserID.GetType()}");
+
             return true;
         }
     }
@@ -296,6 +460,61 @@
             return true;
         }
     }
+
+    // ── Tab switching ──────────────────────────────────────────────────────
+    private async Task SwitchTab(Tab tab)
+    {
+        activeTab = tab;
+
+        if (tab == Tab.Movements &&
+            !movementsLoaded &&
+            !string.IsNullOrWhiteSpace(selectedMaterial))
+        {
+            await LoadMovements();
+        }
+    }
+
+    private async Task ReloadMovements()
+    {
+        movementsLoaded = false;
+        await LoadMovements();
+    }
+
+    private async Task LoadMovements()
+    {
+        if (string.IsNullOrWhiteSpace(selectedMaterial)) return;
+        if (isLoadingMovements) return;
+
+        try
+        {
+            isLoadingMovements = true;
+            await InvokeAsync(StateHasChanged);
+
+            var result = await StockService.GetMaterialDocuments(
+                selectedMaterial, movFrom, movTo);
+
+            // ใหม่สุดอยู่บน
+            movements = (result ?? new())
+                .OrderByDescending(x => x.PostingDate)
+                .ThenByDescending(x => x.MaterialDocument)
+                .ThenBy(x => x.MaterialDocumentItem)
+                .ToList();
+
+            movementsLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("LoadMovements ERROR: " + ex.Message);
+            errorMessage = ex.Message;
+            movements = new();
+        }
+        finally
+        {
+            isLoadingMovements = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
     private async Task OnMaterialSearch(ChangeEventArgs e)
     {
         materialSearch = e.Value?.ToString() ?? "";
@@ -306,6 +525,10 @@
         showMaterialDropdown = false;
         stockData = null;
         hasSearched = false;
+
+        // ✅ เปลี่ยน material → ล้าง movements ทิ้ง
+        movements = new();
+        movementsLoaded = false;
 
         if (string.IsNullOrWhiteSpace(materialSearch) || materialSearch.Length < 2)
         {
@@ -342,6 +565,7 @@
         }
         catch (TaskCanceledException) { }
     }
+
     public async ValueTask DisposeAsync()
     {
         _materialCts?.Cancel();
@@ -355,6 +579,7 @@
         catch (JSDisconnectedException) { }
         catch (TaskCanceledException) { }
     }
+
     private void OnMaterialFocus()
     {
         // ✅ ไม่เปิดถ้า input ตรงกับ selectedMaterial แล้ว (แสดงว่าเลือกแล้ว)
@@ -373,6 +598,7 @@
         // ✅ ไม่ clear materialResults เพื่อให้ OnSearch ใช้ match ได้
         await InvokeAsync(StateHasChanged);
     }
+
     private void SelectMaterial(MaterialLookup item)
     {
         _lastSelectedMaterial = item;  // ✅ cache
@@ -382,6 +608,7 @@
         materialResults.Clear();
         showMaterialDropdown = false;
     }
+
     protected override Task OnInitializedAsync()
     {
         PageContext.Menu = "Sales";
@@ -390,32 +617,24 @@
         selectedMaterial = "";
 
         return Task.CompletedTask;
-
-       
     }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
             _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
-            Console.WriteLine($"Permission null? {AuthState.Permission == null}");
-            Console.WriteLine($"UserRole: '{AuthState.Permission?.UserRole}'");
-            Console.WriteLine($"Department: '{AuthState.Permission?.Department}'");
         }
     }
+
     private async Task LoadData()
     {
-        Console.WriteLine("LoadData Called");
-
         try
         {
             isLoading = true;
 
             stockData = await StockService
                 .GetStockRequirement(selectedPlant, selectedMaterial);
-
-            Console.WriteLine("stockData null? " + (stockData == null));
-            Console.WriteLine("Detail count: " + stockData?.Detail?.Count);
         }
         catch (Exception ex)
         {
@@ -427,13 +646,14 @@
             isLoading = false;
         }
     }
-    
+
     private List<PlantDto> plants = new()
-{
-    new() { PlantCode = "1100", PlantName = "Megachem (Thailand) PCL" },
-    //new() { PlantCode = "1900", PlantName = "MGT Riteoff Plant" },
-    new() { PlantCode = "2100", PlantName = "Green Leaf Chemical" }
-};
+    {
+        new() { PlantCode = "1100", PlantName = "Megachem (Thailand) PCL" },
+        //new() { PlantCode = "1900", PlantName = "MGT Riteoff Plant" },
+        new() { PlantCode = "2100", PlantName = "Green Leaf Chemical" }
+    };
+
     private async Task OnSearch()
     {
         hasSearched = true;
@@ -468,7 +688,7 @@
 
         // ✅ ถ้า selectedMaterialName ยังว่าง → fetch จาก API
         if (string.IsNullOrWhiteSpace(selectedMaterialName) &&
-     !string.IsNullOrWhiteSpace(selectedMaterial))
+            !string.IsNullOrWhiteSpace(selectedMaterial))
         {
             // ← ดึงจาก SAP ก่อน
             selectedMaterialName = await StockService
@@ -481,9 +701,18 @@
         }
         materialResults.Clear();
 
+        // ✅ material เปลี่ยน → movements ต้องโหลดใหม่
+        movements = new();
+        movementsLoaded = false;
+
         await InvokeAsync(StateHasChanged);
         await LoadData();
+
+        // ถ้าค้างอยู่แท็บ Movements ให้โหลดต่อเลย
+        if (activeTab == Tab.Movements)
+            await LoadMovements();
     }
+
     private async Task ExportData()
     {
         if (!CanExportExcel) return;
@@ -503,12 +732,12 @@
         var ws = package.Workbook.Worksheets.Add("StockMovement");
 
         string[] headers = {
-        "Date", "MRP Element Type", "MRP Element Data",
-        "Receipt/Reqmt", "Available Qty", "Additional Info In",
-        "Vendor Code", "Vendor Name", "Additional Info Out",
-        "Customer Code", "Customer Name", "Material Group",
-        "Material Group Description"
-    };
+            "Date", "MRP Element Type", "MRP Element Data",
+            "Receipt/Reqmt", "Available Qty", "Additional Info In",
+            "Vendor Code", "Vendor Name", "Additional Info Out",
+            "Customer Code", "Customer Name", "Material Group",
+            "Material Group Description"
+        };
 
         for (int i = 0; i < headers.Length; i++)
         {
@@ -540,7 +769,6 @@
 
         ws.Cells[ws.Dimension.Address].AutoFitColumns();
 
-       
         // ✅ file-level password ที่แท้จริง
         using var ms = new MemoryStream();
         if (!string.IsNullOrWhiteSpace(exportPassword))
@@ -558,141 +786,179 @@
                 base64);
         }
     }
+
     private async Task ExportConsumption()
     {
         if (!CanExportConsumption) return;
         if (string.IsNullOrWhiteSpace(selectedMaterial)) return;
+        if (isExportingConsumption) return;
 
-        var data = await StockService.GetMaterialConsumption(selectedMaterial);
-        if (data == null || !data.Any()) return;
-
-        using var wb = new XLWorkbook();
-        var ws = wb.Worksheets.Add("Consumption");
-
-        // ── ✅ Material Info Rows (เพิ่มใหม่) ───────────────────────────────────
-        ws.Cell(1, 1).Value = "Material Code:";
-        ws.Cell(1, 2).Value = selectedMaterial;
-        ws.Cell(2, 1).Value = "Material Name:";
-        ws.Cell(2, 2).Value = selectedMaterialName;
-
-        ws.Cell(1, 1).Style.Font.Bold = true;
-        ws.Cell(2, 1).Style.Font.Bold = true;
-        ws.Cell(1, 2).Style.Font.FontColor = XLColor.DarkBlue;
-        ws.Cell(2, 2).Style.Font.FontColor = XLColor.DarkBlue;
-
-        // ── Header Row เริ่มที่แถว 4 (เว้น 1 แถว) ──────────────────────────────
-        string[] headers =
-{
-    "Year",
-    "January", "January (KG)",
-    "February", "February (KG)",
-    "March", "March (KG)",
-    "April", "April (KG)",
-    "May", "May (KG)",
-    "June", "June (KG)",
-    "July", "July (KG)",
-    "August", "August (KG)",
-    "September", "September (KG)",
-    "October", "October (KG)",
-    "November", "November (KG)",
-    "December", "December (KG)",
-    "Total", "Total (KG)"
-};
-
-        int headerRow = 4; // ✅ เลื่อนลงมา
-        for (int i = 0; i < headers.Length; i++)
-            ws.Cell(headerRow, i + 1).Value = headers[i];
-
-        ws.Row(headerRow).Style.Font.Bold = true;
-        ws.Row(headerRow).Style.Fill.BackgroundColor = XLColor.LightGreen;
-
-        // ── Data Rows เริ่มที่แถว 5 ────────────────────────────────────────────
-        int row = headerRow + 1;
-        foreach (var item in data)
+        try
         {
-            ws.Cell(row, 1).Value = item.Year;
-            ws.Cell(row, 2).Value = item.January;
-            ws.Cell(row, 3).Value = item.JanuaryKG;
-            ws.Cell(row, 4).Value = item.February;
-            ws.Cell(row, 5).Value = item.FebruaryKG;
-            ws.Cell(row, 6).Value = item.March;
-            ws.Cell(row, 7).Value = item.MarchKG;
-            ws.Cell(row, 8).Value = item.April;
-            ws.Cell(row, 9).Value = item.AprilKG;
-            ws.Cell(row, 10).Value = item.May;
-            ws.Cell(row, 11).Value = item.MayKG;
-            ws.Cell(row, 12).Value = item.June;
-            ws.Cell(row, 13).Value = item.JuneKG;
-            ws.Cell(row, 14).Value = item.July;
-            ws.Cell(row, 15).Value = item.JulyKG;
-            ws.Cell(row, 16).Value = item.August;
-            ws.Cell(row, 17).Value = item.AugustKG;
-            ws.Cell(row, 18).Value = item.September;
-            ws.Cell(row, 19).Value = item.SeptemberKG;
-            ws.Cell(row, 20).Value = item.October;
-            ws.Cell(row, 21).Value = item.OctoberKG;
-            ws.Cell(row, 22).Value = item.November;
-            ws.Cell(row, 23).Value = item.NovemberKG;
-            ws.Cell(row, 24).Value = item.December;
-            ws.Cell(row, 25).Value = item.DecemberKG;
-            ws.Cell(row, 26).Value = item.Total;
-            ws.Cell(row, 27).Value = item.TotalKG;
-            row++;
+            isExportingConsumption = true;
+            await InvokeAsync(StateHasChanged);
+
+            var data = await StockService.GetMaterialConsumption(selectedMaterial);
+            if (data == null || !data.Any()) return;
+
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Consumption");
+
+            // ── Material Info Rows ────────────────────────────────────────────
+            ws.Cell(1, 1).Value = "Material Code:";
+            ws.Cell(1, 2).Value = selectedMaterial;
+            ws.Cell(2, 1).Value = "Material Name:";
+            ws.Cell(2, 2).Value = selectedMaterialName;
+
+            ws.Cell(1, 1).Style.Font.Bold = true;
+            ws.Cell(2, 1).Style.Font.Bold = true;
+            ws.Cell(1, 2).Style.Font.FontColor = XLColor.DarkBlue;
+            ws.Cell(2, 2).Style.Font.FontColor = XLColor.DarkBlue;
+
+            // ── หมายเหตุแหล่งข้อมูล (DWH billing ก่อน go-live / MB51 หลัง go-live) ──
+            var cutover = data.FirstOrDefault()?.SourceCutover;
+            if (!string.IsNullOrWhiteSpace(cutover))
+            {
+                ws.Cell(3, 1).Value = "หมายเหตุ:";
+                ws.Cell(3, 2).Value =
+                    $"ข้อมูลก่อน {cutover} มาจากยอดขาย (billing) / ตั้งแต่ {cutover} " +
+                    $"มาจาก MB51 (การเคลื่อนไหวสต็อกจริง — นับ movement 601/261/201 และหักรายการกลับรายการ)";
+                ws.Cell(3, 1).Style.Font.Bold = true;
+                ws.Cell(3, 2).Style.Font.FontColor = XLColor.Gray;
+                ws.Cell(3, 2).Style.Font.Italic = true;
+            }
+
+            // ── Header Row ────────────────────────────────────────────────────
+            string[] headers =
+            {
+                "Year",
+                "January", "January (KG)",
+                "February", "February (KG)",
+                "March", "March (KG)",
+                "April", "April (KG)",
+                "May", "May (KG)",
+                "June", "June (KG)",
+                "July", "July (KG)",
+                "August", "August (KG)",
+                "September", "September (KG)",
+                "October", "October (KG)",
+                "November", "November (KG)",
+                "December", "December (KG)",
+                "Total", "Total (KG)"
+            };
+
+            int headerRow = 5;
+            for (int i = 0; i < headers.Length; i++)
+                ws.Cell(headerRow, i + 1).Value = headers[i];
+
+            ws.Row(headerRow).Style.Font.Bold = true;
+            ws.Row(headerRow).Style.Fill.BackgroundColor = XLColor.LightGreen;
+
+            // ── Data Rows ─────────────────────────────────────────────────────
+            int row = headerRow + 1;
+            foreach (var item in data)
+            {
+                ws.Cell(row, 1).Value = item.Year;
+                ws.Cell(row, 2).Value = item.January;
+                ws.Cell(row, 3).Value = item.JanuaryKG;
+                ws.Cell(row, 4).Value = item.February;
+                ws.Cell(row, 5).Value = item.FebruaryKG;
+                ws.Cell(row, 6).Value = item.March;
+                ws.Cell(row, 7).Value = item.MarchKG;
+                ws.Cell(row, 8).Value = item.April;
+                ws.Cell(row, 9).Value = item.AprilKG;
+                ws.Cell(row, 10).Value = item.May;
+                ws.Cell(row, 11).Value = item.MayKG;
+                ws.Cell(row, 12).Value = item.June;
+                ws.Cell(row, 13).Value = item.JuneKG;
+                ws.Cell(row, 14).Value = item.July;
+                ws.Cell(row, 15).Value = item.JulyKG;
+                ws.Cell(row, 16).Value = item.August;
+                ws.Cell(row, 17).Value = item.AugustKG;
+                ws.Cell(row, 18).Value = item.September;
+                ws.Cell(row, 19).Value = item.SeptemberKG;
+                ws.Cell(row, 20).Value = item.October;
+                ws.Cell(row, 21).Value = item.OctoberKG;
+                ws.Cell(row, 22).Value = item.November;
+                ws.Cell(row, 23).Value = item.NovemberKG;
+                ws.Cell(row, 24).Value = item.December;
+                ws.Cell(row, 25).Value = item.DecemberKG;
+                ws.Cell(row, 26).Value = item.Total;
+                ws.Cell(row, 27).Value = item.TotalKG;
+                row++;
+            }
+
+            // ── Total Row ─────────────────────────────────────────────────────
+            ws.Cell(row, 1).Value = "Total";
+            ws.Cell(row, 2).Value = data.Sum(x => x.January);
+            ws.Cell(row, 3).Value = data.Sum(x => x.JanuaryKG ?? 0);
+            ws.Cell(row, 4).Value = data.Sum(x => x.February);
+            ws.Cell(row, 5).Value = data.Sum(x => x.FebruaryKG ?? 0);
+            ws.Cell(row, 6).Value = data.Sum(x => x.March);
+            ws.Cell(row, 7).Value = data.Sum(x => x.MarchKG ?? 0);
+            ws.Cell(row, 8).Value = data.Sum(x => x.April);
+            ws.Cell(row, 9).Value = data.Sum(x => x.AprilKG ?? 0);
+            ws.Cell(row, 10).Value = data.Sum(x => x.May);
+            ws.Cell(row, 11).Value = data.Sum(x => x.MayKG ?? 0);
+            ws.Cell(row, 12).Value = data.Sum(x => x.June);
+            ws.Cell(row, 13).Value = data.Sum(x => x.JuneKG ?? 0);
+            ws.Cell(row, 14).Value = data.Sum(x => x.July);
+            ws.Cell(row, 15).Value = data.Sum(x => x.JulyKG ?? 0);
+            ws.Cell(row, 16).Value = data.Sum(x => x.August);
+            ws.Cell(row, 17).Value = data.Sum(x => x.AugustKG ?? 0);
+            ws.Cell(row, 18).Value = data.Sum(x => x.September);
+            ws.Cell(row, 19).Value = data.Sum(x => x.SeptemberKG ?? 0);
+            ws.Cell(row, 20).Value = data.Sum(x => x.October);
+            ws.Cell(row, 21).Value = data.Sum(x => x.OctoberKG ?? 0);
+            ws.Cell(row, 22).Value = data.Sum(x => x.November);
+            ws.Cell(row, 23).Value = data.Sum(x => x.NovemberKG ?? 0);
+            ws.Cell(row, 24).Value = data.Sum(x => x.December);
+            ws.Cell(row, 25).Value = data.Sum(x => x.DecemberKG ?? 0);
+            ws.Cell(row, 26).Value = data.Sum(x => x.Total);
+            ws.Cell(row, 27).Value = data.Sum(x => x.TotalKG ?? 0);
+
+            var totalRow = ws.Row(row);
+            totalRow.Style.Font.Bold = true;
+            totalRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+            totalRow.Style.Border.TopBorder = XLBorderStyleValues.Medium;
+
+            ws.Columns().AdjustToContents();
+            ws.Column(2).Width = Math.Min(ws.Column(2).Width, 60);
+
+            // ── Download ──────────────────────────────────────────────────────
+            var safeName = string.IsNullOrWhiteSpace(selectedMaterialName)
+                ? selectedMaterial
+                : $"{selectedMaterial}_{selectedMaterialName.Replace(" ", "_").Replace("/", "-")}";
+
+            var fileName = $"Consumption_{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+
+            await DownloadLogSvc.LogDownloadAsync(AuthState.Permission?.Username, fileName);
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+
+            if (_jsModule != null)
+            {
+                await _jsModule.InvokeVoidAsync(
+                    "downloadFileFromBytes",
+                    fileName,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    base64);
+            }
         }
-
-        // ── Total Row ─────────────────────────────────────────────────────────
-        ws.Cell(row, 1).Value = "Total";
-        ws.Cell(row, 2).Value = data.Sum(x => x.January);
-        ws.Cell(row, 3).Value = data.Sum(x => x.JanuaryKG ?? 0);
-        ws.Cell(row, 4).Value = data.Sum(x => x.February);
-        ws.Cell(row, 5).Value = data.Sum(x => x.FebruaryKG ?? 0);
-        ws.Cell(row, 6).Value = data.Sum(x => x.March);
-        ws.Cell(row, 7).Value = data.Sum(x => x.MarchKG ?? 0);
-        ws.Cell(row, 8).Value = data.Sum(x => x.April);
-        ws.Cell(row, 9).Value = data.Sum(x => x.AprilKG ?? 0);
-        ws.Cell(row, 10).Value = data.Sum(x => x.May);
-        ws.Cell(row, 11).Value = data.Sum(x => x.MayKG ?? 0);
-        ws.Cell(row, 12).Value = data.Sum(x => x.June);
-        ws.Cell(row, 13).Value = data.Sum(x => x.JuneKG ?? 0);
-        ws.Cell(row, 14).Value = data.Sum(x => x.July);
-        ws.Cell(row, 15).Value = data.Sum(x => x.JulyKG ?? 0);
-        ws.Cell(row, 16).Value = data.Sum(x => x.August);
-        ws.Cell(row, 17).Value = data.Sum(x => x.AugustKG ?? 0);
-        ws.Cell(row, 18).Value = data.Sum(x => x.September);
-        ws.Cell(row, 19).Value = data.Sum(x => x.SeptemberKG ?? 0);
-        ws.Cell(row, 20).Value = data.Sum(x => x.October);
-        ws.Cell(row, 21).Value = data.Sum(x => x.OctoberKG ?? 0);
-        ws.Cell(row, 22).Value = data.Sum(x => x.November);
-        ws.Cell(row, 23).Value = data.Sum(x => x.NovemberKG ?? 0);
-        ws.Cell(row, 24).Value = data.Sum(x => x.December);
-        ws.Cell(row, 25).Value = data.Sum(x => x.DecemberKG ?? 0);
-        ws.Cell(row, 26).Value = data.Sum(x => x.Total);
-        ws.Cell(row, 27).Value = data.Sum(x => x.TotalKG ?? 0);
-
-        var totalRow = ws.Row(row);
-        totalRow.Style.Font.Bold = true;
-        totalRow.Style.Fill.BackgroundColor = XLColor.LightGray;
-        totalRow.Style.Border.TopBorder = XLBorderStyleValues.Medium;
-
-        ws.Columns().AdjustToContents();
-
-       
-        // ── Download ───────────────────────────────────────────────────────────
-        using var ms = new MemoryStream();
-        wb.SaveAs(ms);
-        var base64 = Convert.ToBase64String(ms.ToArray());
-
-        // ✅ ชื่อไฟล์มี Material Name ด้วย
-        var safeName = string.IsNullOrWhiteSpace(selectedMaterialName)
-            ? selectedMaterial
-            : $"{selectedMaterial}_{selectedMaterialName.Replace(" ", "_").Replace("/", "-")}";
-
-        await _jsModule.InvokeVoidAsync(
-            "downloadFileFromBytes",
-            $"Consumption_{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            base64);
+        catch (Exception ex)
+        {
+            Console.WriteLine("ExportConsumption ERROR: " + ex.Message);
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isExportingConsumption = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
+
     private bool IsManagerOrAbove
     {
         get
@@ -708,7 +974,7 @@
     .so-page-wrapper {
         display: flex;
         flex-direction: column;
-        height: calc((100vh - 48px) / 0.9); /* ✅ หัก padding top+bottom ของ page-inner แล้วหาร zoom */
+        height: calc((100vh - 48px) / 0.9);
         overflow: hidden;
         gap: 8px;
     }
@@ -728,7 +994,72 @@
         overflow-x: auto;
         min-height: 0;
         border-radius: 12px;
-        margin-bottom: 0; /* ✅ ไม่ให้มี margin ล่าง */
+        margin-bottom: 0;
+    }
+
+    /* ── Tab strip ───────────────────────────────────────────────── */
+    .tab-toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+        background: #fff;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        border-bottom: 1px solid #eef2ee;
+    }
+
+    .tab-strip {
+        display: inline-flex;
+        background: #f0f4f0;
+        border-radius: 999px;
+        padding: 3px;
+        gap: 2px;
+    }
+
+    .tab-pill {
+        border: none;
+        background: transparent;
+        color: #6b7a6b;
+        font-size: 0.85rem;
+        font-weight: 600;
+        padding: 5px 16px;
+        border-radius: 999px;
+        white-space: nowrap;
+        transition: all 0.15s;
+    }
+
+        .tab-pill:hover {
+            color: #2e7d32;
+        }
+
+        .tab-pill.active {
+            background: #fff;
+            color: #2e7d32;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+        }
+
+    .mov-date {
+        width: 140px;
+        height: 30px;
+        font-size: 0.82rem;
+    }
+
+    .mvt-badge {
+        display: inline-block;
+        background: #eef4ee;
+        color: #2e7d32;
+        border-radius: 6px;
+        padding: 1px 8px;
+        font-weight: 700;
+        font-size: 0.85rem;
+    }
+
+    .row-cancelled td {
+        opacity: 0.55;
+        text-decoration: line-through;
     }
 
     /* ── Sticky thead ────────────────────────────────────────────── */
@@ -738,10 +1069,9 @@
         width: 100%;
     }
 
-        /* ── Sticky thead ────────────────────────────────────────────── */
         .modern-table thead th {
             position: sticky;
-            top: 0;
+            top: 46px; /* ✅ ใต้ tab-toolbar */
             z-index: 20;
             background-color: #f0f4f0 !important;
             border-bottom: 2px solid #c8e6c9;
@@ -774,7 +1104,7 @@
     /* ── Filter card ─────────────────────────────────────────────── */
     .filter-card-modern {
         padding: 12px 16px !important;
-        margin-bottom: 0 !important; /* ✅ ลบ mb ออก ใช้ gap แทน */
+        margin-bottom: 0 !important;
     }
 
     .modern-label {

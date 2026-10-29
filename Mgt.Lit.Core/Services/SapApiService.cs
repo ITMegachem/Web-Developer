@@ -704,7 +704,309 @@ GetSalesOrderItemsAsync(List<string> salesOrders)
 
         return result;
     }
+    // ───── MB51: Material Document (API_MATERIAL_DOCUMENT_SRV, OData V2) ─────
+    // ⚠️ PostingDate/DocumentDate/CreatedByUser อยู่บน header เท่านั้น จึงต้อง expand เสมอ
+    public async Task<List<SapMaterialDocumentRow>> GetMaterialDocumentRowsAsync(
+        string? material = null,
+        string? plant = null,
+        string? storageLocation = null,
+        string? batch = null,
+        DateTime? postingDateFrom = null,
+        DateTime? postingDateTo = null,
+        string? movementType = null,
+        string? materialDocument = null,
+        string? materialDocumentYear = null,
+        int top = 2000)
+    {
+        var baseUrl = _configuration["SapConfig:MaterialDocument:BaseUrl"];
+        var authHeader = _configuration["SapConfig:MaterialDocument:AuthHeader"];
 
+        if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(authHeader))
+            throw new Exception("Missing config: SapConfig:MaterialDocument (BaseUrl/AuthHeader)");
+
+        var client = _httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        var rows = new List<SapMaterialDocumentRow>();
+
+        // field ที่มีจริงบน item (ยืนยันจาก $metadata แล้ว)
+        const string itemSelect =
+            "MaterialDocument,MaterialDocumentYear,MaterialDocumentItem," +
+            "Material,Plant,StorageLocation,Batch,GoodsMovementType,GoodsMovementRefDocType," +
+            "GoodsMovementReasonCode,InventoryStockType,DebitCreditCode," +
+            "QuantityInEntryUnit,EntryUnit,QuantityInBaseUnit,MaterialBaseUnit," +
+            "GdsMvtExtAmtInCoCodeCrcy,CompanyCodeCurrency," +
+            "PurchaseOrder,PurchaseOrderItem,Delivery,DeliveryItem," +
+            "SalesOrder,SalesOrderItem,Customer,Supplier,Reservation," +
+            "MaterialDocumentItemText,ShelfLifeExpirationDate,ManufactureDate," +
+            "GoodsMovementIsCancelled,ReversedMaterialDocument,ReversedMaterialDocumentYear," +
+            "IssuingOrReceivingPlant,IssuingOrReceivingStorageLoc,FiscalYear,FiscalYearPeriod";
+
+        var useItemEntry = !string.IsNullOrWhiteSpace(material)
+                        || !string.IsNullOrWhiteSpace(materialDocument);
+
+        string url;
+
+        if (useItemEntry)
+        {
+            // ── ทาง A: เข้าทาง item (มี Material หรือเลขเอกสาร) ──────────────
+            var f = new List<string>();
+            if (!string.IsNullOrWhiteSpace(materialDocument))
+                f.Add($"MaterialDocument eq '{materialDocument.Trim()}'");
+            if (!string.IsNullOrWhiteSpace(materialDocumentYear))
+                f.Add($"MaterialDocumentYear eq '{materialDocumentYear.Trim()}'");
+            if (!string.IsNullOrWhiteSpace(material))
+                f.Add($"Material eq '{material.Trim()}'");
+            if (!string.IsNullOrWhiteSpace(plant))
+                f.Add($"Plant eq '{plant.Trim()}'");
+            if (!string.IsNullOrWhiteSpace(storageLocation))
+                f.Add($"StorageLocation eq '{storageLocation.Trim()}'");
+            if (!string.IsNullOrWhiteSpace(batch))
+                f.Add($"Batch eq '{batch.Trim()}'");
+            if (!string.IsNullOrWhiteSpace(movementType))
+                f.Add($"GoodsMovementType eq '{movementType.Trim()}'");
+
+            url = $"{baseUrl.TrimEnd('/')}/A_MaterialDocumentItem" +
+                  $"?$top={top}&$format=json" +
+                  $"&$expand=to_MaterialDocumentHeader" +
+                  $"&$select={itemSelect}," +
+                  $"to_MaterialDocumentHeader/PostingDate," +
+                  $"to_MaterialDocumentHeader/DocumentDate," +
+                  $"to_MaterialDocumentHeader/CreatedByUser," +
+                  $"to_MaterialDocumentHeader/ReferenceDocument" +
+                  $"&$filter={string.Join(" and ", f)}";
+        }
+        else
+        {
+            // ── ทาง B: เข้าทาง header (มีแต่ช่วงวันที่) ───────────────────────
+            var f = new List<string>();
+            if (postingDateFrom.HasValue)
+                f.Add($"PostingDate ge datetime'{postingDateFrom.Value:yyyy-MM-dd}T00:00:00'");
+            if (postingDateTo.HasValue)
+                f.Add($"PostingDate le datetime'{postingDateTo.Value:yyyy-MM-dd}T00:00:00'");
+
+            if (!f.Any()) return rows;
+
+            url = $"{baseUrl.TrimEnd('/')}/A_MaterialDocumentHeader" +
+                  $"?$top={top}&$format=json" +
+                  $"&$expand=to_MaterialDocumentItem" +
+                  $"&$filter={string.Join(" and ", f)}";
+        }
+
+        Console.WriteLine($"[DEBUG] MaterialDocument URL: {url}");
+
+        var response = await client.GetAsync(url);
+        var body = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"SAP MaterialDocument Error: {body}");
+
+        using var doc = JsonDocument.Parse(body);
+        if (!doc.RootElement.TryGetProperty("d", out var d) ||
+            !d.TryGetProperty("results", out var results))
+            return rows;
+
+        if (useItemEntry)
+        {
+            foreach (var item in results.EnumerateArray())
+            {
+                JsonElement? hdr = item.TryGetProperty("to_MaterialDocumentHeader", out var h) &&
+                                   h.ValueKind == JsonValueKind.Object &&
+                                   h.TryGetProperty("PostingDate", out _)
+                                   ? h : (JsonElement?)null;
+                rows.Add(MapRow(item, hdr));
+            }
+        }
+        else
+        {
+            foreach (var header in results.EnumerateArray())
+            {
+                if (!header.TryGetProperty("to_MaterialDocumentItem", out var nav) ||
+                    !nav.TryGetProperty("results", out var itemArr)) continue;
+
+                foreach (var item in itemArr.EnumerateArray())
+                    rows.Add(MapRow(item, header));
+            }
+        }
+
+        // กรองต่อในฝั่ง C# สำหรับเงื่อนไขที่ยิงไป SAP ไม่ได้ในทางนั้น ๆ
+        if (useItemEntry)
+        {
+            if (postingDateFrom.HasValue)
+                rows = rows.Where(r => r.PostingDate >= postingDateFrom.Value.Date).ToList();
+            if (postingDateTo.HasValue)
+                rows = rows.Where(r => r.PostingDate < postingDateTo.Value.Date.AddDays(1)).ToList();
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(plant))
+                rows = rows.Where(r => r.Plant == plant.Trim()).ToList();
+            if (!string.IsNullOrWhiteSpace(storageLocation))
+                rows = rows.Where(r => r.StorageLocation == storageLocation.Trim()).ToList();
+            if (!string.IsNullOrWhiteSpace(batch))
+                rows = rows.Where(r => r.Batch?.Trim() == batch.Trim()).ToList();
+            if (!string.IsNullOrWhiteSpace(movementType))
+                rows = rows.Where(r => r.GoodsMovementType == movementType.Trim()).ToList();
+        }
+
+        return rows;
+    }
+    // ───── MB51: Movement Type description ──────────────────────────────
+    private static readonly Dictionary<string, string> _movementTypeMap = new()
+    {
+        ["101"] = "รับเข้าจาก PO (GR)",
+        ["102"] = "ยกเลิกรับเข้าจาก PO",
+        ["122"] = "ส่งคืนผู้ขาย",
+        ["201"] = "เบิกเข้า Cost Center",
+        ["202"] = "ยกเลิกเบิก Cost Center",
+        ["261"] = "เบิกเข้า Order",
+        ["262"] = "ยกเลิกเบิก Order",
+        ["301"] = "โอนย้ายข้าม Plant",
+        ["311"] = "โอนย้ายข้าม Storage Location",
+        ["321"] = "QI → Unrestricted",
+        ["343"] = "Blocked → Unrestricted",
+        ["501"] = "รับเข้าโดยไม่มี PO",
+        ["561"] = "ตั้งยอดยกมา",
+        ["601"] = "จ่ายออกตาม Delivery",
+        ["602"] = "ยกเลิกจ่ายออกตาม Delivery",
+        ["641"] = "จ่ายออกตาม STO",
+        ["643"] = "จ่ายออก STO ข้ามบริษัท",
+        ["701"] = "ปรับยอดเพิ่ม (ตรวจนับ)",
+        ["702"] = "ปรับยอดลด (ตรวจนับ)",
+    };
+
+    public string? GetMovementTypeDescription(string? code)
+        => string.IsNullOrWhiteSpace(code) ? null
+         : _movementTypeMap.TryGetValue(code.Trim(), out var desc) ? desc : code.Trim();
+    private static SapMaterialDocumentRow MapRow(JsonElement item, JsonElement? header)
+    {
+        static string? S(JsonElement el, string key) =>
+            el.TryGetProperty(key, out var p) && p.ValueKind == JsonValueKind.String
+                ? p.GetString() : null;
+
+        static decimal? Dec(JsonElement el, string key)
+        {
+            if (!el.TryGetProperty(key, out var p)) return null;
+            var raw = p.ValueKind == JsonValueKind.String ? p.GetString() : p.GetRawText();
+            return decimal.TryParse(raw, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
+        }
+
+        static DateTime? Dt(JsonElement el, string key)
+        {
+            var raw = S(el, key);
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            var m = System.Text.RegularExpressions.Regex.Match(raw, @"-?\d+");
+            return m.Success && long.TryParse(m.Value, out var ms)
+                ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime : null;
+        }
+
+        return new SapMaterialDocumentRow
+        {
+            MaterialDocument = S(item, "MaterialDocument"),
+            MaterialDocumentYear = S(item, "MaterialDocumentYear"),
+            MaterialDocumentItem = S(item, "MaterialDocumentItem"),
+
+            PostingDate = header.HasValue ? Dt(header.Value, "PostingDate") : null,
+            DocumentDate = header.HasValue ? Dt(header.Value, "DocumentDate") : null,
+            CreatedByUser = header.HasValue ? S(header.Value, "CreatedByUser") : null,
+            ReferenceDocument = header.HasValue ? S(header.Value, "ReferenceDocument") : null,
+
+            Material = S(item, "Material"),
+            Plant = S(item, "Plant"),
+            StorageLocation = S(item, "StorageLocation"),
+            Batch = S(item, "Batch")?.Trim(),
+
+            GoodsMovementType = S(item, "GoodsMovementType"),
+            GoodsMovementRefDocType = S(item, "GoodsMovementRefDocType"),
+            GoodsMovementReasonCode = S(item, "GoodsMovementReasonCode"),
+            InventoryStockType = S(item, "InventoryStockType"),
+            DebitCreditCode = S(item, "DebitCreditCode"),
+
+            QuantityInEntryUnit = Dec(item, "QuantityInEntryUnit"),
+            EntryUnit = S(item, "EntryUnit"),
+            QuantityInBaseUnit = Dec(item, "QuantityInBaseUnit"),
+            MaterialBaseUnit = S(item, "MaterialBaseUnit"),
+
+            ExternalAmount = Dec(item, "GdsMvtExtAmtInCoCodeCrcy"),
+            CompanyCodeCurrency = S(item, "CompanyCodeCurrency"),
+
+            PurchaseOrder = S(item, "PurchaseOrder"),
+            PurchaseOrderItem = S(item, "PurchaseOrderItem"),
+            Delivery = S(item, "Delivery"),
+            DeliveryItem = S(item, "DeliveryItem"),
+            SalesOrder = S(item, "SalesOrder"),
+            SalesOrderItem = S(item, "SalesOrderItem"),
+            Customer = S(item, "Customer"),
+            Supplier = S(item, "Supplier"),
+            Reservation = S(item, "Reservation"),
+
+            ItemText = S(item, "MaterialDocumentItemText"),
+            ShelfLifeExpirationDate = Dt(item, "ShelfLifeExpirationDate"),
+            ManufactureDate = Dt(item, "ManufactureDate"),
+
+            IsCancelled = item.TryGetProperty("GoodsMovementIsCancelled", out var gc) &&
+                          gc.ValueKind == JsonValueKind.True,
+            ReversedMaterialDocument = S(item, "ReversedMaterialDocument"),
+
+            IssuingOrReceivingPlant = S(item, "IssuingOrReceivingPlant"),
+            IssuingOrReceivingStorageLoc = S(item, "IssuingOrReceivingStorageLoc"),
+        };
+    }
+    // ✅ วัน go-live ของ S/4HANA — จุดตัดระหว่าง DWH (billing) กับ MB51
+    //    ปัดเป็นวันที่ 1 ของเดือนเสมอ เพื่อไม่ให้มีรอยต่อกลางเดือน
+    public DateTime MaterialDocumentGoLiveDate
+    {
+        get
+        {
+            var raw = _configuration["SapConfig:MaterialDocument:GoLiveDate"];
+            return DateTime.TryParse(raw, out var d)
+                ? new DateTime(d.Year, d.Month, 1)
+                : new DateTime(2025, 7, 1);
+        }
+    }
+    public class SapMaterialDocumentRow
+    {
+        public string? MaterialDocument { get; set; }
+        public string? MaterialDocumentYear { get; set; }
+        public string? MaterialDocumentItem { get; set; }
+        public DateTime? PostingDate { get; set; }
+        public DateTime? DocumentDate { get; set; }
+        public string? CreatedByUser { get; set; }
+        public string? ReferenceDocument { get; set; }
+        public string? Material { get; set; }
+        public string? Plant { get; set; }
+        public string? StorageLocation { get; set; }
+        public string? Batch { get; set; }
+        public string? GoodsMovementType { get; set; }
+        public string? GoodsMovementRefDocType { get; set; }
+        public string? GoodsMovementReasonCode { get; set; }
+        public string? InventoryStockType { get; set; }
+        public string? DebitCreditCode { get; set; }
+        public decimal? QuantityInEntryUnit { get; set; }
+        public string? EntryUnit { get; set; }
+        public decimal? QuantityInBaseUnit { get; set; }
+        public string? MaterialBaseUnit { get; set; }
+        public decimal? ExternalAmount { get; set; }
+        public string? CompanyCodeCurrency { get; set; }
+        public string? PurchaseOrder { get; set; }
+        public string? PurchaseOrderItem { get; set; }
+        public string? Delivery { get; set; }
+        public string? DeliveryItem { get; set; }
+        public string? SalesOrder { get; set; }
+        public string? SalesOrderItem { get; set; }
+        public string? Customer { get; set; }
+        public string? Supplier { get; set; }
+        public string? Reservation { get; set; }
+        public string? ItemText { get; set; }
+        public DateTime? ShelfLifeExpirationDate { get; set; }
+        public DateTime? ManufactureDate { get; set; }
+        public bool IsCancelled { get; set; }
+        public string? ReversedMaterialDocument { get; set; }
+        public string? IssuingOrReceivingPlant { get; set; }
+        public string? IssuingOrReceivingStorageLoc { get; set; }
+    }
     public class SapAddressResult
     {
         public string? HouseNumber { get; set; }

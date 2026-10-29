@@ -307,6 +307,7 @@ namespace Mgt.Lit.WebFront.Models.SalesOrder
         public decimal? TotalKG { get; set; }
 
         public decimal? NetWeight { get; set; }
+        public string? SourceCutover { get; set; }
     }
     // NofReportRowDto.cs
     public class NofReportRowDto

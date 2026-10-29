@@ -8,7 +8,7 @@ namespace Mgt.Lit.WebApi.Controllers.Autherize
 {
     [ApiController]
     [Route("api/admin")]
-    [Authorize(Roles = "admin")]
+    [Authorize(Policy = "AdminOnly")]
     public class AdminController : ControllerBase
     {
         private readonly AppDbContext _context;

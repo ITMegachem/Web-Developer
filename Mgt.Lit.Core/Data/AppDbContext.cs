@@ -15,6 +15,7 @@ namespace Mgt.Lit.Core.Data
         public DbSet<MsMonth> MsMonths { get; set; }
         public DbSet<MsCompany> MsCompanies { get; set; }
         public DbSet<MsUserCompany> MsUserCompanies { get; set; }
+        public DbSet<MsUserPermissionOverride> MsUserPermissionOverrides { get; set; }
         public DbSet<MGT_Sale> MGT_Sale { get; set; }
         public DbSet<MGT_Deal> MGT_Deal { get; set; }
         public DbSet<MGT_DealProduct> MGT_DealProduct { get; set; }
@@ -80,6 +81,8 @@ namespace Mgt.Lit.Core.Data
             // 🏗️ 3. Mapping ชื่อตารางให้ตรงกับ SQL Server
             modelBuilder.Entity<MsCompany>().ToTable("Ms_Company");
             modelBuilder.Entity<MsUserCompany>().ToTable("Ms_UserCompany");
+            modelBuilder.Entity<MsUserPermissionOverride>().HasKey(x => x.UserID);
+            modelBuilder.Entity<MsUserPermissionOverride>().ToTable("Ms_UserPermissionOverride", "dbo");
             modelBuilder.Entity<MsUser>().ToTable("Ms_User");
             modelBuilder.Entity<ActivityLog>().ToTable("ActivityLog");
             modelBuilder.Entity<ErrorLog>().ToTable("ErrorLog");

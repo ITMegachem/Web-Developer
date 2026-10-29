@@ -34,6 +34,9 @@ namespace Mgt.Lit.WebFront.Auth
 
             var path = NormalizePath(relativePath);
 
+            if (path == "admin" || path.StartsWith("admin/"))
+                return false;   // /admin/* = admin only
+
             return path switch
             {
                 "sales-orders" => HasPageAccess(user, 1),

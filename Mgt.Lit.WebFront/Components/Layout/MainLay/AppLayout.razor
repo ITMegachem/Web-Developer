@@ -5,6 +5,8 @@
 @inject Mgt.Lit.WebFront.Services.AuthService AuthService
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject System.Net.Http.IHttpClientFactory HttpFactory
+@inject Mgt.Lit.WebFront.Auth.SessionBroadcast Broadcast
 <div class="app-shell @(IsCollapsed ? "collapsed" : "")">
 
     @* ── Hamburger button (mobile only) ── *@
@@ -32,8 +34,8 @@
     <div class="session-overlay">
         <div class="session-modal">
             <div class="session-icon">⏱️</div>
-            <h5 class="session-title">Session Expired</h5>
-            <p class="session-desc">Your session has expired.<br />Please log in again to continue.</p>
+            <h5 class="session-title">Session Ended</h5>
+            <p class="session-desc">Session expired or signed in on another device.<br />Please log in again.</p>
             <button class="btn-session-login" @onclick="GoToLogin">
                 Go to Login
             </button>
@@ -143,8 +145,16 @@
         await AuthState.InitializeAsync();
         _initialized = true;
 
-        if (string.IsNullOrWhiteSpace(AuthState.Token))
+        // Token missing or expired (localStorage keeps it across browser restarts) → refresh with the
+        // stored refresh token instead of sending the person back to login. (A fresh login bumps
+        // TokenVersion and would kick their other tabs.) Only if that fails → login page.
+        string? validToken = null;
+        try { validToken = await AuthState.GetValidTokenAsync(); } catch { }
+
+        if (string.IsNullOrWhiteSpace(validToken))
         {
+            // Clear the dead token first — otherwise Login sees it and sends us straight back (loop).
+            try { await AuthService.LogoutAsync(); } catch { AuthState.Clear(); }
             Nav.NavigateTo("/", replace: true);
             return;
         }
@@ -155,33 +165,58 @@
     }
 
     // AppLayout.razor
+    private int _checking;   // 1 while a session check is running (no overlapping checks)
+
     private void StartSessionTimer()
     {
-        _sessionTimer = new System.Threading.Timer(async _ =>
-        {
-            if (!IsTokenExpired()) return;
+        AuthState.SessionEnded += OnSessionEnded;
+        Broadcast.CheckNow += OnCheckNow;   // instant: a login/logout of this user on this server
 
-            // ✅ เรียก Refresh ผ่าน JS (Browser ส่ง Cookie ไปเองอัตโนมัติ)
-            try
-            {
-                var result = await AuthService.RefreshAsync();
-                if (result != null)
-                {
-                    Console.WriteLine("[Layout] Token refreshed silently");
-                    return; // ✅ ใช้งานต่อได้ ไม่แสดง popup
-                }
-            }
-            catch { }
-
-            // ❌ Refresh ไม่ได้ → แสดง popup
-            await InvokeAsync(() =>
-            {
-                showSessionExpired = true;
-                StateHasChanged();
-            });
-
-        }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        // Fallback heartbeat every 15 s (logins that happen on another server instance/app). Also
+        // refreshes an expiring token. Cost: one tiny authorized GET per open tab; the API answers from
+        // its in-memory TokenVersion cache, so normally no DB query.
+        _sessionTimer = new System.Threading.Timer(_ => _ = CheckSessionAsync(), null,
+            TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
     }
+
+    private void OnCheckNow(string userId)
+    {
+        var mine = AuthState.User?.FindFirst("UserID")?.Value;
+        if (!string.IsNullOrEmpty(mine) && mine == userId)
+            _ = CheckSessionAsync();
+    }
+
+    private async Task CheckSessionAsync()
+    {
+        if (showSessionExpired) return;
+        if (System.Threading.Interlocked.Exchange(ref _checking, 1) == 1) return;
+        try
+        {
+            var http = HttpFactory.CreateClient("RefreshClient");
+            using var r = await AuthState.SendAsync(http, t =>
+            {
+                var m = new HttpRequestMessage(HttpMethod.Get, "api/member/session-check");
+                m.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", t);
+                return m;
+            });
+            // 401 → AuthState raised SessionEnded → popup
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[Layout] session check failed (network?): " + ex.Message); // keep going
+        }
+        finally
+        {
+            System.Threading.Interlocked.Exchange(ref _checking, 0);
+        }
+    }
+
+    private void OnSessionEnded() => _ = InvokeAsync(() =>
+    {
+        showSessionExpired = true;
+        StateHasChanged();
+    });
+
     private bool IsTokenExpired()
     {
         try
@@ -216,11 +251,13 @@
         }
     }
 
-    private void GoToLogin()
+    private async Task GoToLogin()
     {
         showSessionExpired = false;
-        AuthState.Clear(); // ถ้ามี method Clear ใน AuthState
-        Nav.NavigateTo("/", replace: true);
+        // Clear the stale tokens from localStorage too — otherwise the login page sees the old token and
+        // bounces straight back here.
+        try { await AuthService.LogoutAsync(); } catch { AuthState.Clear(); }
+        Nav.NavigateTo("/", forceLoad: true, replace: true);
     }
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
@@ -250,6 +287,8 @@
     public void Dispose()
     {
         Nav.LocationChanged -= OnLocationChanged;
+        AuthState.SessionEnded -= OnSessionEnded;
+        Broadcast.CheckNow -= OnCheckNow;
         _sessionTimer?.Dispose();
     }
 }

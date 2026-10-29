@@ -144,7 +144,47 @@ public sealed class StockService
         if (string.IsNullOrWhiteSpace(_auth.Token))
             throw new UnauthorizedAccessException("Token is missing");
     }
+    public async Task<List<MaterialDocumentItemModel>> GetMaterialDocuments(
+     string material,
+     DateTime? from = null,
+     DateTime? to = null,
+     string? plant = null,
+     CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(material))
+            return new();
 
+        try
+        {
+            using var request = CreateAuthorizedPost(
+                "api/MGT_SalesOrder/MaterialDocumentList",
+                new MaterialDocumentRequestModel
+                {
+                    Material = material.Trim(),
+                    Plant = string.IsNullOrWhiteSpace(plant) ? null : plant.Trim(),
+                    PostingDateFrom = from,
+                    PostingDateTo = to,
+                    Page = 1,
+                    PageSize = 500
+                });
+
+            using var response = await _http.SendAsync(request, cancellationToken);
+
+            var result = await ReadResponseAsync<MaterialDocumentResponseModel>(
+                response, cancellationToken);
+
+            return result?.Items ?? new();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            throw;   // ✅ ปล่อยให้ระบบจัดการ session หมดอายุตามปกติ
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[GetMaterialDocuments] ERROR: {ex.Message}");
+            return new();
+        }
+    }
     public async Task<string> GetProductDescriptionFromSapAsync(
     string material,
     CancellationToken cancellationToken = default)
@@ -521,4 +561,5 @@ public sealed class StockService
         [JsonPropertyName("storageClassDescription")]
         public string? StorageClassDescription { get; set; }
     }
+
 }

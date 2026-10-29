@@ -259,3 +259,14 @@ window.dashboardCharts = {
         layout(sorted, 0, 0, 100, 100);
     }
 };
+
+// ★ Browser-session cookie สำหรับ login ที่ไม่ได้ติ๊ก "Remember me" (ใช้โดย AuthState.cs)
+//   ไม่ตั้งวันหมดอายุ → browser ลบเองตอนปิด, ทุกแท็บเห็นร่วมกัน (เปิดแท็บใหม่ไม่ต้อง login ซ้ำ)
+window.mgtSessionCookie = {
+    has: function () {
+        return document.cookie.split(';').some(function (c) { return c.trim().indexOf('mgt_alive=') === 0; });
+    },
+    set: function () {
+        document.cookie = 'mgt_alive=1; path=/; SameSite=Strict' + (location.protocol === 'https:' ? '; Secure' : '');
+    }
+};

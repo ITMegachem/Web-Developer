@@ -17,10 +17,19 @@ namespace Mgt.Lit.Core.Services
 
         public async Task<MsUser?> LoginAsync(string username, string password)
         {
-            return await _context.MsUsers.FirstOrDefaultAsync(u =>
+            // Find by username only — the password is checked in code (hash first, plaintext fallback).
+            var user = await _context.MsUsers.FirstOrDefaultAsync(u =>
                 u.Username == username &&
-                u.Password == password &&
                 u.IsActive);
+            if (user == null) return null;
+
+            if (!PasswordService.Verify(user, password, out var hashChanged))
+                return null;
+
+            if (hashChanged)
+                await _context.SaveChangesAsync();   // store the new PasswordHash (self-heal)
+
+            return user;
         }
     }
 }
