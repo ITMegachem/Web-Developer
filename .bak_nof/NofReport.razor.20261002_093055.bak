@@ -1,0 +1,683 @@
+﻿@namespace Mgt.Lit.WebFront.Pages
+@page "/nof-report"
+@layout AppLayout
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+@using ClosedXML.Excel
+@using Mgt.Lit.WebFront.Components.Layout.MainLay
+@using Mgt.Lit.WebFront.Models.SalesOrder
+@using Mgt.Lit.WebFront.Services
+@inject INofReportService NofReportService
+@inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject NavigationManager Nav
+@inject Mgt.Lit.WebFront.Services.UiState UiState
+@inject DownloadLogService DownloadLogSvc
+@implements IAsyncDisposable
+
+<div class="so-page-wrapper">
+
+    @* --- Header --- *@
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-2">
+        <h2 class="page-title">@T("Title")</h2>
+        <div class="date-badge">@DateTime.Now.ToString("dd MMM yyyy")</div>
+    </div>
+
+    @* --- Filter Card --- *@
+    <div class="filter-card-modern shadow-sm mb-4">
+        <div class="row g-3 align-items-end">
+
+            <div class="col-6 col-md-4 col-lg-3">
+                <label class="modern-label">Billing Date</label>
+                <input id="dateRange"
+                       class="form-control modern-input @(!string.IsNullOrEmpty(dateRangeError) ? "is-invalid" : "")"
+                       placeholder="Select date range"
+                       autocomplete="off" />
+                @if (!string.IsNullOrEmpty(dateRangeError))
+                {
+                    <span class="text-danger small">@dateRangeError</span>
+                }
+            </div>
+
+            <div class="col-6 col-md-4 col-lg-4">
+                
+                <div class="col-6 col-md-4 col-lg-8">
+                    <label class="modern-label">Product Group</label>
+                    <div class="autocomplete-wrapper">
+                        <input class="form-control modern-input"
+                               value="@productGroupSearch"
+                               @oninput="OnProductGroupSearch"
+                               @onfocus="() => showProductGroupDropdown = true"
+                               @onblur="OnProductGroupBlur"
+                               placeholder="Choose Product Group" />
+                        @if (productGroupResults.Any() && showProductGroupDropdown)
+                        {
+                            <div class="autocomplete-dropdown-card">
+                                @foreach (var item in productGroupResults)
+                                {
+                                    <div class="autocomplete-row" @onclick="() => SelectProductGroup(item)">
+                                        <div class="code">@item.Code</div>
+                                        <div class="name">@item.Name</div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-lg-2 ms-lg-auto">
+                <button class="btn btn-search-pill w-100" disabled="@isLoading" @onclick="RunSearch">
+                    @if (isLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm"></span>
+                    }
+                    else
+                    {
+                        <span><i class="bi bi-search me-1"></i> @T("Run")</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @* --- Table --- *@
+    <div class="table-card-container shadow-sm">
+        <div class="table-responsive flex-grow-1">
+            <table class="table modern-table mb-0">
+                <thead>
+                    <tr>
+                        <th rowspan="2" style="font-weight:800; vertical-align:middle; min-width:110px;">Material</th>
+                        <th rowspan="2" style="font-weight:800; vertical-align:middle; min-width:160px;">Material Name</th>
+                        <th rowspan="2" style="font-weight:800; vertical-align:middle; min-width:110px;">Sold-To Party</th>
+                        <th rowspan="2" style="font-weight:800; vertical-align:middle; min-width:160px;">Sold-To Name</th>
+                        @foreach (var m in MonthColumns)
+                        {
+                            <th style="font-weight:800; text-align:right; min-width:80px;">@m</th>
+                        }
+                        <th style="font-weight:800; text-align:right; min-width:90px;">Total (KG)</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    @if (pagedItems.Any())
+                    {
+                        @foreach (var r in pagedItems)
+                        {
+                            <tr>
+                                <td><span class="badge-pill-material">@r.Material</span></td>
+                                <td class="text-muted small">@r.MaterialName</td>
+                                <td class="numeric-green">@r.SoldToParty</td>
+                                <td class="text-muted small">@r.SoldToName</td>
+                                @foreach (var m in MonthColumns)
+                                {
+                                    var qty = r.MonthlyQty.TryGetValue(m, out var q) ? q : 0;
+                                    <td style="text-align:right;">
+                                        @(qty == 0 ? "-" : qty.ToString("N2"))
+                                    </td>
+                                }
+                                <td style="text-align:right; font-weight:500;">
+                                    @{
+                                        var total = MonthColumns
+                                            .Where(m => r.MonthlyQty.ContainsKey(m))
+                                            .Sum(m => r.MonthlyQty[m]);
+                                    }
+                                    @(total == 0 ? "-" : total.ToString("N2"))
+                                </td>
+                            </tr>
+                        }
+                    }
+                    else if (!isLoading)
+                    {
+                        <tr>
+                            <td colspan="@(4 + MonthColumns.Count + 1)" class="text-center py-5">
+                                @T("NoData")
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+
+                @if (pagedItems.Any())
+                {
+                    <tfoot>
+                        <tr style="background: var(--color-background-secondary); font-weight:600; border-top: 2px solid var(--color-border-primary);">
+                            <td colspan="4" style="font-weight:700;">Grand Total</td>
+                            @foreach (var m in MonthColumns)
+                            {
+                                var colTotal = pagedItems
+                                    .Where(r => r.MonthlyQty.ContainsKey(m))
+                                    .Sum(r => r.MonthlyQty[m]);
+                                <td style="text-align:right; font-weight:700;">
+                                    @(colTotal == 0 ? "-" : colTotal.ToString("N2"))
+                                </td>
+                            }
+                            <td style="text-align:right; font-weight:700; color: var(--color-text-success);">
+                                @{
+                                    var grandTotal = pagedItems
+                                        .SelectMany(r => r.MonthlyQty.Values)
+                                        .Sum();
+                                }
+                                @grandTotal.ToString("N2")
+                            </td>
+                        </tr>
+                    </tfoot>
+                }
+
+            </table>
+        </div>
+
+        @* --- Pagination --- *@
+        @* --- Pagination --- *@
+        <div class="table-footer-pagination">
+            <div class="text-muted small">Results: @totalItems</div>
+        </div>
+    </div>
+
+    @* --- Export Button --- *@
+    <div class="d-flex justify-content-end mt-4">
+        <button class="btn btn-export-pill shadow-sm"
+                disabled="@(isLoading || !pagedItems.Any())"
+                @onclick="ExportData">
+            <i class="bi bi-file-earmark-excel-fill me-2"></i> @T("ExportAs") Excel
+        </button>
+    </div>
+
+</div>
+@code {
+
+    // ── State ──────────────────────────────────────────────────────────────────
+
+    private List<NofReportRowDto> pagedItems = new();
+    private List<ProductGroupLookup> productGroupResults = new();
+    private string productGroupSearch = "";
+    private bool showProductGroupDropdown = false;
+    private string? selectedProductGroup;
+    private ProductGroupLookup? _lastSelectedProductGroup;
+    private string? dateRangeError;
+    private DateTime? DateFrom;
+    private DateTime? DateTo;
+    private int currentPage = 1;
+    private int pageSize = 10000;
+    private int totalItems;
+    private int totalPages = 1;
+    private bool isLoading;
+    private bool _isDisposed;
+    private List<string> _monthColumns = new();
+    private IJSObjectReference? _jsModule;
+    private DotNetObjectReference<NofReport>? _dotNetRef;
+    private CancellationTokenSource? _materialCts;
+    
+
+    private List<string> MonthColumns => _monthColumns.Any()
+     ? _monthColumns
+     : Enumerable.Range(1, 12)
+         .Select(m => $"{(DateFrom?.Year ?? DateTime.Now.Year)}/{m:D2}")
+         .ToList();
+
+    // ── Lifecycle ──────────────────────────────────────────────────────────────
+
+    protected override void OnInitialized()
+    {
+        UiState.Changed += OnUiChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _isDisposed) return;
+
+        await AuthState.InitializeAsync();
+        if (string.IsNullOrWhiteSpace(AuthState.Token)) return;
+
+        await UiState.InitAsync();
+
+        try
+        {
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await _jsModule.InvokeVoidAsync("initDateRange", _dotNetRef);
+            if (!_isDisposed) await InvokeAsync(StateHasChanged);
+        }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+    }
+
+    private void OnUiChanged()
+    {
+        if (!_isDisposed) _ = InvokeAsync(StateHasChanged);
+    }
+
+    // ── JSInvokable (เหมือน sales-orders) ────────────────────────────────────
+    [JSInvokable]
+    public void SetDateRange(string start, string end)
+    {
+        if (string.IsNullOrEmpty(start) || string.IsNullOrEmpty(end))
+        {
+            DateFrom = null; DateTo = null;
+            pagedItems.Clear(); totalItems = 0; totalPages = 1;
+            _monthColumns = new();
+            _ = InvokeAsync(StateHasChanged);
+            return;
+        }
+        if (DateTime.TryParse(start, out var s)) DateFrom = s;
+        if (DateTime.TryParse(end, out var e)) DateTo = e;
+
+        // ✅ เมื่อเปลี่ยนวันที่ → clear data ทันที
+        pagedItems.Clear(); totalItems = 0; totalPages = 1;
+        _monthColumns = new();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public void ClearDateRange()
+    {
+        DateFrom = null; DateTo = null;
+        pagedItems.Clear(); totalItems = 0; totalPages = 1;
+        _monthColumns = new(); // ✅ เพิ่มตรงนี้
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    // ── ProductGroup Autocomplete ──────────────────────────────────────────────
+
+    private async Task OnProductGroupSearch(ChangeEventArgs e)
+    {
+        productGroupSearch = e.Value?.ToString() ?? "";
+        selectedProductGroup = null;
+        _lastSelectedProductGroup = null;
+
+        pagedItems.Clear(); totalItems = 0; totalPages = 1;
+        _monthColumns = new();
+
+        productGroupResults.Clear();
+        showProductGroupDropdown = false;
+
+        if (productGroupSearch.Length < 2)
+        {
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _materialCts?.Cancel();
+        _materialCts = new CancellationTokenSource();
+        var token = _materialCts.Token;
+
+        try
+        {
+            await Task.Delay(300, token);
+            if (token.IsCancellationRequested) return;
+
+            productGroupResults = await NofReportService.SearchProductGroupAsync(productGroupSearch);
+
+            var exact = productGroupResults.FirstOrDefault(x =>
+                x.Code.Equals(productGroupSearch.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            if (exact != null)
+                SelectProductGroup(exact);
+            else
+                showProductGroupDropdown = productGroupResults.Any();
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (TaskCanceledException) { }
+        catch (UnauthorizedAccessException) { Nav.NavigateTo("/", replace: true); }
+    }
+
+    private void SelectProductGroup(ProductGroupLookup item)
+    {
+        _lastSelectedProductGroup = item;
+        selectedProductGroup = item.Code;
+    
+        // ✅ ถ้า Name เหมือน Code → แสดงแค่ Code เดียว
+        productGroupSearch = item.Name == item.Code || string.IsNullOrWhiteSpace(item.Name)
+            ? item.Code
+            : $"{item.Code} {item.Name}";
+    
+        productGroupResults.Clear();
+        showProductGroupDropdown = false;
+    }
+
+    private async Task OnProductGroupBlur()
+    {
+        await Task.Delay(200);
+        showProductGroupDropdown = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // ── Search & Load ─────────────────────────────────────────────────────────
+
+    private async Task RunSearch()
+    {
+        dateRangeError = null;
+        showProductGroupDropdown = false;
+
+        // ── ProductGroup logic ────────────────────────────────────────
+        if (string.IsNullOrWhiteSpace(productGroupSearch))
+        {
+            selectedProductGroup = null;
+            _lastSelectedProductGroup = null;
+        }
+        else if (!string.IsNullOrWhiteSpace(selectedProductGroup))
+        {
+            // เลือกจาก dropdown แล้ว → ใช้ได้เลย
+        }
+        else if (_lastSelectedProductGroup != null)
+        {
+            SelectProductGroup(_lastSelectedProductGroup);
+        }
+        else
+        {
+            var normalized = productGroupSearch.Trim();
+            var matched = productGroupResults.FirstOrDefault(x =>
+                x.Code.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+
+            if (matched != null)
+                SelectProductGroup(matched);
+            else
+            {
+                selectedProductGroup = normalized.Contains(' ')
+                    ? normalized[..normalized.IndexOf(' ')]
+                    : normalized;
+                productGroupSearch = selectedProductGroup;
+            }
+        }
+
+        productGroupResults.Clear();
+        // ── Validate date ─────────────────────────────────────────
+        if (_jsModule is not null)
+        {
+            try
+            {
+                var val = await _jsModule.InvokeAsync<string>("getDateRangeValue");
+                if (string.IsNullOrWhiteSpace(val)) { DateFrom = null; DateTo = null; }
+            }
+            catch { }
+        }
+
+        if (DateFrom is null || DateTo is null)
+        {
+            dateRangeError = "Please select Billing Date range";
+            pagedItems.Clear(); totalItems = 0; totalPages = 1;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        currentPage = 1;
+        await InvokeAsync(StateHasChanged); // ✅ ปิด dropdown ก่อน load
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        if (_isDisposed || string.IsNullOrWhiteSpace(AuthState.Token)) return;
+
+        try
+        {
+            isLoading = true;
+            await InvokeAsync(StateHasChanged);
+
+            var result = await NofReportService.GetNofReportAsync(new NofReportFilter
+            {
+                ProductGroup = selectedProductGroup,
+                DateFrom = DateFrom,
+                DateTo = DateTo,
+                Page = currentPage,
+                PageSize = pageSize
+            });
+
+            pagedItems = result.Items ?? new();
+            totalItems = result.TotalItems;
+            totalPages = Math.Max(1, (int)Math.Ceiling((double)totalItems / pageSize));
+
+            // ✅ ใช้ AvailableMonths จาก API — ครบทุกเดือนทุกหน้าตั้งแต่แรก
+            if (currentPage == 1 && result.AvailableMonths.Any())
+            {
+                _monthColumns = result.AvailableMonths.OrderBy(m => m).ToList();
+            }
+            else
+            {
+                // หน้าถัดไป merge เดือนใหม่ที่ยังไม่มี (กันกรณี API ไม่ส่ง)
+                var monthSet = new HashSet<string>(_monthColumns);
+                var newMonths = result.AvailableMonths
+                    .Where(m => !monthSet.Contains(m))
+                    .ToList();
+
+                if (newMonths.Any())
+                    _monthColumns = _monthColumns.Concat(newMonths).OrderBy(m => m).ToList();
+            }
+        }
+        catch (UnauthorizedAccessException) { Nav.NavigateTo("/", replace: true); }
+        finally
+        {
+            isLoading = false;
+            if (!_isDisposed) await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // ── Pagination ────────────────────────────────────────────────────────────
+
+    private async Task PrevPage()
+    {
+        if (currentPage <= 1 || isLoading) return;
+        currentPage--;
+        await LoadDataAsync();
+    }
+
+    private async Task NextPage()
+    {
+        if (currentPage >= totalPages || isLoading) return;
+        currentPage++;
+        await LoadDataAsync();
+    }
+
+    // ── Export ────────────────────────────────────────────────────────────────────
+
+    private async Task ExportData()
+    {
+        try
+        {
+            isLoading = true;
+            var username = AuthState.Permission?.Username;
+            var fileName = $"NofReport_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await DownloadLogSvc.LogDownloadAsync(username, fileName);
+
+            var all = await GetAllForExport();
+
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("NOF Report");
+
+            var exportMonths = all
+                .SelectMany(r => r.MonthlyQty.Keys)
+                .Distinct()
+                .OrderBy(k => k)
+                .ToList();
+
+            // ── Header row ────────────────────────────────────────────────────────
+            // Col: A=Product Name, B=Customer Name, C..=months, last=Total(KG)
+            // ── Header row ────────────────────────────────────────────────────────
+            // Col: A=Material Code, B=Product Name, C=Customer Name, D..=months, last=Total(KG)
+            int totalCol = 3 + exportMonths.Count;
+
+            ws.Cell(1, 1).Value = "Material Code";
+            ws.Cell(1, 2).Value = "Product Name";
+            ws.Cell(1, 3).Value = "Customer Name";
+            for (int i = 0; i < exportMonths.Count; i++)
+                ws.Cell(1, 4 + i).Value = exportMonths[i];
+
+            var headerRow = ws.Row(1);
+            headerRow.Style.Font.Bold = true;
+            headerRow.Style.Fill.BackgroundColor = XLColor.FromArgb(68, 114, 196); // blue header
+            headerRow.Style.Font.FontColor = XLColor.White;
+            headerRow.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+            // ── Group by MaterialName ─────────────────────────────────────────────
+            var groups = all
+                .GroupBy(r => r.MaterialName)
+                .OrderBy(g => g.Key)
+                .ToList();
+
+            int row = 2;
+            foreach (var g in groups)
+            {
+                int groupStartRow = row;
+                var rows = g.ToList();
+
+                foreach (var r in rows)
+                {
+                    ws.Cell(row, 1).Value = r.Material;        // ✅ Material Code
+                    ws.Cell(row, 2).Value = r.MaterialName;    // Product Name (เดิม col 1)
+                    ws.Cell(row, 3).Value = r.SoldToName;      // Customer  (เดิม col 2)
+
+                    for (int i = 0; i < exportMonths.Count; i++)
+                    {
+                        var qty = r.MonthlyQty.TryGetValue(exportMonths[i], out var q) ? q : 0;
+                        if (qty != 0) ws.Cell(row, 4 + i).Value = (double)qty;   // เดิม 3+i → 4+i
+                    }
+
+                    row++;
+                }
+               
+
+                // ── Merge Product Name cells (col A) for this group + subtotal ────
+                if (groupStartRow < row - 1){
+                    ws.Range(groupStartRow, 1, row - 1, 1).Merge();
+                }
+                ws.Cell(groupStartRow, 1).Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
+                ws.Cell(groupStartRow, 1).Style.Alignment.WrapText = true;
+            }
+
+            // ── Grand Total row ───────────────────────────────────────────────────
+            ws.Cell(row, 1).Value = "Grand Total";
+            ws.Cell(row, 2).Value = "";
+            ws.Range(row, 1, row, 2).Merge();
+
+            for (int i = 0; i < exportMonths.Count; i++)
+            {
+                var colSum = all
+                    .Where(r => r.MonthlyQty.ContainsKey(exportMonths[i]))
+                    .Sum(r => r.MonthlyQty[exportMonths[i]]);
+                if (colSum != 0)
+                    ws.Cell(row, 3 + i).Value = (double)colSum;
+            }
+
+            
+
+            var gtRow = ws.Row(row);
+            gtRow.Style.Font.Bold = true;
+            gtRow.Style.Fill.BackgroundColor = XLColor.FromArgb(68, 114, 196);
+            gtRow.Style.Font.FontColor = XLColor.White;
+
+            // ── Number format ─────────────────────────────────────────────────────
+            var dataRange = ws.Range(2, 3, row, totalCol);
+            dataRange.Style.NumberFormat.Format = "#,##0;-#,##0;-";
+
+            // ── Column widths ─────────────────────────────────────────────────────
+            ws.Column(1).Width = 35; // Product Name
+            ws.Column(2).Width = 40; // Customer Name
+            for (int i = 3; i <= totalCol; i++)
+                ws.Column(i).Width = 12;
+
+            // ── Borders ───────────────────────────────────────────────────────────
+            ws.Range(1, 1, row, totalCol).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            ws.Range(1, 1, row, totalCol).Style.Border.InsideBorder = XLBorderStyleValues.Hair;
+
+            // ── Freeze header ─────────────────────────────────────────────────────
+            ws.SheetView.FreezeRows(1);
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+
+            if (_jsModule is not null && !_isDisposed)
+            {
+                try
+                {
+                    await _jsModule.InvokeVoidAsync("downloadFileFromBytes",
+                        fileName,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        base64);
+                }
+                catch (JSDisconnectedException) { }
+                catch (TaskCanceledException) { }
+            }
+        }
+        catch (UnauthorizedAccessException) { Nav.NavigateTo("/", replace: true); }
+        finally
+        {
+            isLoading = false;
+            if (!_isDisposed) await InvokeAsync(StateHasChanged);
+        }
+    }
+    public class ProductGroupLookup
+    {
+        public string Code { get; set; } = "";
+        public string Name { get; set; } = "";
+    }
+    private async Task<List<NofReportRowDto>> GetAllForExport()
+    {
+        var filter = new NofReportFilter
+        {
+            ProductGroup = selectedProductGroup,
+            DateFrom = DateFrom,
+            DateTo = DateTo,
+            Page = 1,
+            PageSize = 10000
+        };
+
+        var all = new List<NofReportRowDto>();
+        while (!_isDisposed)
+        {
+            var result = await NofReportService.GetNofReportAsync(filter);
+            if (result.Items == null || !result.Items.Any()) break;
+            all.AddRange(result.Items);
+            if (all.Count >= result.TotalItems) break;
+            filter.Page++;
+        }
+        return all;
+    }
+
+    // ── i18n ──────────────────────────────────────────────────────────────────
+
+    private string T(string key) =>
+        (Text.TryGetValue(UiState.Lang ?? "th", out var dict) && dict.TryGetValue(key, out var v))
+            ? v : key;
+
+    private static readonly Dictionary<string, Dictionary<string, string>> Text = new()
+    {
+        ["en"] = new()
+        {
+            ["Title"] = "Sales Report",
+            ["Material"] = "Material",
+            ["Run"] = "Run",
+            ["NoData"] = "No data found",
+            ["ExportAs"] = "Export as",
+        },
+        ["th"] = new()
+        {
+            ["Title"] = "Sales Report",
+            ["Material"] = "วัสดุ",
+            ["Run"] = "ค้นหา",
+            ["NoData"] = "ไม่พบข้อมูล",
+            ["ExportAs"] = "ส่งออกเป็น",
+        }
+    };
+
+    // ── Dispose ───────────────────────────────────────────────────────────────
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_isDisposed) return;
+        _isDisposed = true;
+        UiState.Changed -= OnUiChanged;
+
+        var module = _jsModule; _jsModule = null;
+        var dotNetRef = _dotNetRef; _dotNetRef = null;
+
+        try { if (module is not null) await module.DisposeAsync(); }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+        catch (ObjectDisposedException) { }
+
+        dotNetRef?.Dispose();
+        _materialCts?.Cancel();
+        _materialCts?.Dispose();
+    }
+
+}

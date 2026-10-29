@@ -16,6 +16,7 @@
 @inject IJSRuntime JS
 @inject DownloadLogService DownloadLogSvc
 @inject Mgt.Lit.WebFront.Auth.AuthState AuthState
+@inject NavigationManager Nav
 
 <div class="so-page-wrapper">
 
@@ -393,6 +394,21 @@
     private enum Tab { Requirements, Movements }
     private Tab activeTab = Tab.Requirements;
 
+    // ── เก็บสถานะไว้ใน URL เพื่อให้ refresh (F5) แล้วข้อมูลไม่หาย ────────────
+    [Parameter, SupplyParameterFromQuery(Name = "material")]
+    public string? QueryMaterial { get; set; }
+
+    [Parameter, SupplyParameterFromQuery(Name = "tab")]
+    public string? QueryTab { get; set; }
+
+    [Parameter, SupplyParameterFromQuery(Name = "from")]
+    public string? QueryFrom { get; set; }
+
+    [Parameter, SupplyParameterFromQuery(Name = "to")]
+    public string? QueryTo { get; set; }
+
+    private bool _restoredFromUrl = false;
+
     private IJSObjectReference? _jsModule;
     private StockRequirementResponse stockData;
     private string selectedPlant;
@@ -465,6 +481,7 @@
     private async Task SwitchTab(Tab tab)
     {
         activeTab = tab;
+        SyncUrl();
 
         if (tab == Tab.Movements &&
             !movementsLoaded &&
@@ -474,9 +491,26 @@
         }
     }
 
+    // ── เขียนสถานะปัจจุบันลง URL (ไม่ reload หน้า) ──────────────────────────
+    private void SyncUrl()
+    {
+        var isMov = activeTab == Tab.Movements;
+
+        var q = new Dictionary<string, object?>
+        {
+            ["material"] = string.IsNullOrWhiteSpace(selectedMaterial) ? null : selectedMaterial,
+            ["tab"] = isMov ? "mov" : null,
+            ["from"] = isMov ? movFrom.ToString("yyyy-MM-dd") : null,
+            ["to"] = isMov ? movTo.ToString("yyyy-MM-dd") : null,
+        };
+
+        Nav.NavigateTo(Nav.GetUriWithQueryParameters(q), replace: true);
+    }
+
     private async Task ReloadMovements()
     {
         movementsLoaded = false;
+        SyncUrl();
         await LoadMovements();
     }
 
@@ -624,6 +658,40 @@
         if (firstRender)
         {
             _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/site.js");
+
+            // ✅ refresh (F5) แล้วค้นหาเดิมกลับมาเอง — อ่านค่าจาก query string
+            if (!_restoredFromUrl && !string.IsNullOrWhiteSpace(QueryMaterial))
+            {
+                _restoredFromUrl = true;
+
+                // ⚠️ ตอน F5 token ยังไม่ถูกอ่านกลับจาก browser storage
+                //    ต้อง InitializeAsync ก่อน ไม่งั้นจะเด้ง "Token is missing"
+                await AuthState.InitializeAsync();
+
+                if (string.IsNullOrWhiteSpace(AuthState.Token))
+                {
+                    Nav.NavigateTo("/", replace: true);
+                    return;
+                }
+
+                materialSearch = QueryMaterial.Trim();
+                selectedMaterial = materialSearch;
+
+                if (string.Equals(QueryTab, "mov", StringComparison.OrdinalIgnoreCase))
+                    activeTab = Tab.Movements;
+
+                if (DateTime.TryParse(QueryFrom, out var qf)) movFrom = qf;
+                if (DateTime.TryParse(QueryTo, out var qt)) movTo = qt;
+
+                try
+                {
+                    await OnSearch();
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    Nav.NavigateTo("/", replace: true);
+                }
+            }
         }
     }
 
@@ -635,6 +703,8 @@
 
             stockData = await StockService
                 .GetStockRequirement(selectedPlant, selectedMaterial);
+
+            NormalizeMd04Rows();   // ✅ จัดลำดับ + คำนวณ Available Qty ใหม่ให้ตรงกับ SAP
         }
         catch (Exception ex)
         {
@@ -645,6 +715,49 @@
         {
             isLoading = false;
         }
+    }
+
+    // ── จัดลำดับแถว MD04 ให้ตรงกับที่ SAP แสดง ────────────────────────────
+    // SAP เรียง Stock → SafeSt → ตามวันที่ และ "รับเข้า" มาก่อน "จ่ายออก"
+    // เมื่ออยู่วันเดียวกัน  ถ้าเรียงสลับกัน ยอดคงเหลือระหว่างทางจะเพี้ยน
+    // (ยอดสุดท้ายเท่ากัน แต่ตัวเลขกลางทางดูเหมือนของใกล้หมด)
+    // จึงเรียงใหม่แล้วไล่บวกยอดคงเหลือใหม่ทั้งคอลัมน์
+    private void NormalizeMd04Rows()
+    {
+        var rows = stockData?.Detail;
+        if (rows == null || rows.Count == 0) return;
+
+        static int Rank(StockDetail d) =>
+            string.Equals(d.ElementType, "Stock", StringComparison.OrdinalIgnoreCase) ? 0
+          : string.Equals(d.ElementType, "SafeSt", StringComparison.OrdinalIgnoreCase) ? 1
+          : 2;
+
+        var sorted = rows
+            .OrderBy(d => Rank(d))
+            .ThenBy(d => Rank(d) == 2 ? d.DocumentDate : DateTime.MinValue)
+            .ThenBy(d => Rank(d) == 2 && d.ReceiptReqmtQty > 0 ? 0 : 1)
+            .ToList();
+
+        var stock = sorted.FirstOrDefault(d => Rank(d) == 0);
+
+        // ยอดตั้งต้น = Stock ปัจจุบัน (ถ้าไม่มีแถว Stock ให้ถอยจากแถวแรก)
+        decimal running = stock is not null
+            ? stock.AvailableQty
+            : sorted[0].AvailableQty - sorted[0].ReceiptReqmtQty;
+
+        foreach (var d in sorted)
+        {
+            if (ReferenceEquals(d, stock))
+            {
+                d.AvailableQty = running;
+                continue;
+            }
+
+            running += d.ReceiptReqmtQty;
+            d.AvailableQty = running;
+        }
+
+        stockData.Detail = sorted;
     }
 
     private List<PlantDto> plants = new()
@@ -704,6 +817,8 @@
         // ✅ material เปลี่ยน → movements ต้องโหลดใหม่
         movements = new();
         movementsLoaded = false;
+
+        SyncUrl();   // ✅ เก็บ material ที่ค้นลง URL
 
         await InvokeAsync(StateHasChanged);
         await LoadData();
