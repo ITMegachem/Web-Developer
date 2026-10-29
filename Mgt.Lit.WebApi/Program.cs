@@ -37,6 +37,7 @@ builder.Services.AddScoped<SapService>();
 builder.Services.AddSingleton<ZohoAuthTokenProvider>();
 builder.Services.AddHttpClient<ZohoDealSyncService>();
 builder.Services.AddHttpClient<ZohoVisitSyncService>();
+builder.Services.AddHostedService<Mgt.Lit.WebApi.BackgroundServices.ZohoAutoSyncService>();
 
 // =======================
 // JWT Authentication

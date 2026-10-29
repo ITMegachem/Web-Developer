@@ -40,7 +40,8 @@ namespace Mgt.Lit.Core.Services
             _tokenProvider = tokenProvider;
         }
 
-        public async Task<int> SyncVisitReportsAsync(CancellationToken ct = default)
+        // modifiedSince = null -> ดึงทุก Visit Report (full sync) / มีค่า -> ดึงเฉพาะที่ Modified_Time >= ค่านั้น (incremental)
+        public async Task<int> SyncVisitReportsAsync(DateTimeOffset? modifiedSince = null, CancellationToken ct = default)
         {
             var (accessToken, apiDomain) = await _tokenProvider.GetAccessTokenAsync(ct);
 
@@ -56,11 +57,15 @@ namespace Mgt.Lit.Core.Services
             var offset = 0;
             const int pageSize = 200;
 
+            var whereClause = modifiedSince.HasValue
+                ? $"Modified_Time >= '{modifiedSince.Value:yyyy-MM-dd'T'HH:mm:sszzz}'"
+                : "id is not null";
+
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
 
-                var query = $"select {string.Join(",", selectFields.Distinct())} from Visit_Reports where id is not null limit {pageSize} offset {offset}";
+                var query = $"select {string.Join(",", selectFields.Distinct())} from Visit_Reports where {whereClause} limit {pageSize} offset {offset}";
                 using var reqContent = new StringContent(JsonSerializer.Serialize(new { select_query = query }), Encoding.UTF8, "application/json");
                 using var req = new HttpRequestMessage(HttpMethod.Post, $"{apiDomain.TrimEnd('/')}/crm/v8/coql") { Content = reqContent };
                 req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");

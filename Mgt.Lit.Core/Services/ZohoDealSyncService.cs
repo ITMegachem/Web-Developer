@@ -50,7 +50,10 @@ namespace Mgt.Lit.Core.Services
             _tokenProvider = tokenProvider;
         }
 
-        public async Task<int> SyncDealsAsync(CancellationToken ct = default)
+        // modifiedSince = null -> ดึงทุก Deal (full sync) / มีค่า -> ดึงเฉพาะ Deal ที่ Modified_Time >= ค่านั้น (incremental)
+        // ★ incremental จะไม่เห็นการเปลี่ยนแปลงที่เกิดบน Account (Owner/Industry/Sales Group) เพราะไม่ทำให้
+        // Modified_Time ของ Deal เปลี่ยน — ต้องมี full sync เป็นระยะ (ดู ZohoAutoSyncService)
+        public async Task<int> SyncDealsAsync(DateTimeOffset? modifiedSince = null, CancellationToken ct = default)
         {
             var (accessToken, apiDomain) = await _tokenProvider.GetAccessTokenAsync(ct);
             var stageForecastMap = await GetStageForecastMapAsync(apiDomain, accessToken, ct);
@@ -76,11 +79,15 @@ namespace Mgt.Lit.Core.Services
             var offset = 0;
             const int pageSize = 200; // ค่าสูงสุดต่อ request ของ Zoho COQL
 
+            var whereClause = modifiedSince.HasValue
+                ? $"Modified_Time >= '{modifiedSince.Value:yyyy-MM-dd'T'HH:mm:sszzz}'"
+                : "id is not null";
+
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
 
-                var query = $"select {string.Join(",", selectFields.Distinct())} from Deals where id is not null limit {pageSize} offset {offset}";
+                var query = $"select {string.Join(",", selectFields.Distinct())} from Deals where {whereClause} limit {pageSize} offset {offset}";
                 using var reqContent = new StringContent(JsonSerializer.Serialize(new { select_query = query }), Encoding.UTF8, "application/json");
                 using var req = new HttpRequestMessage(HttpMethod.Post, $"{apiDomain.TrimEnd('/')}/crm/v8/coql") { Content = reqContent };
                 req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");

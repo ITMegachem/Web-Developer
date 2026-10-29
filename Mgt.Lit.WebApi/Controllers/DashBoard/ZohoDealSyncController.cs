@@ -25,7 +25,7 @@ namespace Mgt.Lit.WebApi.Controllers.DashBoard
         {
             try
             {
-                var count = await _syncService.SyncDealsAsync(ct);
+                var count = await _syncService.SyncDealsAsync(ct: ct);
                 return Ok(new { message = $"Synced {count} deal(s) from Zoho CRM.", count });
             }
             catch (InvalidOperationException ex)

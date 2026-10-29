@@ -55,7 +55,19 @@
     .vdr-visit-first-row td { border-top: 2px solid var(--card-border); }
     .vdr-combined-table tbody tr:hover td { background: #f7faf5; }
 
+    /* ── Pagination ───── */
+    .vdr-pager { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding-top: 14px; }
+    .vdr-pager-info { font-size: 14.5px; color: var(--muted); }
+    .vdr-pager-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .vdr-pager-size { display: flex; align-items: center; gap: 8px; font-size: 14.5px; color: var(--neutral-700); }
+    .vdr-pager-size select { border: 1px solid var(--card-border); border-radius: 8px; padding: 6px 10px; font-size: 14.5px; background: #fff; }
+    .vdr-page-btn { min-width: 38px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--card-border); background: #fff; color: var(--neutral-700); font-weight: 600; font-size: 14.5px; }
+    .vdr-page-btn:hover:not(:disabled) { background: var(--neutral-100); }
+    .vdr-page-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .vdr-page-btn.active { background: #15803d; border-color: #15803d; color: #fff; }
+
     @@media print {
+        .vdr-pager { display: none !important; }
         .dash-sidebar, .vdr-toolbar, .dash-filters, .app-topbar, .app-sidebar { display: none !important; }
         .table-scroll { max-height: none !important; overflow: visible !important; }
     }
@@ -100,11 +112,11 @@
             </div>
             <div class="dash-field">
                 <div class="dash-field-label">Deal Status</div>
-                <DashSelect @bind-Value="_selectedDealStatus" Placeholder="All" Options="@(new List<string> { "Won", "Open", "Lost", "No Deal" })" />
+                <DashSelect @bind-Value="_selectedDealStatus" @bind-Value:after="ResetPage" Placeholder="All" Options="@(new List<string> { "Won", "Open", "Lost", "No Deal" })" />
             </div>
             <div class="dash-field">
                 <div class="dash-field-label">Search</div>
-                <input class="dash-input" placeholder="Search visit no., customer, deal name, material..." @bind="_searchText" @bind:event="oninput" />
+                <input class="dash-input" placeholder="Search visit no., customer, deal name, material..." @bind="_searchText" @bind:event="oninput" @bind:after="ResetPage" />
             </div>
             <div class="dash-field" style="align-self:flex-end">
                 <button type="button" class="vdr-reset-btn" @onclick="ResetAsync">↺ Reset</button>
@@ -120,6 +132,11 @@
         }
         else
         {
+            var allVisits = FilteredVisits;
+            var totalPages = Math.Max(1, (int)Math.Ceiling(allVisits.Count / (double)_pageSize));
+            if (_page > totalPages) _page = totalPages;
+            var pagedVisits = allVisits.Skip((_page - 1) * _pageSize).Take(_pageSize).ToList();
+
             <div class="dash-card">
                 <div class="dash-card-header">Visit Details</div>
                 <div class="dash-card-body">
@@ -147,13 +164,13 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                @if (FilteredVisits.Count == 0)
+                                @if (allVisits.Count == 0)
                                 {
                                     <tr><td colspan="12" class="dash-table-empty">No visit reports for this filter</td></tr>
                                 }
                                 else
                                 {
-                                    @foreach (var visit in FilteredVisits)
+                                    @foreach (var visit in pagedVisits)
                                     {
                                         var rowCount = Math.Max(1, visit.Items.Count);
                                         @for (var i = 0; i < rowCount; i++)
@@ -198,6 +215,39 @@
                             </tbody>
                         </table>
                     </div>
+
+                    <div class="vdr-pager">
+                        <div class="vdr-pager-info">
+                            @if (allVisits.Count == 0)
+                            {
+                                <span>No visits</span>
+                            }
+                            else
+                            {
+                                <span>Showing @((_page - 1) * _pageSize + 1)–@(Math.Min(_page * _pageSize, allVisits.Count)) of @allVisits.Count visits</span>
+                            }
+                        </div>
+                        <div class="vdr-pager-controls">
+                            <label class="vdr-pager-size">
+                                Rows per page
+                                <select @bind="_pageSize" @bind:after="ResetPage">
+                                    @foreach (var size in PageSizeOptions)
+                                    {
+                                        <option value="@size">@size</option>
+                                    }
+                                </select>
+                            </label>
+                            <button type="button" class="vdr-page-btn" disabled="@(_page <= 1)" @onclick="() => GoToPage(1)">«</button>
+                            <button type="button" class="vdr-page-btn" disabled="@(_page <= 1)" @onclick="() => GoToPage(_page - 1)">‹</button>
+                            @foreach (var p in VisiblePages(_page, totalPages))
+                            {
+                                var target = p;
+                                <button type="button" class="vdr-page-btn @(target == _page ? "active" : "")" @onclick="() => GoToPage(target)">@target</button>
+                            }
+                            <button type="button" class="vdr-page-btn" disabled="@(_page >= totalPages)" @onclick="() => GoToPage(_page + 1)">›</button>
+                            <button type="button" class="vdr-page-btn" disabled="@(_page >= totalPages)" @onclick="() => GoToPage(totalPages)">»</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -215,6 +265,22 @@
     private string _selectedCustomer = "";
     private string _selectedDealStatus = "";   // client-side quick filter — ไม่ยิง API ใหม่
     private string _searchText = "";        // client-side quick filter — ไม่ยิง API ใหม่
+
+    private static readonly int[] PageSizeOptions = { 10, 50, 100 };
+    private int _pageSize = 10;
+    private int _page = 1;
+
+    private void ResetPage() => _page = 1;
+    private void GoToPage(int page) => _page = Math.Max(1, page);
+
+    // หน้าที่แสดงเป็นปุ่ม: หน้าปัจจุบัน ±2 (เลื่อนตามหน้า) ไม่แสดงครบทุกหน้า เพราะ 100 ต่อหน้าอาจเหลือแค่ไม่กี่หน้า แต่ 10 ต่อหน้าอาจมีเป็นสิบๆ หน้า
+    private static IEnumerable<int> VisiblePages(int current, int total)
+    {
+        var start = Math.Max(1, current - 2);
+        var end = Math.Min(total, start + 4);
+        start = Math.Max(1, end - 4);
+        return Enumerable.Range(start, end - start + 1);
+    }
 
     private bool CanExport => Mgt.Lit.WebFront.Auth.ReportAccessHelper.CanExportReport(AuthState.User, "VisitDailyReport");
 
@@ -328,7 +394,7 @@
 
     private async Task LoadAsync()
     {
-        _loading = true; StateHasChanged();
+        _loading = true; _page = 1; StateHasChanged();
         try
         {
             _data = await VisitApi.GetAsync(BuildFilter());
